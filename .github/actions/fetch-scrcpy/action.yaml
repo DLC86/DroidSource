@@ -57,11 +57,12 @@ runs:
         if (-not $sdkRoot) { $sdkRoot = 'C:\Android\android-sdk' }
         "ANDROID_SDK_ROOT=$sdkRoot" >> $env:GITHUB_ENV
         "ANDROID_HOME=$sdkRoot" >> $env:GITHUB_ENV
-        $sdkManager = Get-ChildItem -Path (Join-Path $sdkRoot 'cmdline-tools') -Filter sdkmanager.bat -Recurse -File | Select-Object -First 1
-        if (-not $sdkManager) { throw "sdkmanager.bat not found under $sdkRoot" }
-        & $sdkManager.FullName --licenses
-        & $sdkManager.FullName "platforms;android-36" "build-tools;36.0.0"
-
+        $platform = Join-Path $sdkRoot 'platforms\android-36\android.jar'
+        $buildTools = Join-Path $sdkRoot 'build-tools\36.0.0\d8.bat'
+        if (-not (Test-Path $platform)) { throw "Android platform android-36 not installed: $platform" }
+        if (-not (Test-Path $buildTools)) { throw "Android build-tools 36.0.0 not installed: $buildTools" }
+        Write-Host "Using Android SDK: $sdkRoot"
+        Write-Host "Android platform and build-tools are present."
     - name: Build patched scrcpy Android server
       shell: bash
       run: |
