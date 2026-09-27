@@ -107,7 +107,13 @@ runs:
         )
         s = s.replace(
             'javac -encoding UTF-8 -bootclasspath "$ANDROID_JAR" \\',
-            '"$JAVAC" -encoding UTF-8 -Xbootclasspath/p:"$JAVA8_RT_JAR" -bootclasspath "$ANDROID_JAR" -sourcepath "$GEN_DIR" \\',
+            '"$JAVAC" -encoding UTF-8 -bootclasspath "$ANDROID_JAR" -sourcepath "$GEN_DIR" \\',
+        )
+        # The scrcpy script uses ':' in its classpath for POSIX shells, but
+        # Java on Windows requires ';' as the classpath separator.
+        s = s.replace(
+            '-cp "$LAMBDA_JAR:$GEN_DIR"',
+            '-cp "$LAMBDA_JAR;$GEN_DIR"',
         )
         s = s.replace(
             '    android/content/IOnPrimaryClipChangedListener.aidl',
