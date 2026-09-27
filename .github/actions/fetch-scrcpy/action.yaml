@@ -41,3 +41,18 @@ runs:
 
         echo "data/bin contents:"
         ls -la data/bin/
+
+    - name: Install Android SDK for patched camera server
+      uses: android-actions/setup-android@v3
+
+    - name: Build patched scrcpy Android server
+      shell: bash
+      run: |
+        set -e
+        sdkmanager "platforms;android-36" "build-tools;36.0.0"
+        python tools/patch-scrcpy-camera.py
+        rm -rf "${RUNNER_TEMP}/scrcpy-server-build"
+        BUILD_DIR="${RUNNER_TEMP}/scrcpy-server-build" bash scrcpy/server/build_without_gradle.sh
+        cp "${RUNNER_TEMP}/scrcpy-server-build/scrcpy-server" data/bin/scrcpy-server
+        echo "Patched scrcpy-server installed:"
+        ls -l data/bin/scrcpy-server
