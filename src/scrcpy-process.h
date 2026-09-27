@@ -23,6 +23,8 @@ extern "C" {
 
 bool scrcpy_proc_spawn(scrcpy_proc_t *proc, const char *exe_path, const char *const *argv, const char *log_path);
 
+bool scrcpy_proc_run_capture(const char *exe_path, const char *const *argv, char **output);
+
 bool scrcpy_proc_alive(const scrcpy_proc_t *proc);
 
 void scrcpy_proc_kill(scrcpy_proc_t *proc);
