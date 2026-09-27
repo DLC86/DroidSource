@@ -12,6 +12,8 @@ jobs:
         shell: bash
         run: |
           set -e
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          export PATH="/home/linuxbrew/.linuxbrew/opt/clang-format@19/bin:$PATH"
           brew install --quiet obsproject/tools/clang-format@19
           clang-format-19 -style=file -i src/*.c
           if git diff --quiet -- src/scrcpy-source.c; then
