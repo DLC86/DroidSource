@@ -159,7 +159,6 @@ patch("app/src/options.h", [
     uint16_t camera_fps;
 """,
 """    const char *camera_zoom;
-    const char *camera_size;
     const char *camera_awb;
     const char *camera_focus;
     const char *camera_iso;
@@ -173,7 +172,6 @@ patch("app/src/options.c", [
     .camera_fps = 0,
 """,
 """    .camera_zoom = NULL,
-    .camera_size = NULL,
     .camera_awb = NULL,
     .camera_focus = NULL,
     .camera_iso = NULL,
