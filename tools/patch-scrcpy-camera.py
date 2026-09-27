@@ -68,6 +68,15 @@ patch("server/src/main/java/com/genymobile/scrcpy/Options.java", [
 ])
 
 patch("server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java", [
+("""                CameraManager cameraManager = ServiceManager.getCameraManager();
+                try {
+                    CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
+""",
+"""                CameraManager cameraManager = ServiceManager.getCameraManager();
+                CameraCharacteristics characteristics;
+                try {
+                    characteristics = cameraManager.getCameraCharacteristics(cameraId);
+"""),
 ("""    private final boolean initialTorch;
     private float zoom;
 """,
