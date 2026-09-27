@@ -153,7 +153,7 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 		if (ctx->camera_iso > 0)
 			snprintf(camera_iso_arg, sizeof(camera_iso_arg), "--camera-iso=%d", ctx->camera_iso);
 		if (ctx->camera_shutter_us > 0)
-			snprintf(camera_shutter_arg, sizeof(camera_shutter_arg), "--camera-shutter-us=%d", ctx->camera_shutter_us);
+			snprintf(camera_shutter_arg, sizeof(camera_shutter_arg), "--camera-shutter=%d", ctx->camera_shutter_us);
 		if (ctx->camera_focus_distance > 0)
 			snprintf(camera_focus_arg, sizeof(camera_focus_arg), "--camera-focus=%.3f", ctx->camera_focus_distance);
 		if (ctx->camera_awb_mode && *ctx->camera_awb_mode && strcmp(ctx->camera_awb_mode, "auto") != 0)
@@ -247,7 +247,6 @@ static void load_settings(struct scrcpy_src *ctx, obs_data_t *settings)
 	ctx->video_source = bstrdup(obs_data_get_string(settings, "video_source"));
 	ctx->codec = bstrdup(obs_data_get_string(settings, "codec"));
 	ctx->camera_id = (int)obs_data_get_int(settings, "camera_id");
-	bfree(ctx->camera_size);
 	ctx->camera_size = bstrdup(obs_data_get_string(settings, "camera_size"));
 	ctx->camera_fps = (int)obs_data_get_int(settings, "camera_fps");
 	ctx->camera_zoom = (float)obs_data_get_double(settings, "camera_zoom");
