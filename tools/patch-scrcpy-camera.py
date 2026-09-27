@@ -150,10 +150,47 @@ patch("server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java", [
 
                     if (initialTorch) {
 """),
-("""                    CaptureRequest request = requestBuilder.build();
-                    setRepeatingRequest(session, request);
-                    currentSession = session;
-                } catch (CameraAccessException e) {
+("""                    try {
+                        applyManualCameraControls(requestBuilder, characteristics);
+
+                        if (initialTorch) {
+                            Ln.i("Turn camera torch on");
+                            requestBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH);
+                        }
+                        if (zoom != 1) {
+                            zoom = clampZoom(zoom);
+                            Ln.i("Set camera zoom: " + zoom);
+                            requestBuilder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom);
+                        }
+
+                        CaptureRequest request = requestBuilder.build();
+                        setRepeatingRequest(session, request);
+                        currentSession = session;
+                    } catch (CameraAccessException | IllegalArgumentException e) {
+                        if (cameraIso > 0 || cameraShutterUs > 0 || cameraFocusDistance > 0 || (cameraAwbMode != null && !cameraAwbMode.isEmpty() && !"auto".equals(cameraAwbMode))) {
+                            Ln.w("Camera rejected manual controls; retrying with automatic controls", e);
+
+                            requestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
+                            requestBuilder.addTarget(captureSurface);
+                            if (fps > 0) {
+                                requestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, new Range<>(fps, fps));
+                            }
+                            if (initialTorch) {
+                                requestBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH);
+                            }
+                            if (zoom != 1) {
+                                zoom = clampZoom(zoom);
+                                requestBuilder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom);
+                            }
+
+                            request = requestBuilder.build();
+                            setRepeatingRequest(session, request);
+                            currentSession = session;
+                        } else {
+                            throw e;
+                        }
+                    }
+                } catch (CameraAccessException | IllegalArgumentException e) {
                     Ln.e("Camera error", e);
                     disconnected.set(true);
                     getCaptureControl().reset(CaptureControl.RESET_REASON_TERMINATED);
