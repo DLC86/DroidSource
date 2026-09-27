@@ -514,6 +514,8 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 
 	int selected_fps[32];
 	size_t selected_fps_count = 0;
+	int first_fps[32];
+	size_t first_fps_count = 0;
 	size_t camera_count = 0;
 	char first_id[64] = {0};
 
@@ -535,8 +537,11 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 		int fps[32];
 		size_t fps_count = 0;
 		if (parse_camera_id_line(line_copy, id, sizeof(id), label, sizeof(label), fps, &fps_count)) {
-			if (!first_id[0])
+			if (!first_id[0]) {
 				snprintf(first_id, sizeof(first_id), "%s", id);
+				memcpy(first_fps, fps, fps_count * sizeof(int));
+				first_fps_count = fps_count;
+			}
 
 			if (refresh_ids)
 				obs_property_list_add_string(camera_id_prop, label, id);
@@ -572,8 +577,14 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 	}
 
 	obs_property_list_clear(fps_prop);
-	if (selected_fps_count == 0)
-		selected_fps[0] = 30, selected_fps_count = 1;
+	if (selected_fps_count == 0 && first_fps_count > 0) {
+		memcpy(selected_fps, first_fps, first_fps_count * sizeof(int));
+		selected_fps_count = first_fps_count;
+	}
+	if (selected_fps_count == 0) {
+		selected_fps[0] = 30;
+		selected_fps_count = 1;
+	}
 	int current_fps = (int)obs_data_get_int(settings, "camera_fps");
 	bool fps_found = false;
 	for (size_t i = 0; i < selected_fps_count; ++i) {
@@ -727,6 +738,9 @@ static bool video_source_modified(obs_properties_t *props, obs_property_t *p, ob
 		if (prop)
 			obs_property_set_visible(prop, is_camera);
 	}
+	obs_property_t *max_size = obs_properties_get(props, "max_size");
+	if (max_size)
+		obs_property_set_visible(max_size, !is_camera);
 	if (is_camera)
 		refresh_camera_capabilities(props, settings, true);
 	return true;
