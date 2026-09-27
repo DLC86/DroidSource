@@ -331,7 +331,6 @@ static void src_get_defaults(obs_data_t *settings)
 	obs_data_set_default_string(settings, "codec", "h264");
 }
 
-
 static void populate_shutter_list(obs_property_t *prop, int fps);
 
 static bool run_scrcpy_query(const char *serial, const char *option, char **output)
