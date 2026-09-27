@@ -23,12 +23,12 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Check Event Data ☑️
+      - name: Check GitHub Event Data ☑️
         id: setup
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          : Check Event Data ☑️
+          : Check GitHub Event Data ☑️
           if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
 
           case "${GITHUB_EVENT_NAME}" in
@@ -83,6 +83,42 @@ jobs:
         with:
           submodules: recursive
           fetch-depth: 0
+
+      - name: Pin OBS 32.2.2 dependencies 🔒
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $specPath = Join-Path $env:GITHUB_WORKSPACE 'buildspec.json'
+          $spec = Get-Content $specPath -Raw | ConvertFrom-Json
+
+          # OBS 32.2.x is the current stable OBS ABI. The repository originally
+          # pinned OBS 31.1.1, which is too old for a plugin we want to test on
+          # current OBS 32.2.2.
+          $obsVersion = '32.2.2'
+          $obsUrl = "https://github.com/obsproject/obs-studio/archive/refs/tags/$obsVersion.zip"
+          $obsZip = Join-Path $env:RUNNER_TEMP "obs-studio-$obsVersion.zip"
+
+          Write-Host "Downloading $obsUrl to calculate the exact source archive SHA-256..."
+          Invoke-WebRequest -Uri $obsUrl -OutFile $obsZip
+          $obsHash = (Get-FileHash $obsZip -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "OBS 32.2.2 source ZIP SHA-256: $obsHash"
+
+          $spec.dependencies.'obs-studio'.version = $obsVersion
+          $spec.dependencies.'obs-studio'.hashes.'windows-x64' = $obsHash
+
+          # Dependency bundles used by the OBS 32.2.x build tree.
+          $depsVersion = '2026-08-26'
+          $spec.dependencies.prebuilt.version = $depsVersion
+          $spec.dependencies.prebuilt.hashes.'windows-x64' = 'eb5e67ad110543bcb65a4612bcd654b6427972ea70d26412b48d7e21532dfe67'
+
+          $spec.dependencies.qt6.version = $depsVersion
+          $spec.dependencies.qt6.hashes.'windows-x64' = '7dd60d2883207ecccceb2270538140fccd1b5022e06beedfbc3ba46c7d2e76ae'
+          $spec.dependencies.qt6.debugSymbols.'windows-x64' = 'c69ad24a76c7986aabff1f0e3860f4e650843dcbbcb2e6699daf63914fa888cd'
+
+          $spec | ConvertTo-Json -Depth 20 | Set-Content -Path $specPath -Encoding UTF8
+
+          Write-Host 'Effective Windows buildspec:'
+          Get-Content $specPath
 
       - name: Set Up Environment 🔧
         id: setup
