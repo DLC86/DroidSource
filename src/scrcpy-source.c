@@ -783,7 +783,10 @@ static obs_properties_t *src_get_properties(void *data)
 
 	const char *camera_visible = ctx->video_source && strcmp(ctx->video_source, "camera") == 0 ? "camera" : "display";
 	bool is_camera = strcmp(camera_visible, "camera") == 0;
+	obs_property_t *max_size = obs_properties_get(props, "max_size");
 	obs_property_set_visible(camera_id, is_camera);
+	if (max_size)
+		obs_property_set_visible(max_size, !is_camera);
 	obs_property_set_visible(camera_size, is_camera);
 	obs_property_set_visible(camera_fps, is_camera);
 	obs_property_set_visible(camera_zoom, is_camera);
@@ -799,7 +802,8 @@ static obs_properties_t *src_get_properties(void *data)
 		obs_data_release(settings);
 	}
 
-	obs_properties_add_int(props, "max_size", obs_module_text("MaxSize"), 0, 4096, 16);
+	max_size = obs_properties_add_int(props, "max_size", obs_module_text("MaxSize"), 0, 4096, 16);
+	obs_property_set_visible(max_size, !is_camera);
 	obs_properties_add_int(props, "bitrate_kbps", obs_module_text("BitrateKbps"), 500, 50000, 500);
 
 	obs_property_t *codec_list = obs_properties_add_list(props, "codec", obs_module_text("Codec"),
