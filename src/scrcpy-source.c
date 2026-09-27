@@ -250,7 +250,6 @@ static void load_settings(struct scrcpy_src *ctx, obs_data_t *settings)
 	ctx->serial = bstrdup(obs_data_get_string(settings, "serial"));
 	ctx->video_source = bstrdup(obs_data_get_string(settings, "video_source"));
 	ctx->codec = bstrdup(obs_data_get_string(settings, "codec"));
-	bfree(ctx->camera_id);
 	const char *camera_id = obs_data_get_string(settings, "camera_id");
 	if (camera_id && *camera_id) {
 		ctx->camera_id = bstrdup(camera_id);
