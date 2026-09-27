@@ -49,7 +49,18 @@ runs:
         java-version: "17"
 
     - name: Configure Android SDK for patched camera server
-      uses: android-actions/setup-android@v3
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $sdkRoot = $env:ANDROID_SDK_ROOT
+        if (-not $sdkRoot) { $sdkRoot = $env:ANDROID_HOME }
+        if (-not $sdkRoot) { $sdkRoot = 'C:\Android\android-sdk' }
+        "ANDROID_SDK_ROOT=$sdkRoot" >> $env:GITHUB_ENV
+        "ANDROID_HOME=$sdkRoot" >> $env:GITHUB_ENV
+        $sdkManager = Get-ChildItem -Path (Join-Path $sdkRoot 'cmdline-tools') -Filter sdkmanager.bat -Recurse -File | Select-Object -First 1
+        if (-not $sdkManager) { throw "sdkmanager.bat not found under $sdkRoot" }
+        & $sdkManager.FullName --licenses
+        & $sdkManager.FullName "platforms;android-36" "build-tools;36.0.0"
 
     - name: Build patched scrcpy Android server
       shell: bash
