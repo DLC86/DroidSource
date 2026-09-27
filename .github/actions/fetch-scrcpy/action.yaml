@@ -88,6 +88,10 @@ runs:
             '"$BUILD_TOOLS_DIR/aidl" -o"$GEN_DIR" "-I$AIDL_DIR_NATIVE" \\',
         )
         s = s.replace(
+            'javac -encoding UTF-8 -bootclasspath "$ANDROID_JAR" \\',
+            'javac -encoding UTF-8 -bootclasspath "$ANDROID_JAR" -sourcepath "$GEN_DIR" \\',
+        )
+        s = s.replace(
             '    android/content/IOnPrimaryClipChangedListener.aidl',
             r'    "$AIDL_DIR_NATIVE\\android\\content\\IOnPrimaryClipChangedListener.aidl"',
         )
