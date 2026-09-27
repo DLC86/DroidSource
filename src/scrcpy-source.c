@@ -395,8 +395,9 @@ static bool parse_camera_id_line(const char *line, char *id, size_t id_size, cha
 		}
 	}
 
-	snprintf(label, label_size, "Camera %s (%s%s%u%s%u%s)", id, facing,
-		 width ? ", " : "", width, width ? "x" : "", height, width ? "" : "");
+	if (label && label_size > 0)
+		snprintf(label, label_size, "Camera %s (%s%s%u%s%u%s)", id, facing,
+			 width ? ", " : "", width, width ? "x" : "", height, width ? "" : "");
 
 	if (fps && fps_count) {
 		*fps_count = 0;
@@ -752,7 +753,9 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_t *camera_iso = obs_properties_add_int_slider(props, "camera_iso", obs_module_text("CameraIso"), 0, 12800, 50);
 	obs_property_t *camera_shutter = obs_properties_add_list(props, "camera_shutter_us", obs_module_text("CameraShutter"),
 							   OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
-	populate_shutter_list(camera_shutter, (int)obs_data_get_int(obs_source_get_settings(ctx->source), "camera_fps"));
+	obs_data_t *current_settings = obs_source_get_settings(ctx->source);
+	populate_shutter_list(camera_shutter, (int)obs_data_get_int(current_settings, "camera_fps"));
+	obs_data_release(current_settings);
 	obs_property_t *camera_focus = obs_properties_add_float_slider(props, "camera_focus_distance", obs_module_text("CameraFocus"),
 							   0.0, 20.0, 0.1);
 	obs_property_t *camera_awb = obs_properties_add_list(props, "camera_awb_mode", obs_module_text("CameraWhiteBalance"),
