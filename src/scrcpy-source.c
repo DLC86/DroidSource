@@ -107,8 +107,6 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 		return;
 	}
 
-	char *exe_path = path_join(bin_dir, SCRCPY_EXE_NAME);
-
 	char bitrate_arg[64];
 	snprintf(bitrate_arg, sizeof(bitrate_arg), "--video-bit-rate=%dK", ctx->bitrate_kbps);
 
@@ -291,7 +289,7 @@ static obs_properties_t *src_get_properties(void *data)
 							   OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
 	fill_device_list(dev_list);
 
-	obs_properties_add_button(props, "refresh_devices", obs_module_text("RefreshDevices"), refresh_devices_clicked);
+	obs_properties_add_button2(props, "refresh_devices", obs_module_text("RefreshDevices"), refresh_devices_clicked, NULL);
 
 	obs_property_t *src_list = obs_properties_add_list(props, "video_source", obs_module_text("VideoSource"),
 							   OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
