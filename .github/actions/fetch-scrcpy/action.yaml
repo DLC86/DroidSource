@@ -42,14 +42,29 @@ runs:
         echo "data/bin contents:"
         ls -la data/bin/
 
-    - name: Install Android SDK for patched camera server
+    - name: Set up JDK 17 for Android build
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: "17"
+
+    - name: Configure Android SDK for patched camera server
       uses: android-actions/setup-android@v3
 
     - name: Build patched scrcpy Android server
       shell: bash
       run: |
         set -e
-        sdkmanager "platforms;android-36" "build-tools;36.0.0"
+        SDKMANAGER="${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
+        if [[ ! -x "$SDKMANAGER" ]]; then
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+        fi
+        if [[ ! -x "$SDKMANAGER" ]]; then
+          echo "sdkmanager not found; ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}; ANDROID_HOME=${ANDROID_HOME}"
+          find "${ANDROID_SDK_ROOT:-${ANDROID_HOME}}" -maxdepth 4 -type f -name sdkmanager -print || true
+          exit 1
+        fi
+        "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
         python tools/patch-scrcpy-camera.py
         rm -rf "${RUNNER_TEMP}/scrcpy-server-build"
         BUILD_DIR="${RUNNER_TEMP}/scrcpy-server-build" bash scrcpy/server/build_without_gradle.sh
