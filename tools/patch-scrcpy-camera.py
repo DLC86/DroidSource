@@ -73,7 +73,7 @@ patch("server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java", [
                     CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
 """,
 """                CameraManager cameraManager = ServiceManager.getCameraManager();
-                CameraCharacteristics characteristics;
+                CameraCharacteristics characteristics = null;
                 try {
                     characteristics = cameraManager.getCameraCharacteristics(cameraId);
 """),
@@ -108,17 +108,21 @@ patch("server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java", [
 
                     // Manual sensor controls require both ISO and exposure time.
                     if (cameraIso > 0 && cameraShutterUs > 0) {
-                        Range<Integer> isoRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE);
-                        Range<Long> exposureRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE);
-                        if (isoRange != null && exposureRange != null) {
-                            int iso = isoRange.clamp(cameraIso);
-                            long exposureNs = exposureRange.clamp(cameraShutterUs * 1000L);
-                            requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF);
-                            requestBuilder.set(CaptureRequest.SENSOR_SENSITIVITY, iso);
-                            requestBuilder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureNs);
-                            Ln.i("Set manual exposure: ISO " + iso + ", " + cameraShutterUs + " us");
+                        if (characteristics != null) {
+                            Range<Integer> isoRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE);
+                            Range<Long> exposureRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE);
+                            if (isoRange != null && exposureRange != null) {
+                                int iso = isoRange.clamp(cameraIso);
+                                long exposureNs = exposureRange.clamp(cameraShutterUs * 1000L);
+                                requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF);
+                                requestBuilder.set(CaptureRequest.SENSOR_SENSITIVITY, iso);
+                                requestBuilder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureNs);
+                                Ln.i("Set manual exposure: ISO " + iso + ", " + cameraShutterUs + " us");
+                            } else {
+                                Ln.w("Manual exposure is not supported by this camera");
+                            }
                         } else {
-                            Ln.w("Manual exposure is not supported by this camera");
+                            Ln.w("Camera characteristics unavailable; manual exposure disabled");
                         }
                     } else if (cameraIso > 0 || cameraShutterUs > 0) {
                         Ln.w("ISO and shutter speed must both be set to enable manual exposure");
