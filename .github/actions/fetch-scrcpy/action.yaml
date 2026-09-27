@@ -68,8 +68,8 @@ runs:
       run: |
         set -e
         python tools/patch-scrcpy-camera.py
-        # Android build-tools 36 on the Windows runner does not resolve the
-        # relative AIDL import path used by scrcpy 4.0. Use an absolute path.
+        # Android build-tools 36 on Windows expects native Windows paths for AIDL
+        # import directories. Convert the AIDL root to a native path before invoking aidl.exe.
         python - <<'PY'
         from pathlib import Path
         p = Path("scrcpy/server/build_without_gradle.sh")
@@ -78,9 +78,26 @@ runs:
             'SERVER_DIR=$(dirname "$0")',
             'SERVER_DIR=$(realpath "$(dirname "$0")")',
         )
+        marker='echo "Generating java from aidl..."'
+        inject='''echo "Generating java from aidl..."
+        AIDL_DIR_NATIVE=$(cygpath -w "$SERVER_DIR/src/main/aidl")
+        '''
+        s = s.replace(marker, inject.rstrip())
         s = s.replace(
             '"$BUILD_TOOLS_DIR/aidl" -o"$GEN_DIR" -I. \\',
-            '"$BUILD_TOOLS_DIR/aidl" -o"$GEN_DIR" -I"$SERVER_DIR/src/main/aidl" \\',
+            '"$BUILD_TOOLS_DIR/aidl" -o"$GEN_DIR" "-I$AIDL_DIR_NATIVE" \\',
+        )
+        s = s.replace(
+            '    android/content/IOnPrimaryClipChangedListener.aidl',
+            '    "$AIDL_DIR_NATIVE\\android\\content\\IOnPrimaryClipChangedListener.aidl"',
+        )
+        s = s.replace(
+            '"$BUILD_TOOLS_DIR/aidl" -o"$GEN_DIR" -I. -p "$ANDROID_AIDL" \\',
+            '"$BUILD_TOOLS_DIR/aidl" -o"$GEN_DIR" "-I$AIDL_DIR_NATIVE" -p "$ANDROID_AIDL" \\',
+        )
+        s = s.replace(
+            '    android/view/IDisplayWindowListener.aidl',
+            '    "$AIDL_DIR_NATIVE\\android\\view\\IDisplayWindowListener.aidl"',
         )
         p.write_text(s, encoding="utf-8")
         PY
