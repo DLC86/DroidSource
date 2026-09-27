@@ -16,7 +16,7 @@ jobs:
     if: github.ref_name == 'master' || github.ref_name == 'main'
     uses: ./.github/workflows/check-format.yaml
     permissions:
-      contents: read
+      contents: write
 
   build-windows:
     name: Build Windows 🪟
