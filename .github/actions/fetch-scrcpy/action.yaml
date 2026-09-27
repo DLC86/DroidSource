@@ -127,6 +127,11 @@ runs:
             '    android/view/IDisplayWindowListener.aidl',
             r'    "$AIDL_DIR_NATIVE\\android\\view\\IDisplayWindowListener.aidl"',
         )
+        # Build Tools 36 on Windows ships d8.bat rather than a POSIX d8 executable.
+        s = s.replace(
+            '"$BUILD_TOOLS_DIR/d8" --classpath "$ANDROID_JAR" \\',
+            'D8="$BUILD_TOOLS_DIR/d8.bat"\n    "$D8" --classpath "$ANDROID_JAR" \\',
+        )
         p.write_text(s, encoding="utf-8")
         PY
         rm -rf "${RUNNER_TEMP}/scrcpy-server-build"
