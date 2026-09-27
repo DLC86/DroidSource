@@ -85,7 +85,9 @@ runs:
         # Android build-tools 36 on Windows expects native Windows paths for AIDL
         # import directories. Convert the AIDL root to a native path before invoking aidl.exe.
         export JAVAC="$(cygpath -u "$JAVA8_HOME")/bin/javac.exe"
+        export JAVA8_RT_JAR="$(cygpath -u "$JAVA8_HOME")/jre/lib/rt.jar"
         echo "Using JDK 8 javac: $JAVAC"
+        echo "Using JDK 8 runtime classes: $JAVA8_RT_JAR"
         python - <<'PY'
         from pathlib import Path
         p = Path("scrcpy/server/build_without_gradle.sh")
@@ -105,7 +107,7 @@ runs:
         )
         s = s.replace(
             'javac -encoding UTF-8 -bootclasspath "$ANDROID_JAR" \\',
-            '"$JAVAC" -encoding UTF-8 -bootclasspath "$ANDROID_JAR" -sourcepath "$GEN_DIR" \\',
+            '"$JAVAC" -encoding UTF-8 -Xbootclasspath/p:"$JAVA8_RT_JAR" -bootclasspath "$ANDROID_JAR" -sourcepath "$GEN_DIR" \\',
         )
         s = s.replace(
             '    android/content/IOnPrimaryClipChangedListener.aidl',
