@@ -42,6 +42,20 @@ runs:
         echo "data/bin contents:"
         ls -la data/bin/
 
+    - name: Set up JDK 8 for scrcpy javac
+      uses: actions/setup-java@v5
+      with:
+        distribution: temurin
+        java-version: "8"
+
+    - name: Save JDK 8 path
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        if (-not $env:JAVA_HOME) { throw "JAVA_HOME is not set after JDK 8 setup" }
+        "JAVA8_HOME=$env:JAVA_HOME" >> $env:GITHUB_ENV
+        Write-Host "JDK 8: $env:JAVA_HOME"
+
     - name: Set up JDK 17 for Android build
       uses: actions/setup-java@v5
       with:
@@ -70,6 +84,8 @@ runs:
         python tools/patch-scrcpy-camera.py
         # Android build-tools 36 on Windows expects native Windows paths for AIDL
         # import directories. Convert the AIDL root to a native path before invoking aidl.exe.
+        export JAVAC="$(cygpath -u "$JAVA8_HOME")/bin/javac.exe"
+        echo "Using JDK 8 javac: $JAVAC"
         python - <<'PY'
         from pathlib import Path
         p = Path("scrcpy/server/build_without_gradle.sh")
@@ -89,7 +105,7 @@ runs:
         )
         s = s.replace(
             'javac -encoding UTF-8 -bootclasspath "$ANDROID_JAR" \\',
-            'javac -encoding UTF-8 -bootclasspath "$ANDROID_JAR" -sourcepath "$GEN_DIR" \\',
+            '"$JAVAC" -encoding UTF-8 -bootclasspath "$ANDROID_JAR" -sourcepath "$GEN_DIR" \\',
         )
         s = s.replace(
             '    android/content/IOnPrimaryClipChangedListener.aidl',
