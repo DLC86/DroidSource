@@ -395,8 +395,10 @@ static bool parse_camera_id_line(const char *line, char *id, size_t id_size, cha
 	}
 
 	if (label && label_size > 0)
-		snprintf(label, label_size, "Camera %s (%s%s%u%s%u%s)", id, facing,
-			 width ? ", " : "", width, width ? "x" : "", height, width ? "" : "");
+		if (width > 0 && height > 0)
+		snprintf(label, label_size, "Camera %s (%s, %ux%u)", id, facing, width, height);
+	else
+		snprintf(label, label_size, "Camera %s (%s)", id, facing);
 
 	if (fps && fps_count) {
 		*fps_count = 0;
@@ -572,10 +574,18 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 	obs_property_list_clear(fps_prop);
 	if (selected_fps_count == 0)
 		selected_fps[0] = 30, selected_fps_count = 1;
+	int current_fps = (int)obs_data_get_int(settings, "camera_fps");
+	bool fps_found = false;
 	for (size_t i = 0; i < selected_fps_count; ++i) {
 		char label[32];
 		snprintf(label, sizeof(label), "%d fps", selected_fps[i]);
 		obs_property_list_add_int(fps_prop, label, selected_fps[i]);
+		if (selected_fps[i] == current_fps)
+			fps_found = true;
+	}
+	if (!fps_found && selected_fps_count > 0) {
+		current_fps = selected_fps[0];
+		obs_data_set_int(settings, "camera_fps", current_fps);
 	}
 
 	char *size_output = NULL;
@@ -615,9 +625,13 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 		obs_data_set_string(settings, "camera_size", preferred);
 	}
 
-	if (obs_property_list_item_count(camera_id_prop) > 0) {
+	if (obs_property_list_item_count(camera_id_prop) > 0)
 		obs_data_set_string(settings, "camera_id", selected_id);
-	}
+
+	obs_property_t *shutter_prop = obs_properties_get(props, "camera_shutter_us");
+	if (shutter_prop)
+		populate_shutter_list(shutter_prop, current_fps);
+
 	return true;
 }
 
