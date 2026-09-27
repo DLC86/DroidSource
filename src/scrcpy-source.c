@@ -107,6 +107,7 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 		return;
 	}
 
+	char *exe_path = path_join(bin_dir, SCRCPY_EXE_NAME);
 	char bitrate_arg[64];
 	snprintf(bitrate_arg, sizeof(bitrate_arg), "--video-bit-rate=%dK", ctx->bitrate_kbps);
 
