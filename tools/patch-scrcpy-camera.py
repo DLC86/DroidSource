@@ -111,10 +111,10 @@ patch("server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java", [
                     Ln.w("Could not get camera characteristics");
                 }
 
+                CaptureRequest request;
                 try {
                     requestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
                     requestBuilder.addTarget(captureSurface);
-                    CaptureRequest request;
 
                     boolean manualExposure = cameraIso > 0 && cameraShutterUs > 0
                             && hasManualSensorSupport(characteristics);
