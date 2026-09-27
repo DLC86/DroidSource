@@ -69,14 +69,103 @@ patch("server/src/main/java/com/genymobile/scrcpy/Options.java", [
 
 patch("server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java", [
 ("""                CameraManager cameraManager = ServiceManager.getCameraManager();
-                CameraCharacteristics characteristics = null;
                 try {
-                    characteristics = cameraManager.getCameraCharacteristics(cameraId);
+                    CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
+                    zoomRange = characteristics.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE);
+                } catch (CameraAccessException e) {
+                    Ln.w("Could not get camera characteristics");
+                }
+
+                try {
+                    requestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
+                    requestBuilder.addTarget(captureSurface);
+
+                    if (fps > 0) {
+                        requestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, new Range<>(fps, fps));
+                    }
+                    if (initialTorch) {
+                        Ln.i("Turn camera torch on");
+                        requestBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH);
+                    }
+                    if (zoom != 1) {
+                        zoom = clampZoom(zoom);
+                        Ln.i("Set camera zoom: " + zoom);
+                        requestBuilder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom);
+                    }
+
+                    CaptureRequest request = requestBuilder.build();
+                    setRepeatingRequest(session, request);
+                    currentSession = session;
+                } catch (CameraAccessException e) {
+                    Ln.e("Camera error", e);
+                    disconnected.set(true);
+                    getCaptureControl().reset(CaptureControl.RESET_REASON_TERMINATED);
+                }
 """,
 """                CameraManager cameraManager = ServiceManager.getCameraManager();
                 CameraCharacteristics characteristics = null;
                 try {
                     characteristics = cameraManager.getCameraCharacteristics(cameraId);
+                    zoomRange = characteristics.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE);
+                } catch (CameraAccessException e) {
+                    Ln.w("Could not get camera characteristics");
+                }
+
+                try {
+                    requestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
+                    requestBuilder.addTarget(captureSurface);
+
+                    boolean manualExposure = cameraIso > 0 && cameraShutterUs > 0
+                            && hasManualSensorSupport(characteristics);
+                    if (fps > 0 && !manualExposure) {
+                        requestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, new Range<>(fps, fps));
+                    }
+
+                    applyManualCameraControls(requestBuilder, characteristics);
+
+                    if (initialTorch) {
+                        Ln.i("Turn camera torch on");
+                        requestBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH);
+                    }
+                    if (zoom != 1) {
+                        zoom = clampZoom(zoom);
+                        Ln.i("Set camera zoom: " + zoom);
+                        requestBuilder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom);
+                    }
+
+                    CaptureRequest request = requestBuilder.build();
+                    setRepeatingRequest(session, request);
+                    currentSession = session;
+                } catch (CameraAccessException | IllegalArgumentException e) {
+                    if (hasManualControlRequest()) {
+                        Ln.w("Camera rejected the requested manual controls; retrying automatically", e);
+                        try {
+                            requestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
+                            requestBuilder.addTarget(captureSurface);
+                            if (fps > 0) {
+                                requestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, new Range<>(fps, fps));
+                            }
+                            if (initialTorch) {
+                                requestBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH);
+                            }
+                            if (zoom != 1) {
+                                zoom = clampZoom(zoom);
+                                requestBuilder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom);
+                            }
+                            request = requestBuilder.build();
+                            setRepeatingRequest(session, request);
+                            currentSession = session;
+                        } catch (CameraAccessException | IllegalArgumentException fallbackError) {
+                            Ln.e("Camera fallback request failed", fallbackError);
+                            disconnected.set(true);
+                            getCaptureControl().reset(CaptureControl.RESET_REASON_TERMINATED);
+                        }
+                    } else {
+                        Ln.e("Camera error", e);
+                        disconnected.set(true);
+                        getCaptureControl().reset(CaptureControl.RESET_REASON_TERMINATED);
+                    }
+                }
 """),
 ("""    private final boolean initialTorch;
     private float zoom;
@@ -98,141 +187,16 @@ patch("server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java", [
         this.cameraAwbMode = options.getCameraAwbMode();
         this.zoom = options.getCameraZoom();
 """),
-("""                    if (fps > 0) {
-                        requestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, new Range<>(fps, fps));
-                    }
-
-                    // Manual sensor controls require both ISO and exposure time.
-                    if (cameraIso > 0 && cameraShutterUs > 0) {
-                        if (characteristics != null) {
-                            Range<Integer> isoRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE);
-                            Range<Long> exposureRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE);
-                            if (isoRange != null && exposureRange != null) {
-                                int iso = isoRange.clamp(cameraIso);
-                                long exposureNs = exposureRange.clamp(cameraShutterUs * 1000L);
-                                requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF);
-                                requestBuilder.set(CaptureRequest.SENSOR_SENSITIVITY, iso);
-                                requestBuilder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureNs);
-                                Ln.i("Set manual exposure: ISO " + iso + ", " + cameraShutterUs + " us");
-                            } else {
-                                Ln.w("Manual exposure is not supported by this camera");
-                            }
-                        } else {
-                            Ln.w("Camera characteristics unavailable; manual exposure disabled");
-                        }
-                    } else if (cameraIso > 0 || cameraShutterUs > 0) {
-                        Ln.w("ISO and shutter speed must both be set to enable manual exposure");
-                    }
-
-                    if (cameraFocusDistance > 0) {
-                        requestBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF);
-                        requestBuilder.set(CaptureRequest.LENS_FOCUS_DISTANCE, cameraFocusDistance);
-                        Ln.i("Set manual focus distance: " + cameraFocusDistance + " diopters");
-                    }
-
-                    if (cameraAwbMode != null && !cameraAwbMode.isEmpty() && !"auto".equals(cameraAwbMode)) {
-                        Integer awbMode = getAwbMode(cameraAwbMode);
-                        if (awbMode != null) {
-                            requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE, awbMode);
-                            Ln.i("Set white balance: " + cameraAwbMode);
-                        } else {
-                            Ln.w("Unsupported white balance mode: " + cameraAwbMode);
-                        }
-                    }
-
-                    if (initialTorch) {
+("""    private float clampZoom(float value) {
 """,
-"""                    if (fps > 0) {
-                        requestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, new Range<>(fps, fps));
-                    }
+"""    private boolean hasManualControlRequest() {
+        return cameraIso > 0
+                || cameraShutterUs > 0
+                || cameraFocusDistance > 0
+                || (cameraAwbMode != null && !cameraAwbMode.isEmpty() && !"auto".equals(cameraAwbMode));
+    }
 
-                    applyManualCameraControls(requestBuilder, characteristics);
-
-                    if (initialTorch) {
-"""),
-("""                    try {
-                        applyManualCameraControls(requestBuilder, characteristics);
-
-                        if (initialTorch) {
-                            Ln.i("Turn camera torch on");
-                            requestBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH);
-                        }
-                        if (zoom != 1) {
-                            zoom = clampZoom(zoom);
-                            Ln.i("Set camera zoom: " + zoom);
-                            requestBuilder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom);
-                        }
-
-                        CaptureRequest request = requestBuilder.build();
-                        setRepeatingRequest(session, request);
-                        currentSession = session;
-                    } catch (CameraAccessException | IllegalArgumentException e) {
-                        if (cameraIso > 0 || cameraShutterUs > 0 || cameraFocusDistance > 0 || (cameraAwbMode != null && !cameraAwbMode.isEmpty() && !"auto".equals(cameraAwbMode))) {
-                            Ln.w("Camera rejected manual controls; retrying with automatic controls", e);
-
-                            requestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
-                            requestBuilder.addTarget(captureSurface);
-                            if (fps > 0) {
-                                requestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, new Range<>(fps, fps));
-                            }
-                            if (initialTorch) {
-                                requestBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH);
-                            }
-                            if (zoom != 1) {
-                                zoom = clampZoom(zoom);
-                                requestBuilder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom);
-                            }
-
-                            request = requestBuilder.build();
-                            setRepeatingRequest(session, request);
-                            currentSession = session;
-                        } else {
-                            throw e;
-                        }
-                    }
-                } catch (CameraAccessException | IllegalArgumentException e) {
-                    Ln.e("Camera error", e);
-                    disconnected.set(true);
-                    getCaptureControl().reset(CaptureControl.RESET_REASON_TERMINATED);
-                }
-""",
-"""                    CaptureRequest request = requestBuilder.build();
-                    try {
-                        setRepeatingRequest(session, request);
-                        currentSession = session;
-                    } catch (CameraAccessException | IllegalArgumentException e) {
-                        if (cameraIso > 0 || cameraShutterUs > 0 || cameraFocusDistance > 0 || (cameraAwbMode != null && !cameraAwbMode.isEmpty() && !"auto".equals(cameraAwbMode))) {
-                            Ln.w("Camera rejected manual controls; retrying with automatic controls", e);
-
-                            requestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
-                            requestBuilder.addTarget(captureSurface);
-                            if (fps > 0) {
-                                requestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, new Range<>(fps, fps));
-                            }
-                            if (initialTorch) {
-                                requestBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH);
-                            }
-                            if (zoom != 1) {
-                                zoom = clampZoom(zoom);
-                                requestBuilder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom);
-                            }
-
-                            request = requestBuilder.build();
-                            setRepeatingRequest(session, request);
-                            currentSession = session;
-                        } else {
-                            throw e;
-                        }
-                    }
-                } catch (CameraAccessException | IllegalArgumentException e) {
-                    Ln.e("Camera error", e);
-                    disconnected.set(true);
-                    getCaptureControl().reset(CaptureControl.RESET_REASON_TERMINATED);
-                }
-"""),
-("""    private static Integer getAwbMode(String mode) {
-""",
-"""    private static boolean contains(int[] values, int value) {
+    private static boolean contains(int[] values, int value) {
         if (values == null) {
             return false;
         }
@@ -325,8 +289,22 @@ patch("server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java", [
     }
 
     private static Integer getAwbMode(String mode) {
-"""),
-])
+        switch (mode) {
+            case "incandescent":
+                return CaptureRequest.CONTROL_AWB_MODE_INCANDESCENT;
+            case "fluorescent":
+                return CaptureRequest.CONTROL_AWB_MODE_FLUORESCENT;
+            case "daylight":
+                return CaptureRequest.CONTROL_AWB_MODE_DAYLIGHT;
+            case "cloudy":
+                return CaptureRequest.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT;
+            default:
+                return null;
+        }
+    }
+
+    private float clampZoom(float value) {
+""")
 ])
 
 patch("app/src/options.h", [
