@@ -4,27 +4,10 @@ on:
 jobs:
   clang-format:
     runs-on: ubuntu-24.04
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Format changed C/C++ sources 🔧
-        shell: bash
-        run: |
-          set -e
-          brew install --quiet obsproject/tools/clang-format@19
-          clang-format-19 -style=file -i src/*.c src/*.h src/*.cpp src/*.hpp 2>/dev/null || true
-          if git diff --quiet -- src/scrcpy-source.c; then
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/scrcpy-source.c
-          git commit -m "Format source"
-          git push
-
       - name: clang-format check 🐉
         id: clang-format
         uses: ./.github/actions/run-clang-format
