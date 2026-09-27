@@ -130,6 +130,68 @@ bool scrcpy_proc_spawn(scrcpy_proc_t *proc, const char *exe_path, const char *co
 	return true;
 }
 
+bool scrcpy_proc_run_capture(const char *exe_path, const char *const *argv, char **output)
+{
+	*output = NULL;
+
+	struct dstr cmdline = {0};
+	quote_arg(&cmdline, exe_path);
+	for (size_t i = 0; argv[i]; ++i) {
+		dstr_cat_ch(&cmdline, ' ');
+		quote_arg(&cmdline, argv[i]);
+	}
+
+	SECURITY_ATTRIBUTES sa = {sizeof(sa), NULL, TRUE};
+	HANDLE rd = NULL;
+	HANDLE wr = NULL;
+	if (!CreatePipe(&rd, &wr, &sa, 65536)) {
+		dstr_free(&cmdline);
+		return false;
+	}
+	SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
+
+	wchar_t *wcmd = utf8_to_wide(cmdline.array);
+	dstr_free(&cmdline);
+	if (!wcmd) {
+		CloseHandle(rd);
+		CloseHandle(wr);
+		return false;
+	}
+
+	STARTUPINFOW si = {0};
+	si.cb = sizeof(si);
+	si.dwFlags = STARTF_USESTDHANDLES;
+	si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+	si.hStdOutput = wr;
+	si.hStdError = wr;
+
+	PROCESS_INFORMATION pi = {0};
+	BOOL ok = CreateProcessW(NULL, wcmd, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+	bfree(wcmd);
+	CloseHandle(wr);
+
+	if (!ok) {
+		CloseHandle(rd);
+		return false;
+	}
+
+	struct dstr out = {0};
+	char buf[4096];
+	for (;;) {
+		DWORD n = 0;
+		if (!ReadFile(rd, buf, sizeof(buf), &n, NULL) || n == 0)
+			break;
+		dstr_ncat(&out, buf, n);
+	}
+	CloseHandle(rd);
+	WaitForSingleObject(pi.hProcess, 5000);
+	CloseHandle(pi.hProcess);
+	CloseHandle(pi.hThread);
+
+	*output = out.array;
+	return true;
+}
+
 bool scrcpy_proc_alive(const scrcpy_proc_t *proc)
 {
 	if (!proc->process)
@@ -197,6 +259,60 @@ bool scrcpy_proc_spawn(scrcpy_proc_t *proc, const char *exe_path, const char *co
 		return false;
 	}
 	proc->pid = pid;
+	return true;
+}
+
+bool scrcpy_proc_run_capture(const char *exe_path, const char *const *argv, char **output)
+{
+	*output = NULL;
+
+	size_t argc = 0;
+	while (argv[argc])
+		argc++;
+
+	char **spawn_argv = bmalloc(sizeof(char *) * (argc + 2));
+	spawn_argv[0] = (char *)exe_path;
+	for (size_t i = 0; i < argc; ++i)
+		spawn_argv[i + 1] = (char *)argv[i];
+	spawn_argv[argc + 1] = NULL;
+
+	int pipes[2];
+	if (pipe(pipes) != 0) {
+		bfree(spawn_argv);
+		return false;
+	}
+
+	posix_spawn_file_actions_t actions;
+	posix_spawn_file_actions_init(&actions);
+	posix_spawn_file_actions_adddup2(&actions, pipes[1], STDOUT_FILENO);
+	posix_spawn_file_actions_adddup2(&actions, pipes[1], STDERR_FILENO);
+	posix_spawn_file_actions_addclose(&actions, pipes[0]);
+	posix_spawn_file_actions_addclose(&actions, pipes[1]);
+
+	pid_t pid = 0;
+	int rc = posix_spawn(&pid, exe_path, &actions, NULL, spawn_argv, environ);
+	posix_spawn_file_actions_destroy(&actions);
+	close(pipes[1]);
+	bfree(spawn_argv);
+
+	if (rc != 0) {
+		close(pipes[0]);
+		return false;
+	}
+
+	struct dstr out = {0};
+	char buf[4096];
+	for (;;) {
+		ssize_t n = read(pipes[0], buf, sizeof(buf));
+		if (n <= 0)
+			break;
+		dstr_ncat(&out, buf, (size_t)n);
+	}
+	close(pipes[0]);
+
+	int status = 0;
+	waitpid(pid, &status, 0);
+	*output = out.array;
 	return true;
 }
 
