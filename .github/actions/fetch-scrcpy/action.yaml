@@ -68,6 +68,9 @@ runs:
       run: |
         set -e
         python tools/patch-scrcpy-camera.py
+        # Android build-tools 36 on the Windows runner does not resolve the
+        # relative AIDL import path used by scrcpy 4.0. Use an absolute path.
+        python -c 'from pathlib import Path; p=Path("scrcpy/server/build_without_gradle.sh"); s=p.read_text(encoding="utf-8"); s=s.replace("-I. \\", "-I\\"$SERVER_DIR/src/main/aidl\\" \\"); p.write_text(s, encoding="utf-8")'
         rm -rf "${RUNNER_TEMP}/scrcpy-server-build"
         BUILD_DIR="${RUNNER_TEMP}/scrcpy-server-build" bash scrcpy/server/build_without_gradle.sh
         cp "${RUNNER_TEMP}/scrcpy-server-build/scrcpy-server" data/bin/scrcpy-server
