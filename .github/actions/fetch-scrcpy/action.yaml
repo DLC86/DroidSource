@@ -89,7 +89,7 @@ runs:
         )
         s = s.replace(
             '    android/content/IOnPrimaryClipChangedListener.aidl',
-            '    "$AIDL_DIR_NATIVE\\android\\content\\IOnPrimaryClipChangedListener.aidl"',
+            r'    "$AIDL_DIR_NATIVE\\android\\content\\IOnPrimaryClipChangedListener.aidl"',
         )
         s = s.replace(
             '"$BUILD_TOOLS_DIR/aidl" -o"$GEN_DIR" -I. -p "$ANDROID_AIDL" \\',
@@ -97,7 +97,7 @@ runs:
         )
         s = s.replace(
             '    android/view/IDisplayWindowListener.aidl',
-            '    "$AIDL_DIR_NATIVE\\android\\view\\IDisplayWindowListener.aidl"',
+            r'    "$AIDL_DIR_NATIVE\\android\\view\\IDisplayWindowListener.aidl"',
         )
         p.write_text(s, encoding="utf-8")
         PY
