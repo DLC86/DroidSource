@@ -240,7 +240,7 @@ patch("server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java", [
         return contains(afModes, CaptureRequest.CONTROL_AF_MODE_OFF);
     }
 
-    private static void applyManualCameraControls(CaptureRequest.Builder builder, CameraCharacteristics characteristics) {
+    private void applyManualCameraControls(CaptureRequest.Builder builder, CameraCharacteristics characteristics) {
         if (cameraIso > 0 || cameraShutterUs > 0) {
             if (cameraIso > 0 && cameraShutterUs > 0 && hasManualSensorSupport(characteristics)) {
                 Range<Integer> isoRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE);
@@ -248,6 +248,10 @@ patch("server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java", [
                 if (isoRange != null && exposureRange != null) {
                     int iso = isoRange.clamp(cameraIso);
                     long exposureNs = exposureRange.clamp(cameraShutterUs * 1000L);
+                    if (fps > 0) {
+                        long frameDurationNs = 1000000000L / fps;
+                        exposureNs = Math.min(exposureNs, frameDurationNs);
+                    }
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF);
                     builder.set(CaptureRequest.SENSOR_SENSITIVITY, iso);
                     builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureNs);
