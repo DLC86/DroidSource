@@ -36,6 +36,13 @@ struct scrcpy_src {
 	char *serial;
 	char *video_source;
 	int camera_id;
+	int camera_fps;
+	float camera_zoom;
+	bool camera_torch;
+	int camera_iso;
+	int camera_shutter_us;
+	float camera_focus_distance;
+	char *camera_awb_mode;
 	int max_size;
 	int bitrate_kbps;
 	char *codec;
@@ -123,9 +130,33 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 	if (ctx->video_source && *ctx->video_source)
 		snprintf(source_arg, sizeof(source_arg), "--video-source=%s", ctx->video_source);
 
-	char camera_arg[64] = {0};
-	if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0)
-		snprintf(camera_arg, sizeof(camera_arg), "--camera-id=%d", ctx->camera_id);
+\tchar camera_arg[64] = {0};
+\tchar camera_size_arg[64] = {0};
+\tchar camera_fps_arg[64] = {0};
+\tchar camera_zoom_arg[64] = {0};
+\tchar camera_torch_arg[64] = {0};
+\tchar camera_iso_arg[64] = {0};
+\tchar camera_shutter_arg[64] = {0};
+\tchar camera_focus_arg[64] = {0};
+\tchar camera_awb_arg[64] = {0};
+\tif (ctx->video_source && strcmp(ctx->video_source, "camera") == 0) {
+\t\tsnprintf(camera_arg, sizeof(camera_arg), "--camera-id=%d", ctx->camera_id);
+\t\tsnprintf(camera_size_arg, sizeof(camera_size_arg), "--camera-size=1920x1080");
+\t\tif (ctx->camera_fps > 0)
+\t\t\tsnprintf(camera_fps_arg, sizeof(camera_fps_arg), "--camera-fps=%d", ctx->camera_fps);
+\t\tif (ctx->camera_zoom > 0)
+\t\t\tsnprintf(camera_zoom_arg, sizeof(camera_zoom_arg), "--camera-zoom=%.3f", ctx->camera_zoom);
+\t\tif (ctx->camera_torch)
+\t\t\tsnprintf(camera_torch_arg, sizeof(camera_torch_arg), "--camera-torch=true");
+\t\tif (ctx->camera_iso > 0)
+\t\t\tsnprintf(camera_iso_arg, sizeof(camera_iso_arg), "--camera-iso=%d", ctx->camera_iso);
+\t\tif (ctx->camera_shutter_us > 0)
+\t\t\tsnprintf(camera_shutter_arg, sizeof(camera_shutter_arg), "--camera-shutter-us=%d", ctx->camera_shutter_us);
+\t\tif (ctx->camera_focus_distance > 0)
+\t\t\tsnprintf(camera_focus_arg, sizeof(camera_focus_arg), "--camera-focus=%.3f", ctx->camera_focus_distance);
+\t\tif (ctx->camera_awb_mode && *ctx->camera_awb_mode && strcmp(ctx->camera_awb_mode, "auto") != 0)
+\t\t\tsnprintf(camera_awb_arg, sizeof(camera_awb_arg), "--camera-awb=%s", ctx->camera_awb_mode);
+\t}
 
 	char serial_arg[128] = {0};
 	if (ctx->serial && *ctx->serial)
@@ -148,8 +179,15 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 		argv[n++] = codec_arg;
 	if (source_arg[0])
 		argv[n++] = source_arg;
-	if (camera_arg[0])
-		argv[n++] = camera_arg;
+	if (camera_arg[0]) argv[n++] = camera_arg;
+	if (camera_size_arg[0]) argv[n++] = camera_size_arg;
+	if (camera_fps_arg[0]) argv[n++] = camera_fps_arg;
+	if (camera_zoom_arg[0]) argv[n++] = camera_zoom_arg;
+	if (camera_torch_arg[0]) argv[n++] = camera_torch_arg;
+	if (camera_iso_arg[0]) argv[n++] = camera_iso_arg;
+	if (camera_shutter_arg[0]) argv[n++] = camera_shutter_arg;
+	if (camera_focus_arg[0]) argv[n++] = camera_focus_arg;
+	if (camera_awb_arg[0]) argv[n++] = camera_awb_arg;
 	if (serial_arg[0])
 		argv[n++] = serial_arg;
 	argv[n] = NULL;
@@ -201,10 +239,18 @@ static void load_settings(struct scrcpy_src *ctx, obs_data_t *settings)
 	bfree(ctx->serial);
 	bfree(ctx->video_source);
 	bfree(ctx->codec);
+	bfree(ctx->camera_awb_mode);
 	ctx->serial = bstrdup(obs_data_get_string(settings, "serial"));
 	ctx->video_source = bstrdup(obs_data_get_string(settings, "video_source"));
 	ctx->codec = bstrdup(obs_data_get_string(settings, "codec"));
 	ctx->camera_id = (int)obs_data_get_int(settings, "camera_id");
+	ctx->camera_fps = (int)obs_data_get_int(settings, "camera_fps");
+	ctx->camera_zoom = (float)obs_data_get_double(settings, "camera_zoom");
+	ctx->camera_torch = obs_data_get_bool(settings, "camera_torch");
+	ctx->camera_iso = (int)obs_data_get_int(settings, "camera_iso");
+	ctx->camera_shutter_us = (int)obs_data_get_int(settings, "camera_shutter_us");
+	ctx->camera_focus_distance = (float)obs_data_get_double(settings, "camera_focus_distance");
+	ctx->camera_awb_mode = bstrdup(obs_data_get_string(settings, "camera_awb_mode"));
 	ctx->max_size = (int)obs_data_get_int(settings, "max_size");
 	ctx->bitrate_kbps = (int)obs_data_get_int(settings, "bitrate_kbps");
 }
@@ -254,6 +300,13 @@ static void src_get_defaults(obs_data_t *settings)
 {
 	obs_data_set_default_string(settings, "video_source", "display");
 	obs_data_set_default_int(settings, "camera_id", 0);
+	obs_data_set_default_int(settings, "camera_fps", 30);
+	obs_data_set_default_double(settings, "camera_zoom", 1.0);
+	obs_data_set_default_bool(settings, "camera_torch", false);
+	obs_data_set_default_int(settings, "camera_iso", 0);
+	obs_data_set_default_int(settings, "camera_shutter_us", 0);
+	obs_data_set_default_double(settings, "camera_focus_distance", 0.0);
+	obs_data_set_default_string(settings, "camera_awb_mode", "auto");
 	obs_data_set_default_int(settings, "max_size", 0);
 	obs_data_set_default_int(settings, "bitrate_kbps", 8000);
 	obs_data_set_default_string(settings, "codec", "h264");
@@ -276,8 +329,12 @@ static bool video_source_modified(obs_properties_t *props, obs_property_t *p, ob
 	const char *source = obs_data_get_string(settings, "video_source");
 	bool is_camera = source && strcmp(source, "camera") == 0;
 	obs_property_t *camera_id = obs_properties_get(props, "camera_id");
-	if (camera_id)
-		obs_property_set_visible(camera_id, is_camera);
+	if (camera_id) obs_property_set_visible(camera_id, is_camera);
+	const char *keys[] = {"camera_fps", "camera_zoom", "camera_torch", "camera_iso", "camera_shutter_us", "camera_focus_distance", "camera_awb_mode"};
+	for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
+		obs_property_t *prop = obs_properties_get(props, keys[i]);
+		if (prop) obs_property_set_visible(prop, is_camera);
+	}
 	return true;
 }
 
@@ -298,8 +355,36 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_list_add_string(src_list, "Camera", "camera");
 	obs_property_set_modified_callback(src_list, video_source_modified);
 
-	obs_property_t *camera_id = obs_properties_add_int(props, "camera_id", obs_module_text("CameraId"), 0, 9, 1);
-	obs_property_set_visible(camera_id, ctx->video_source && strcmp(ctx->video_source, "camera") == 0);
+\tobs_property_t *camera_id = obs_properties_add_int(props, "camera_id", obs_module_text("CameraId"), 0, 9, 1);
+\tobs_property_t *camera_fps = obs_properties_add_int(props, "camera_fps", obs_module_text("CameraFps"), 1, 60, 1);
+\tobs_property_t *camera_zoom = obs_properties_add_float_slider(props, "camera_zoom", obs_module_text("CameraZoom"), 1.0, 10.0, 0.1);
+\tobs_property_t *camera_torch = obs_properties_add_bool(props, "camera_torch", obs_module_text("CameraTorch"));
+\tobs_property_t *camera_iso = obs_properties_add_int_slider(props, "camera_iso", obs_module_text("CameraIso"), 0, 12800, 50);
+\tobs_property_t *camera_shutter = obs_properties_add_list(props, "camera_shutter_us", obs_module_text("CameraShutter"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+\tobs_property_list_add_int(camera_shutter, "Auto", 0);
+\tobs_property_list_add_int(camera_shutter, "1/30 s", 33333);
+\tobs_property_list_add_int(camera_shutter, "1/60 s", 16667);
+\tobs_property_list_add_int(camera_shutter, "1/120 s", 8333);
+\tobs_property_list_add_int(camera_shutter, "1/240 s", 4167);
+\tobs_property_list_add_int(camera_shutter, "1/500 s", 2000);
+\tobs_property_list_add_int(camera_shutter, "1/1000 s", 1000);
+\tobs_property_list_add_int(camera_shutter, "1/2000 s", 500);
+\tobs_property_list_add_int(camera_shutter, "1/4000 s", 250);
+\tobs_property_t *camera_focus = obs_properties_add_float_slider(props, "camera_focus_distance", obs_module_text("CameraFocus"), 0.0, 20.0, 0.1);
+\tobs_property_t *camera_awb = obs_properties_add_list(props, "camera_awb_mode", obs_module_text("CameraWhiteBalance"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+\tobs_property_list_add_string(camera_awb, "Auto", "auto");
+\tobs_property_list_add_string(camera_awb, "Incandescent", "incandescent");
+\tobs_property_list_add_string(camera_awb, "Fluorescent", "fluorescent");
+\tobs_property_list_add_string(camera_awb, "Daylight", "daylight");
+\tobs_property_list_add_string(camera_awb, "Cloudy", "cloudy");
+\tobs_property_set_visible(camera_id, ctx->video_source && strcmp(ctx->video_source, "camera") == 0);
+\tobs_property_set_visible(camera_fps, ctx->video_source && strcmp(ctx->video_source, "camera") == 0);
+\tobs_property_set_visible(camera_zoom, ctx->video_source && strcmp(ctx->video_source, "camera") == 0);
+\tobs_property_set_visible(camera_torch, ctx->video_source && strcmp(ctx->video_source, "camera") == 0);
+\tobs_property_set_visible(camera_iso, ctx->video_source && strcmp(ctx->video_source, "camera") == 0);
+\tobs_property_set_visible(camera_shutter, ctx->video_source && strcmp(ctx->video_source, "camera") == 0);
+\tobs_property_set_visible(camera_focus, ctx->video_source && strcmp(ctx->video_source, "camera") == 0);
+\tobs_property_set_visible(camera_awb, ctx->video_source && strcmp(ctx->video_source, "camera") == 0);
 
 	obs_properties_add_int(props, "max_size", obs_module_text("MaxSize"), 0, 4096, 16);
 
