@@ -130,7 +130,12 @@ runs:
         # Build Tools 36 on Windows ships d8.bat rather than a POSIX d8 executable.
         s = s.replace(
             '"$BUILD_TOOLS_DIR/d8" --classpath "$ANDROID_JAR" \\',
-            'D8="$BUILD_TOOLS_DIR/d8.bat"\n    "$D8" --classpath "$ANDROID_JAR" \\',
+            'if [[ "$OSTYPE" == msys* || "$OSTYPE" == cygwin* ]]; then\n'
+            '    D8="$BUILD_TOOLS_DIR/d8.bat"\n'
+            'else\n'
+            '    D8="$BUILD_TOOLS_DIR/d8"\n'
+            'fi\n'
+            '"$D8" --classpath "$ANDROID_JAR" \\',
         )
         p.write_text(s, encoding="utf-8")
         PY
