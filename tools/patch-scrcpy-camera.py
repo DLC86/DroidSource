@@ -93,7 +93,7 @@ patch("server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java", [
                         requestBuilder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom);
                     }
 
-                    CaptureRequest request = requestBuilder.build();
+                    request = requestBuilder.build();
                     setRepeatingRequest(session, request);
                     currentSession = session;
                 } catch (CameraAccessException e) {
@@ -114,6 +114,7 @@ patch("server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java", [
                 try {
                     requestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
                     requestBuilder.addTarget(captureSurface);
+                    CaptureRequest request;
 
                     boolean manualExposure = cameraIso > 0 && cameraShutterUs > 0
                             && hasManualSensorSupport(characteristics);
