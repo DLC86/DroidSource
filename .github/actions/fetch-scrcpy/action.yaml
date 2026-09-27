@@ -66,13 +66,9 @@ runs:
       shell: bash
       run: |
         set -e
-        SDKMANAGER="${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
-        if [[ ! -x "$SDKMANAGER" ]]; then
-          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
-        fi
-        if [[ ! -x "$SDKMANAGER" ]]; then
-          echo "sdkmanager not found; ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}; ANDROID_HOME=${ANDROID_HOME}"
-          find "${ANDROID_SDK_ROOT:-${ANDROID_HOME}}" -maxdepth 4 -type f -name sdkmanager -print || true
+        SDKMANAGER=$(find "${ANDROID_SDK_ROOT:-${ANDROID_HOME}}" -type f -name sdkmanager.bat -print -quit)
+        if [[ -z "$SDKMANAGER" ]]; then
+          echo "sdkmanager.bat not found; ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}; ANDROID_HOME=${ANDROID_HOME}"
           exit 1
         fi
         "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
