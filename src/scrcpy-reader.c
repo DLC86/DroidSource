@@ -74,7 +74,7 @@ struct scrcpy_reader {
 
 	sock_t sock;
 
-	  bool hardware_decoding;
+	  bool hardware_decoding; /* trigger formatting workflow */
 	bool flip_vertical;
 	int video_buffer_ms;
 	char color_space[16];
