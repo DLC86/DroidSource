@@ -180,44 +180,32 @@ patch("server/src/main/java/com/genymobile/scrcpy/util/LogUtils.java", [
                             }
                         }
                     }
-                    boolean manualWb = false;
+                    boolean wbPreset = false;
                     int[] awbModes = characteristics.get(CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES);
-                    int[] capabilitiesForWb = characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
-                    if (awbModes != null && capabilitiesForWb != null) {
-                        boolean awbOff = false;
-                        boolean manualPostProcessing = false;
-                        for (int mode : awbModes) {
-                            if (mode == android.hardware.camera2.CaptureRequest.CONTROL_AWB_MODE_OFF) {
-                                awbOff = true;
-                                break;
-                            }
-                        }
-                        for (int capability : capabilitiesForWb) {
-                            if (capability == CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING) {
-                                manualPostProcessing = true;
-                                break;
-                            }
-                        }
-                        manualWb = awbOff && manualPostProcessing;
-                        if (Build.VERSION.SDK_INT >= 36) {
-                            int[] correctionModesForWb =
-                                    characteristics.get(CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_MODES);
-                            boolean transformMatrix = false;
-                            if (correctionModesForWb != null) {
-                                for (int mode : correctionModesForWb) {
-                                    if (mode == android.hardware.camera2.CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX) {
-                                        transformMatrix = true;
-                                        break;
-                                    }
+                    if (awbModes != null) {
+                        final int[] presetModes = {
+                                android.hardware.camera2.CaptureRequest.CONTROL_AWB_MODE_INCANDESCENT,
+                                android.hardware.camera2.CaptureRequest.CONTROL_AWB_MODE_FLUORESCENT,
+                                android.hardware.camera2.CaptureRequest.CONTROL_AWB_MODE_WARM_FLUORESCENT,
+                                android.hardware.camera2.CaptureRequest.CONTROL_AWB_MODE_DAYLIGHT,
+                                android.hardware.camera2.CaptureRequest.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT,
+                                android.hardware.camera2.CaptureRequest.CONTROL_AWB_MODE_TWILIGHT,
+                                android.hardware.camera2.CaptureRequest.CONTROL_AWB_MODE_SHADE,
+                        };
+                        for (int available : awbModes) {
+                            for (int preset : presetModes) {
+                                if (available == preset) {
+                                    wbPreset = true;
+                                    break;
                                 }
                             }
-                            manualWb = manualWb && transformMatrix;
-                        } else {
-                            // FULL-level cameras guarantee TRANSFORM_MATRIX on older Android releases.
+                            if (wbPreset) {
+                                break;
+                            }
                         }
                     }
-                    if (manualWb) {
-                        builder.append(", wb-manual=true");
+                    if (wbPreset) {
+                        builder.append(", wb-presets=true");
                     }
 
 
@@ -234,7 +222,6 @@ import android.hardware.camera2.params.SessionConfiguration;
 import android.hardware.camera2.params.StreamConfigurationMap;
 """,
         """import android.hardware.camera2.params.OutputConfiguration;
-import android.hardware.camera2.params.RggbChannelVector;
 import android.hardware.camera2.params.SessionConfiguration;
 import android.hardware.camera2.params.StreamConfigurationMap;
 """,
@@ -595,73 +582,43 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
 
         int[] awbModes =
                 cameraCharacteristics.get(CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES);
-        int[] capabilities =
-                cameraCharacteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
-        int[] correctionModes =
-                cameraCharacteristics.get(CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_MODES);
-
-        boolean manualSupported =
-                contains(awbModes, CaptureRequest.CONTROL_AWB_MODE_OFF)
-                && contains(capabilities,
-                        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING)
-                && contains(correctionModes,
-                        CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX);
-
-        if (manualSupported) {
-            requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
-                    CaptureRequest.CONTROL_AWB_MODE_OFF);
-            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_MODE,
-                    CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX);
-            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS,
-                    kelvinToGains(whiteBalanceKelvin));
+        int wbMode = chooseAwbMode(whiteBalanceKelvin, awbModes);
+        if (wbMode != CaptureRequest.CONTROL_AWB_MODE_AUTO) {
+            requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE, wbMode);
+            Ln.i("Camera white balance preset: " + whiteBalanceKelvin + " K -> AWB mode " + wbMode);
         } else {
-            Ln.w("Manual white balance is unsupported on this camera");
+            Ln.w("Camera does not expose a usable manual white balance control");
             requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
                     CaptureRequest.CONTROL_AWB_MODE_AUTO);
         }
     }
 
-    private static RggbChannelVector kelvinToGains(int kelvin) {
-        double temperature = Math.max(1000, Math.min(15000, kelvin)) / 100.0;
-        double red;
-        double green;
-        double blue;
-
-        if (temperature <= 66) {
-            red = 255;
-        } else {
-            red = 329.698727446 * Math.pow(temperature - 60, -0.1332047592);
+    private static int chooseAwbMode(int kelvin, int[] availableModes) {
+        if (availableModes == null) {
+            return CaptureRequest.CONTROL_AWB_MODE_AUTO;
         }
-
-        if (temperature <= 66) {
-            green = 99.4708025861 * Math.log(Math.max(1, temperature)) - 161.1195681661;
-        } else {
-            green = 288.1221695283 * Math.pow(temperature - 60, -0.0755148492);
+        int[][] candidates = {
+                {3000, CaptureRequest.CONTROL_AWB_MODE_INCANDESCENT},
+                {4000, CaptureRequest.CONTROL_AWB_MODE_FLUORESCENT},
+                {3500, CaptureRequest.CONTROL_AWB_MODE_WARM_FLUORESCENT},
+                {5500, CaptureRequest.CONTROL_AWB_MODE_DAYLIGHT},
+                {6500, CaptureRequest.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT},
+                {7000, CaptureRequest.CONTROL_AWB_MODE_TWILIGHT},
+                {7500, CaptureRequest.CONTROL_AWB_MODE_SHADE},
+        };
+        int bestMode = CaptureRequest.CONTROL_AWB_MODE_AUTO;
+        int bestDistance = Integer.MAX_VALUE;
+        for (int[] candidate : candidates) {
+            if (!contains(availableModes, candidate[1])) {
+                continue;
+            }
+            int distance = Math.abs(kelvin - candidate[0]);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                bestMode = candidate[1];
+            }
         }
-
-        if (temperature >= 66) {
-            blue = 255;
-        } else if (temperature <= 19) {
-            blue = 1;
-        } else {
-            blue = 138.5177312231 * Math.log(temperature - 10) - 305.0447927307;
-        }
-
-        red = Math.max(1, Math.min(255, red));
-        green = Math.max(1, Math.min(255, green));
-        blue = Math.max(1, Math.min(255, blue));
-
-        float redGain = (float) (green / red);
-        float blueGain = (float) (green / blue);
-        float maxGain = Math.max(redGain, blueGain);
-
-        if (maxGain > 8f) {
-            float scale = 8f / maxGain;
-            redGain *= scale;
-            blueGain *= scale;
-        }
-
-        return new RggbChannelVector(redGain, 1f, 1f, blueGain);
+        return bestMode;
     }
 
     private static boolean contains(int[] values, int value) {
