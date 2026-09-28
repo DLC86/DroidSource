@@ -179,7 +179,7 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 			snprintf(control_codec_arg, sizeof(control_codec_arg),
 				 "--video-codec-options=__scrcpy_obs_camera_control_port:int=%u,"
 				 "__scrcpy_obs_camera_zoom:float=%.3f,"
-				 "__scrcpy_obs_camera_torch:bool=%d,"
+				 "__scrcpy_obs_camera_torch:int=%d,"
 				 "__scrcpy_obs_camera_iso:int=%d,"
 				 "__scrcpy_obs_camera_shutter:int=%d,"
 				 "__scrcpy_obs_camera_focus:float=%.3f,"
