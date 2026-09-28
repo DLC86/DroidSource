@@ -663,6 +663,24 @@ static void parse_camera_sensor_ranges(const char *line, int *iso_min, int *iso_
 	}
 }
 
+static void parse_camera_post_raw_boost_range(const char *line, int *boost_min, int *boost_max)
+{
+	if (!line || !boost_min || !boost_max)
+		return;
+
+	const char *start = strstr(line, "post-raw-sensitivity-boost-range=[");
+	if (!start)
+		return;
+
+	start += strlen("post-raw-sensitivity-boost-range=[");
+	int lo = 100;
+	int hi = 100;
+	if (sscanf(start, "%d, %d", &lo, &hi) == 2 && lo > 0 && hi >= lo) {
+		*boost_min = lo;
+		*boost_max = hi;
+	}
+}
+
 static bool parse_selected_camera_sizes(const char *output, const char *selected_id, obs_property_t *resolution)
 {
 	bool in_camera = false;
@@ -852,10 +870,14 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 	int selected_iso_max = 0;
 	long long selected_exposure_min_ns = 0;
 	long long selected_exposure_max_ns = 0;
+	int selected_post_raw_boost_min = 100;
+	int selected_post_raw_boost_max = 100;
 	int first_iso_min = 0;
 	int first_iso_max = 0;
 	long long first_exposure_min_ns = 0;
 	long long first_exposure_max_ns = 0;
+	int first_post_raw_boost_min = 100;
+	int first_post_raw_boost_max = 100;
 	int first_fps[64];
 	size_t first_fps_count = 0;
 	size_t camera_count = 0;
@@ -890,8 +912,12 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 			int line_iso_max = 0;
 			long long line_exposure_min_ns = 0;
 			long long line_exposure_max_ns = 0;
+			int line_post_raw_boost_min = 100;
+			int line_post_raw_boost_max = 100;
 			parse_camera_sensor_ranges(line_copy, &line_iso_min, &line_iso_max,
 						   &line_exposure_min_ns, &line_exposure_max_ns);
+			parse_camera_post_raw_boost_range(line_copy,
+						   &line_post_raw_boost_min, &line_post_raw_boost_max);
 
 			if (!first_id[0]) {
 				snprintf(first_id, sizeof(first_id), "%s", id);
@@ -901,6 +927,8 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 				first_iso_max = line_iso_max;
 				first_exposure_min_ns = line_exposure_min_ns;
 				first_exposure_max_ns = line_exposure_max_ns;
+				first_post_raw_boost_min = line_post_raw_boost_min;
+				first_post_raw_boost_max = line_post_raw_boost_max;
 			}
 			obs_property_list_add_string(camera_id_prop, label, id);
 			camera_count++;
@@ -925,6 +953,8 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 				selected_iso_max = line_iso_max;
 				selected_exposure_min_ns = line_exposure_min_ns;
 				selected_exposure_max_ns = line_exposure_max_ns;
+				selected_post_raw_boost_min = line_post_raw_boost_min;
+				selected_post_raw_boost_max = line_post_raw_boost_max;
 			}
 		}
 
@@ -958,6 +988,10 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 	if (selected_exposure_max_ns <= 0 && first_exposure_max_ns > 0) {
 		selected_exposure_min_ns = first_exposure_min_ns;
 		selected_exposure_max_ns = first_exposure_max_ns;
+	}
+	if (selected_post_raw_boost_max <= 100 && first_post_raw_boost_max > 100) {
+		selected_post_raw_boost_min = first_post_raw_boost_min;
+		selected_post_raw_boost_max = first_post_raw_boost_max;
 	}
 	int saved_fps = (int)obs_data_get_int(settings, "camera_fps");
 	if (saved_fps > 0)
@@ -1004,7 +1038,13 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 
 	obs_property_t *iso_prop = obs_properties_get(props, "camera_iso");
 	if (iso_prop) {
-		int iso_max = selected_iso_max > 0 ? selected_iso_max : 12800;
+		int sensor_iso_max = selected_iso_max > 0 ? selected_iso_max : 12800;
+		int boost_max = selected_post_raw_boost_max > 0 ? selected_post_raw_boost_max : 100;
+		long long effective_iso_max_ll =
+			(long long)sensor_iso_max * (long long)boost_max / 100LL;
+		int iso_max = effective_iso_max_ll > 1000000LL ? 1000000 : (int)effective_iso_max_ll;
+		if (iso_max < sensor_iso_max)
+			iso_max = sensor_iso_max;
 		obs_property_int_set_limits(iso_prop, 0, iso_max, 1);
 		obs_property_set_enabled(iso_prop, true);
 
