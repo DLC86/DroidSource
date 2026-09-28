@@ -353,7 +353,7 @@ static bool scrcpy_stream_healthy(struct scrcpy_src *ctx)
 	/* A USB/ADB disconnect may leave the child alive while its socket
 	 * remains open. Treat a stream with no decoded frame for a few
 	 * seconds as dead so the watchdog can restart it. */
-	return !scrcpy_reader_is_stale(ctx->reader, 1000);
+	return !scrcpy_reader_is_stale(ctx->reader, 3000);
 }
 
 static void *scrcpy_watchdog(void *data)
@@ -554,7 +554,7 @@ static pthread_mutex_t g_camera_capabilities_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 
 static bool parse_camera_id_line(const char *line, char *id, size_t id_size, char *label, size_t label_size, int *fps,
-				 size_t *fps_count, float *focus_max, int *wb_min, int *wb_max, int *sensor_orientation)
+				 size_t *fps_count, float *focus_max, int *wb_min, int *wb_max, int *sensor_orientation, bool *wb_manual)
 {
 	const char *p = strstr(line, "--camera-id=");
 	if (!p)
@@ -661,6 +661,9 @@ static bool parse_camera_id_line(const char *line, char *id, size_t id_size, cha
 		}
 	}
 
+	if (wb_manual)
+		*wb_manual = strstr(line, "wb-manual=true") != NULL;
+
 	return true;
 }
 
@@ -675,14 +678,14 @@ static bool parse_selected_camera_sizes(const char *output, const char *selected
 		const char *end = strpbrk(line, "\r\n");
 		size_t line_len = end ? (size_t)(end - line) : strlen(line);
 
-		char line_copy[1024];
+		char line_copy[4096];
 		if (line_len >= sizeof(line_copy))
 			line_len = sizeof(line_copy) - 1;
 		memcpy(line_copy, line, line_len);
 		line_copy[line_len] = '\0';
 
 		char camera_id[64];
-		if (parse_camera_id_line(line_copy, camera_id, sizeof(camera_id), NULL, 0, NULL, NULL, NULL, NULL, NULL, NULL)) {
+		if (parse_camera_id_line(line_copy, camera_id, sizeof(camera_id), NULL, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL)) {
 			in_camera = strcmp(camera_id, selected_id) == 0;
 			high_speed = false;
 		} else if (in_camera) {
@@ -847,6 +850,7 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 	float selected_focus_max = 0.0f;
 	int selected_wb_min = 0;
 	int selected_wb_max = 0;
+	bool selected_wb_manual = false;
 	int first_fps[64];
 	size_t first_fps_count = 0;
 	size_t camera_count = 0;
@@ -857,7 +861,7 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 	while (line && *line) {
 		const char *end = strpbrk(line, "\r\n");
 		size_t line_len = end ? (size_t)(end - line) : strlen(line);
-		char line_copy[1024];
+		char line_copy[4096];
 		if (line_len >= sizeof(line_copy))
 			line_len = sizeof(line_copy) - 1;
 		memcpy(line_copy, line, line_len);
@@ -871,8 +875,9 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 		int wb_min = 0;
 		int wb_max = 0;
 		int sensor_orientation = 0;
+		bool wb_manual = false;
 		if (parse_camera_id_line(line_copy, id, sizeof(id), label, sizeof(label),
-					 fps, &fps_count, &focus_max, &wb_min, &wb_max, &sensor_orientation)) {
+					 fps, &fps_count, &focus_max, &wb_min, &wb_max, &sensor_orientation, &wb_manual)) {
 			in_selected_camera = selected_id[0] && strcmp(selected_id, id) == 0;
 			if (!first_id[0]) {
 				snprintf(first_id, sizeof(first_id), "%s", id);
@@ -891,6 +896,8 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 				selected_wb_min = wb_min;
 				selected_wb_max = wb_max;
 			}
+			if (in_selected_camera && wb_manual)
+				selected_wb_manual = true;
 			if (in_selected_camera)
 				obs_data_set_int(settings, "camera_sensor_orientation", sensor_orientation);
 		}
@@ -955,7 +962,7 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 		int min_kelvin = selected_wb_min > 0 ? selected_wb_min : 1000;
 		int max_kelvin = selected_wb_max > 0 ? selected_wb_max : 12000;
 		obs_property_int_set_limits(wb_prop, 0, max_kelvin, 100);
-		obs_property_set_enabled(wb_prop, selected_wb_min > 0);
+		obs_property_set_enabled(wb_prop, selected_wb_min > 0 || selected_wb_manual);
 		int current_wb = (int)obs_data_get_int(settings, "camera_wb_kelvin");
 		if (current_wb > 0 && selected_wb_min > 0 &&
 		    (current_wb < selected_wb_min || current_wb > selected_wb_max))
