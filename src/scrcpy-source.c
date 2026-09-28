@@ -169,7 +169,7 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 	char camera_arg[64] = {0};
 	char camera_size_arg[64] = {0};
 	char camera_fps_arg[64] = {0};
-	char control_codec_arg[160] = {0};
+	char control_codec_arg[1024] = {0};
 	if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0) {
 		snprintf(camera_arg, sizeof(camera_arg), "--camera-id=%s", ctx->camera_id ? ctx->camera_id : "0");
 		if (ctx->camera_size && *ctx->camera_size)
@@ -186,7 +186,7 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 				 "__scrcpy_obs_camera_shutter:int=%d,"
 				 "__scrcpy_obs_camera_focus:float=%.3f,"
 				 "__scrcpy_obs_camera_wb:int=%d,"
-				 "max-bframes:int=0,latency:int=0,priority:int=0,"
+				 "max-bframes:int=0,latency:int=1,priority:int=0,"
 				 "max-fps-to-encoder:float=%.3f,operating-rate:int=%d",
 				 (unsigned)control_port, ctx->camera_iso, ctx->camera_shutter_us,
 				 ctx->camera_focus_distance, ctx->camera_wb_kelvin,
