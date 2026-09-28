@@ -132,6 +132,29 @@ patch("server/src/main/java/com/genymobile/scrcpy/util/LogUtils.java", [
                                 .append(exposureRange.getUpper()).append(']');
                     }
 
+                    Range<Integer> postRawBoostRange = characteristics.get(
+                            CameraCharacteristics.CONTROL_POST_RAW_SENSITIVITY_BOOST_RANGE);
+                    if (postRawBoostRange != null) {
+                        builder.append(", post-raw-sensitivity-boost-range=[")
+                                .append(postRawBoostRange.getLower()).append(", ")
+                                .append(postRawBoostRange.getUpper()).append(']');
+                    }
+
+                    int[] capabilitiesForWb = characteristics.get(
+                            CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
+                    int[] correctionModesForWb = characteristics.get(
+                            CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_MODES);
+                    int[] awbModesForWb = characteristics.get(
+                            CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES);
+                    boolean manualWb = contains(capabilitiesForWb,
+                            CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING)
+                            && contains(awbModesForWb, CaptureRequest.CONTROL_AWB_MODE_OFF)
+                            && contains(correctionModesForWb,
+                                    CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX);
+                    if (manualWb) {
+                        builder.append(", wb-manual=true");
+                    }
+
                     Float focusMax = characteristics.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE);
                     if (focusMax != null && focusMax > 0) {
                         builder.append(", focus-range=[0, ")
@@ -196,9 +219,12 @@ patch("server/src/main/java/com/genymobile/scrcpy/util/LogUtils.java", [
 
 patch("server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java", [
     (
-        """import android.hardware.camera2.params.OutputConfiguration;
+        """import android.hardware.camera2.params.ColorSpaceTransform;
+import android.hardware.camera2.params.OutputConfiguration;
+import android.hardware.camera2.params.RggbChannelVector;
 import android.hardware.camera2.params.SessionConfiguration;
 import android.hardware.camera2.params.StreamConfigurationMap;
+import android.util.Rational;
 """,
         """import android.hardware.camera2.params.OutputConfiguration;
 import android.hardware.camera2.params.SessionConfiguration;
