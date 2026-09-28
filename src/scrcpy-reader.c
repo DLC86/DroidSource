@@ -214,14 +214,11 @@ static bool open_decoder(struct scrcpy_reader *r, uint32_t codec_id, uint32_t wi
 
 	r->codec_ctx->flags |= AV_CODEC_FLAG_LOW_DELAY;
 	r->codec_ctx->thread_type = FF_THREAD_SLICE;
-	if (codec_id == SC_CODEC_ID_H265) {
+	if (codec_id == SC_CODEC_ID_H265)
 		r->codec_ctx->flags2 |= AV_CODEC_FLAG2_FAST;
-		/* HEVC frame threading adds pipeline depth; keep only a small
-		 * slice-thread pool to avoid trading CPU efficiency for latency. */
-		r->codec_ctx->thread_count = 2;
-	} else {
-		r->codec_ctx->thread_count = 0;
-	}
+	/* Slice threading avoids frame-thread buffering; let FFmpeg choose
+	 * the available slice threads so 4K HEVC does not become CPU-starved. */
+	r->codec_ctx->thread_count = 0;
 	r->codec_ctx->width = (int)width;
 	r->codec_ctx->height = (int)height;
 	r->codec_ctx->pix_fmt = AV_PIX_FMT_YUV420P;
@@ -310,7 +307,7 @@ static void *reader_thread(void *data)
 	bool drop_until_keyframe = false;
 
 	while (!os_atomic_load_bool(&r->stop)) {
-		size_t backlog_limit = codec_id == SC_CODEC_ID_H265 ? (96 * 1024) : (128 * 1024);
+		size_t backlog_limit = codec_id == SC_CODEC_ID_H265 ? (256 * 1024) : (512 * 1024);
 		if (!drop_until_keyframe && socket_pending_bytes(r->sock) > backlog_limit) {
 			obs_log(LOG_WARNING, "scrcpy-reader: video backlog exceeded %zu KiB; dropping to next keyframe",
 				 backlog_limit / 1024);
