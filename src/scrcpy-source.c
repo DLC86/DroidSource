@@ -193,6 +193,8 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 		} else {
 			snprintf(control_codec_arg, sizeof(control_codec_arg),
 				 "--video-codec-options=__scrcpy_obs_camera_control_port:int=%u,"
+				 "__scrcpy_obs_camera_zoom:float=%.3f,"
+				 "__scrcpy_obs_camera_torch:bool=%d,"
 				 "__scrcpy_obs_camera_iso:int=%d,"
 				 "__scrcpy_obs_camera_shutter:int=%d,"
 				 "__scrcpy_obs_camera_focus:float=%.3f,"
@@ -675,7 +677,7 @@ static bool parse_selected_camera_sizes(const char *output, const char *selected
 
 		char camera_id[64];
 		if (parse_camera_id_line(line_copy, camera_id, sizeof(camera_id), NULL, 0, NULL, NULL, NULL, NULL, NULL,
-					 NULL)) {
+					 NULL, NULL)) {
 			in_camera = strcmp(camera_id, selected_id) == 0;
 			high_speed = false;
 		} else if (in_camera) {
@@ -955,9 +957,6 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 		float zoom_min = selected_zoom_max > selected_zoom_min ? selected_zoom_min : 1.0f;
 		float zoom_max = selected_zoom_max > selected_zoom_min ? selected_zoom_max : 10.0f;
 		obs_property_float_set_limits(zoom_prop, zoom_min, zoom_max, 0.05);
-		double current_zoom = obs_data_get_double(settings, "camera_zoom");
-		if (current_zoom < zoom_min || current_zoom > zoom_max)
-			obs_data_set_double(settings, "camera_zoom", zoom_min);
 	}
 
 	obs_property_t *wb_prop = obs_properties_get(props, "camera_wb_kelvin");
@@ -967,9 +966,6 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 		obs_property_int_set_limits(wb_prop, 0, max_kelvin, 100);
 		obs_property_set_enabled(wb_prop, selected_wb_min > 0 || selected_wb_manual);
 		int current_wb = (int)obs_data_get_int(settings, "camera_wb_kelvin");
-		if (current_wb > 0 && selected_wb_min > 0 &&
-		    (current_wb < selected_wb_min || current_wb > selected_wb_max))
-			obs_data_set_int(settings, "camera_wb_kelvin", min_kelvin);
 	}
 
 	parse_selected_camera_sizes(camera_output, selected_id, resolution_prop);
