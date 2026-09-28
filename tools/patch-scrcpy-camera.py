@@ -98,8 +98,8 @@ patch("server/src/main/java/com/genymobile/scrcpy/Options.java", [
                             } else if ("__scrcpy_obs_camera_zoom".equals(optionKey) && valueObj instanceof Float) {
                                 options.cameraZoom = (Float) valueObj;
                                 codecOptions.remove(j);
-                            } else if ("__scrcpy_obs_camera_torch".equals(optionKey) && valueObj instanceof Boolean) {
-                                options.cameraTorch = (Boolean) valueObj;
+                            } else if ("__scrcpy_obs_camera_torch".equals(optionKey) && valueObj instanceof Integer) {
+                                options.cameraTorch = (Integer) valueObj != 0;
                                 codecOptions.remove(j);
                             } else if ("__scrcpy_obs_camera_iso".equals(optionKey) && valueObj instanceof Integer) {
                                 options.cameraIso = (Integer) valueObj;
