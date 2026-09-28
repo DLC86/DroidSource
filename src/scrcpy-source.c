@@ -669,7 +669,7 @@ static bool parse_camera_id_line(const char *line, char *id, size_t id_size, cha
 	}
 
 	if (wb_manual)
-		*wb_manual = strstr(line, "wb-manual=true") != NULL;
+		*wb_manual = strstr(line, "wb-kelvin-range=[") != NULL || strstr(line, "wb-presets=true") != NULL;
 
 	return true;
 }
