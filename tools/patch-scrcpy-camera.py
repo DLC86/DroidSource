@@ -121,7 +121,6 @@ import android.hardware.camera2.params.StreamConfigurationMap;
         } catch (CameraAccessException | InterruptedException e) {
 """,
 """            Ln.i("Using camera '" + cameraId + "'");
-            cameraDevice = openCamera(cameraId);
 
             if (cameraControlPort > 0) {
                 try {
@@ -132,6 +131,8 @@ import android.hardware.camera2.params.StreamConfigurationMap;
                     cameraControlServer = null;
                 }
             }
+
+            cameraDevice = openCamera(cameraId);
         } catch (CameraAccessException | InterruptedException e) {
 """),
 ("""                    CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
@@ -172,19 +173,26 @@ import android.hardware.camera2.params.StreamConfigurationMap;
 ("""    public void setTorchEnabled(boolean enabled) {
         cameraHandler.post(() -> {
             assertCameraThread();
-            if (currentSession != null && requestBuilder != null) {
-                try {
-                    Ln.i("Turn camera torch " + (enabled ? "on" : "off"));
-                    requestBuilder.set(CaptureRequest.FLASH_MODE, enabled ? CaptureRequest.FLASH_MODE_TORCH : CaptureRequest.FLASH_MODE_OFF);
-                    CaptureRequest request = requestBuilder.build();
-                    setRepeatingRequest(currentSession, request);
-                } catch (CameraAccessException e) {
-                    Ln.e("Camera error", e);
+            torchEnabled = enabled;
+            try {
+                ServiceManager.getCameraManager().setTorchMode(cameraId, enabled);
+                Ln.i("Camera torch " + (enabled ? "enabled" : "disabled") + " via CameraManager");
+            } catch (CameraAccessException | IllegalArgumentException e) {
+                Ln.w("CameraManager torch control failed: " + e.getMessage());
+                if (currentSession != null && requestBuilder != null) {
+                    try {
+                        requestBuilder.set(CaptureRequest.FLASH_MODE,
+                                enabled ? CaptureRequest.FLASH_MODE_TORCH : CaptureRequest.FLASH_MODE_OFF);
+                        setRepeatingRequest(currentSession, requestBuilder.build());
+                    } catch (CameraAccessException | IllegalArgumentException | IllegalStateException ex) {
+                        Ln.e("Camera request torch control failed: " + ex.getMessage());
+                    }
                 }
             }
         });
     }
-""",
+"""
+),
 """    public void setTorchEnabled(boolean enabled) {
         cameraHandler.post(() -> {
             assertCameraThread();
@@ -274,28 +282,27 @@ methods = r'''    public void setZoomRatio(float value) {
     private void applyCurrentCameraSettings() throws CameraAccessException {
         assertCameraThread();
 
-        requestBuilder.set(CaptureRequest.FLASH_MODE,
-                torchEnabled ? CaptureRequest.FLASH_MODE_TORCH : CaptureRequest.FLASH_MODE_OFF);
-
-        if (zoom != 1) {
-            zoom = clampZoom(zoom);
-            requestBuilder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom);
-        }
-
         try {
-            applyExposure();
-        } catch (RuntimeException e) {
-            Ln.w("Could not apply manual exposure: " + e.getMessage());
-            manualIso = 0;
-            manualShutterUs = 0;
-            requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
+            ServiceManager.getCameraManager().setTorchMode(cameraId, torchEnabled);
+        } catch (CameraAccessException | IllegalArgumentException e) {
+            Ln.w("Could not set camera torch through CameraManager: " + e.getMessage());
+            requestBuilder.set(CaptureRequest.FLASH_MODE,
+                    torchEnabled ? CaptureRequest.FLASH_MODE_TORCH : CaptureRequest.FLASH_MODE_OFF);
         }
+
+        zoom = clampZoom(zoom);
+        requestBuilder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom);
+
+        applyExposure();
+
         try {
             applyFocus();
         } catch (RuntimeException e) {
             Ln.w("Could not apply manual focus: " + e.getMessage());
             manualFocusDistance = 0;
+            applyFocus();
         }
+
         try {
             applyWhiteBalance();
         } catch (RuntimeException e) {
@@ -308,17 +315,20 @@ methods = r'''    public void setZoomRatio(float value) {
     private void applyExposure() {
         assertCameraThread();
 
-        if ((manualIso <= 0 && manualShutterUs <= 0) || highSpeed || cameraCharacteristics == null) {
-            requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
+        if (cameraCharacteristics == null) {
             return;
         }
 
-        int[] capabilities =
-                cameraCharacteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
-        if (!contains(capabilities,
-                CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR)) {
-            Ln.w("Manual exposure is not supported by this camera");
+        boolean hasIso = manualIso > 0;
+        boolean hasShutter = manualShutterUs > 0;
+
+        if (!hasIso && !hasShutter) {
             requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
+            if (android.os.Build.VERSION.SDK_INT >= 36) {
+                requestBuilder.set(CaptureRequest.CONTROL_AE_PRIORITY_MODE,
+                        CaptureRequest.CONTROL_AE_PRIORITY_MODE_OFF);
+            }
+            Ln.i("Camera exposure: auto");
             return;
         }
 
@@ -327,22 +337,52 @@ methods = r'''    public void setZoomRatio(float value) {
         Range<Long> exposureRange =
                 cameraCharacteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE);
         if (isoRange == null || exposureRange == null) {
-            Ln.w("Manual exposure ranges are unavailable");
-            requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
+            throw new IllegalStateException("manual exposure ranges unavailable");
+        }
+
+        int[] capabilities =
+                cameraCharacteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
+        boolean manualSensor = contains(capabilities,
+                CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR);
+
+        if (hasIso && hasShutter) {
+            if (!manualSensor) {
+                throw new IllegalStateException("manual sensor capability unavailable");
+            }
+
+            int iso = isoRange.clamp(manualIso);
+            long exposureNs = exposureRange.clamp(manualShutterUs * 1000L);
+            requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF);
+            if (android.os.Build.VERSION.SDK_INT >= 36) {
+                requestBuilder.set(CaptureRequest.CONTROL_AE_PRIORITY_MODE,
+                        CaptureRequest.CONTROL_AE_PRIORITY_MODE_OFF);
+            }
+            requestBuilder.set(CaptureRequest.SENSOR_SENSITIVITY, iso);
+            requestBuilder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureNs);
+            requestBuilder.set(CaptureRequest.SENSOR_FRAME_DURATION, exposureNs);
+            Ln.i("Manual exposure: ISO " + iso + ", " + manualShutterUs + " us");
             return;
         }
 
-        int iso = isoRange.clamp(manualIso > 0 ? manualIso : isoRange.getLower());
-        long defaultExposureUs = fps > 0 ? 1_000_000L / fps : exposureRange.getLower() / 1000L;
-        long requestedExposureUs = manualShutterUs > 0 ? manualShutterUs : defaultExposureUs;
-        long exposureNs = exposureRange.clamp(requestedExposureUs * 1000L);
-        long frameDurationNs = fps > 0 ? 1_000_000_000L / fps : exposureNs;
+        if (android.os.Build.VERSION.SDK_INT < 36) {
+            throw new IllegalStateException("independent ISO/shutter control requires Android 16+");
+        }
 
-        requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF);
-        requestBuilder.set(CaptureRequest.SENSOR_SENSITIVITY, iso);
-        requestBuilder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureNs);
-        requestBuilder.set(CaptureRequest.SENSOR_FRAME_DURATION,
-                Math.max(exposureNs, frameDurationNs));
+        if (hasIso) {
+            int iso = isoRange.clamp(manualIso);
+            requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
+            requestBuilder.set(CaptureRequest.CONTROL_AE_PRIORITY_MODE,
+                    CaptureRequest.CONTROL_AE_PRIORITY_MODE_SENSOR_SENSITIVITY_PRIORITY);
+            requestBuilder.set(CaptureRequest.SENSOR_SENSITIVITY, iso);
+            Ln.i("Camera ISO locked at " + iso + ", shutter automatic");
+        } else {
+            long exposureNs = exposureRange.clamp(manualShutterUs * 1000L);
+            requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
+            requestBuilder.set(CaptureRequest.CONTROL_AE_PRIORITY_MODE,
+                    CaptureRequest.CONTROL_AE_PRIORITY_MODE_SENSOR_EXPOSURE_TIME_PRIORITY);
+            requestBuilder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureNs);
+            Ln.i("Camera shutter locked at " + manualShutterUs + " us, ISO automatic");
+        }
     }
 
     private void applyFocus() {
