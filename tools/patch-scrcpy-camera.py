@@ -761,6 +761,36 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
         return new RggbChannelVector(redGain, 1.0f, 1.0f, blueGain);
     }
 
+    private static int chooseAwbMode(int kelvin, int[] awbModes) {
+        if (awbModes == null) {
+            return CaptureRequest.CONTROL_AWB_MODE_AUTO;
+        }
+
+        final int[][] candidates = {
+                {CaptureRequest.CONTROL_AWB_MODE_INCANDESCENT, 2800},
+                {CaptureRequest.CONTROL_AWB_MODE_WARM_FLUORESCENT, 3200},
+                {CaptureRequest.CONTROL_AWB_MODE_FLUORESCENT, 4000},
+                {CaptureRequest.CONTROL_AWB_MODE_DAYLIGHT, 5500},
+                {CaptureRequest.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT, 6500},
+                {CaptureRequest.CONTROL_AWB_MODE_TWILIGHT, 7500},
+                {CaptureRequest.CONTROL_AWB_MODE_SHADE, 8000},
+        };
+
+        int bestMode = CaptureRequest.CONTROL_AWB_MODE_AUTO;
+        int bestDistance = Integer.MAX_VALUE;
+        for (int[] candidate : candidates) {
+            if (!contains(awbModes, candidate[0])) {
+                continue;
+            }
+            int distance = Math.abs(kelvin - candidate[1]);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                bestMode = candidate[0];
+            }
+        }
+        return bestMode;
+    }
+
     private static boolean contains(int[] values, int value) {
         if (values == null) {
             return false;
