@@ -166,9 +166,19 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 			snprintf(camera_size_arg, sizeof(camera_size_arg), "--camera-size=%s", ctx->camera_size);
 		if (ctx->camera_fps > 0)
 			snprintf(camera_fps_arg, sizeof(camera_fps_arg), "--camera-fps=%d", ctx->camera_fps);
-		snprintf(control_codec_arg, sizeof(control_codec_arg),
-			 "--video-codec-options=__scrcpy_obs_camera_control_port:int=%u",
-			 (unsigned)control_port);
+
+		if (ctx->codec && strcmp(ctx->codec, "h265") == 0) {
+			/* H.265 encoders on Android may introduce additional buffering.
+			 * Keep the encoder realtime-oriented and explicitly forbid B-frames. */
+			snprintf(control_codec_arg, sizeof(control_codec_arg),
+				 "--video-codec-options=__scrcpy_obs_camera_control_port:int=%u,"
+				 "max-bframes:int=0,latency:int=0,priority:int=0",
+				 (unsigned)control_port);
+		} else {
+			snprintf(control_codec_arg, sizeof(control_codec_arg),
+				 "--video-codec-options=__scrcpy_obs_camera_control_port:int=%u",
+				 (unsigned)control_port);
+		}
 	}
 
 	char serial_arg[128] = {0};
@@ -288,7 +298,13 @@ static bool scrcpy_stream_healthy(struct scrcpy_src *ctx)
 {
 	if (!ctx->proc_alive || !scrcpy_proc_alive(&ctx->proc))
 		return false;
-	return scrcpy_reader_is_alive(ctx->reader);
+	if (!scrcpy_reader_is_alive(ctx->reader))
+		return false;
+
+	/* A USB/ADB disconnect may leave the child alive while its socket
+	 * remains open. Treat a stream with no decoded frame for a few
+	 * seconds as dead so the watchdog can restart it. */
+	return !scrcpy_reader_is_stale(ctx->reader, 3000);
 }
 
 static void *scrcpy_watchdog(void *data)
