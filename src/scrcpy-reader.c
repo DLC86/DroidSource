@@ -221,6 +221,11 @@ static enum AVPixelFormat get_hw_format(AVCodecContext *codec_ctx, const enum AV
 }
 #endif
 
+static enum video_colorspace obs_colorspace_from_av(const AVFrame *frame);
+static enum video_range_type obs_range_from_av(const AVFrame *frame);
+static uint8_t obs_trc_from_av(const AVFrame *frame);
+static bool rotate_frame_90_ccw(struct scrcpy_reader *r, const AVFrame *src);
+
 static bool open_decoder(struct scrcpy_reader *r, uint32_t codec_id, uint32_t width, uint32_t height)
 {
 	enum AVCodecID av_id = scrcpy_codec_to_avcodec(codec_id);
