@@ -1144,6 +1144,49 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_t *camera_wb = obs_properties_add_int_slider(
 		props, "camera_wb_kelvin", obs_module_text("CameraWhiteBalance"), 0, 12000, 100);
 
+	obs_property_t *buffering = obs_properties_add_list(
+		props, "video_buffer_ms", obs_module_text("Buffering"),
+		OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(buffering, "Automatic (OBS)", 0);
+	obs_property_list_add_int(buffering, "50 ms", 50);
+	obs_property_list_add_int(buffering, "100 ms", 100);
+	obs_property_list_add_int(buffering, "200 ms", 200);
+
+	obs_property_t *flip_vertical = obs_properties_add_bool(props, "flip_vertical", obs_module_text("FlipVertical"));
+	obs_property_t *hardware_decoding = obs_properties_add_bool(props, "hardware_decoding", obs_module_text("HardwareDecoding"));
+
+	obs_property_t *pixel_format = obs_properties_add_list(
+		props, "pixel_format", obs_module_text("PixelFormat"),
+		OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+	obs_property_list_add_string(pixel_format, "Automatic", "auto");
+	obs_property_list_add_string(pixel_format, "I420", "i420");
+	obs_property_list_add_string(pixel_format, "NV12", "nv12");
+
+	obs_property_t *color_space = obs_properties_add_list(
+		props, "color_space", obs_module_text("ColorSpace"),
+		OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+	obs_property_list_add_string(color_space, "Automatic", "auto");
+	obs_property_list_add_string(color_space, "Rec. 601", "601");
+	obs_property_list_add_string(color_space, "Rec. 709", "709");
+	obs_property_list_add_string(color_space, "sRGB", "srgb");
+	obs_property_list_add_string(color_space, "Rec. 2100 PQ", "2100pq");
+	obs_property_list_add_string(color_space, "Rec. 2100 HLG", "2100hlg");
+
+	obs_property_t *color_range = obs_properties_add_list(
+		props, "color_range", obs_module_text("ColorRange"),
+		OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+	obs_property_list_add_string(color_range, "Automatic", "auto");
+	obs_property_list_add_string(color_range, "Limited", "limited");
+	obs_property_list_add_string(color_range, "Full", "full");
+
+	obs_property_t *transfer = obs_properties_add_list(
+		props, "transfer", obs_module_text("Transfer"),
+		OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+	obs_property_list_add_string(transfer, "Automatic", "auto");
+	obs_property_list_add_string(transfer, "sRGB / SDR", "srgb");
+	obs_property_list_add_string(transfer, "HLG", "hlg");
+	obs_property_list_add_string(transfer, "PQ", "pq");
+
 	obs_properties_add_button2(props, "refresh_cameras", obs_module_text("RefreshCameras"), refresh_cameras_clicked,
 				   ctx);
 
@@ -1162,16 +1205,13 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_set_visible(camera_shutter, is_camera);
 	obs_property_set_visible(camera_focus, is_camera);
 	obs_property_set_visible(camera_wb, is_camera);
-
 	obs_property_set_visible(buffering, is_camera);
+	obs_property_set_visible(flip_vertical, is_camera);
+	obs_property_set_visible(hardware_decoding, is_camera);
 	obs_property_set_visible(pixel_format, is_camera);
 	obs_property_set_visible(color_space, is_camera);
 	obs_property_set_visible(color_range, is_camera);
 	obs_property_set_visible(transfer, is_camera);
-	obs_property_t *flip_vertical = obs_properties_get(props, "flip_vertical");
-	obs_property_t *hardware_decoding = obs_properties_get(props, "hardware_decoding");
-	if (flip_vertical) obs_property_set_visible(flip_vertical, is_camera);
-	if (hardware_decoding) obs_property_set_visible(hardware_decoding, is_camera);
 
 	populate_camera_fallbacks(camera_id, camera_size, camera_fps);
 
