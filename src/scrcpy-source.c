@@ -463,7 +463,8 @@ static bool camera_restart_required(const struct scrcpy_src *ctx, obs_data_t *se
 	    || ctx->camera_fps != (int)obs_data_get_int(settings, "camera_fps")
 	    || ctx->max_size != (int)obs_data_get_int(settings, "max_size")
 	    || ctx->bitrate_kbps != (int)obs_data_get_int(settings, "bitrate_kbps")
-	    || setting_string_changed(ctx->codec, obs_data_get_string(settings, "codec"));
+	    || setting_string_changed(ctx->codec, obs_data_get_string(settings, "codec"))
+	    || ctx->camera_apply_rotation != obs_data_get_bool(settings, "camera_apply_rotation");
 }
 
 static void src_update(void *data, obs_data_t *settings)
