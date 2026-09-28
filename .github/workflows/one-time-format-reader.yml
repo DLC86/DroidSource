@@ -25,7 +25,7 @@ jobs:
       - name: Format reader
         shell: bash
         run: |
-          clang-format-19 -style=file -i src/scrcpy-reader.c
+          /home/linuxbrew/.linuxbrew/opt/clang-format@19/bin/clang-format -style=file -i src/scrcpy-reader.c
 
       - name: Commit formatting
         shell: bash
