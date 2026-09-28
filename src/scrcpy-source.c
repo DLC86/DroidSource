@@ -318,10 +318,6 @@ static void load_settings(struct scrcpy_src *ctx, obs_data_t *settings)
 	ctx->flip_vertical = obs_data_get_bool(settings, "flip_vertical");
 	ctx->video_buffer_ms = (int)obs_data_get_int(settings, "video_buffer_ms");
 
-	ctx->pixel_format = bstrdup(obs_data_get_string(settings, "pixel_format"));
-	ctx->color_space = bstrdup(obs_data_get_string(settings, "color_space"));
-	ctx->color_range = bstrdup(obs_data_get_string(settings, "color_range"));
-	ctx->transfer = bstrdup(obs_data_get_string(settings, "transfer"));
 }
 
 static bool scrcpy_stream_healthy(struct scrcpy_src *ctx)
@@ -445,14 +441,9 @@ static bool camera_restart_required(const struct scrcpy_src *ctx, obs_data_t *se
 	    || ctx->max_size != (int)obs_data_get_int(settings, "max_size")
 	    || ctx->bitrate_kbps != (int)obs_data_get_int(settings, "bitrate_kbps")
 	    || setting_string_changed(ctx->codec, obs_data_get_string(settings, "codec"))
-	    || ctx->camera_apply_rotation != obs_data_get_bool(settings, "camera_apply_rotation")
 	    || ctx->hardware_decoding != obs_data_get_bool(settings, "hardware_decoding")
 	    || ctx->flip_vertical != obs_data_get_bool(settings, "flip_vertical")
-	    || ctx->video_buffer_ms != (int)obs_data_get_int(settings, "video_buffer_ms")
-	    || setting_string_changed(ctx->pixel_format, obs_data_get_string(settings, "pixel_format"))
-	    || setting_string_changed(ctx->color_space, obs_data_get_string(settings, "color_space"))
-	    || setting_string_changed(ctx->color_range, obs_data_get_string(settings, "color_range"))
-	    || setting_string_changed(ctx->transfer, obs_data_get_string(settings, "transfer"));
+	    || ctx->video_buffer_ms != (int)obs_data_get_int(settings, "video_buffer_ms");
 }
 
 static void src_update(void *data, obs_data_t *settings)
@@ -471,12 +462,13 @@ static void src_update(void *data, obs_data_t *settings)
 		if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0) {
 			if (!ctx->camera_control && ctx->serial && *ctx->serial && ctx->camera_control_port != 0)
 				ctx->camera_control = scrcpy_camera_control_create(ctx->serial, ctx->camera_control_port);
-			if (ctx->camera_control)
-				(void)scrcpy_camera_control_apply(ctx->camera_control, ctx->camera_zoom, ctx->camera_torch,
-								ctx->camera_iso, ctx->camera_shutter_us,
-								ctx->camera_focus_distance, ctx->camera_wb_kelvin);
 		}
 	}
+
+	if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0 && ctx->camera_control)
+		(void)scrcpy_camera_control_apply(ctx->camera_control, ctx->camera_zoom, ctx->camera_torch,
+							ctx->camera_iso, ctx->camera_shutter_us,
+							ctx->camera_focus_distance, ctx->camera_wb_kelvin);
 
 	os_atomic_set_bool(&ctx->updating, false);
 	pthread_mutex_unlock(&ctx->state_mutex);
