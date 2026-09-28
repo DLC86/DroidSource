@@ -32,6 +32,8 @@
 
 #define SCRCPY_EXE_NAME "scrcpy.exe"
 
+static void refresh_camera_capabilities_cache(const char *serial, bool force);
+
 struct scrcpy_src {
 	obs_source_t *source;
 	scrcpy_proc_t proc;
@@ -536,7 +538,6 @@ static char *g_camera_capabilities_serial;
 static char *g_camera_capabilities_output;
 static pthread_mutex_t g_camera_capabilities_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-static void refresh_camera_capabilities_cache(const char *serial, bool force);
 
 static bool parse_camera_id_line(const char *line, char *id, size_t id_size, char *label, size_t label_size, int *fps,
 				 size_t *fps_count, float *focus_max, int *wb_min, int *wb_max)
