@@ -22,7 +22,6 @@ typedef int socklen_t;
 #include <libavcodec/avcodec.h>
 #include <libavutil/avutil.h>
 #include <libavutil/pixfmt.h>
-#include <libavutil/hwdevice.h>
 #include <libavutil/hwcontext.h>
 #include <libswscale/swscale.h>
 
