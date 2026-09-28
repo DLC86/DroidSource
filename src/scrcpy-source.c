@@ -541,7 +541,8 @@ static pthread_mutex_t g_camera_capabilities_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 
 static bool parse_camera_id_line(const char *line, char *id, size_t id_size, char *label, size_t label_size, int *fps,
-				 size_t *fps_count, float *focus_max, int *wb_min, int *wb_max, int *sensor_orientation, bool *wb_manual)
+				 size_t *fps_count, float *focus_max, float *zoom_min, float *zoom_max, int *wb_min, int *wb_max,
+				 bool *wb_manual)
 {
 	const char *p = strstr(line, "--camera-id=");
 	if (!p)
@@ -627,11 +628,19 @@ static bool parse_camera_id_line(const char *line, char *id, size_t id_size, cha
 		}
 	}
 
-	if (sensor_orientation) {
-		*sensor_orientation = 0;
-		const char *orientation_start = strstr(line, "sensor-orientation=");
-		if (orientation_start)
-			sscanf(orientation_start + strlen("sensor-orientation="), "%d", sensor_orientation);
+
+	if (zoom_min && zoom_max) {
+		*zoom_min = 1.0f;
+		*zoom_max = 1.0f;
+		const char *zoom_start = strstr(line, "zoom-range=[");
+		if (zoom_start) {
+			zoom_start += strlen("zoom-range=[");
+			if (sscanf(zoom_start, "%f, %f", zoom_min, zoom_max) != 2 ||
+			    *zoom_min <= 0.0f || *zoom_max < *zoom_min) {
+				*zoom_min = 1.0f;
+				*zoom_max = 1.0f;
+			}
+		}
 	}
 
 	if (wb_min && wb_max) {
@@ -673,7 +682,7 @@ static bool parse_selected_camera_sizes(const char *output, const char *selected
 		line_copy[line_len] = '\0';
 
 		char camera_id[64];
-		if (parse_camera_id_line(line_copy, camera_id, sizeof(camera_id), NULL, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL)) {
+		if (parse_camera_id_line(line_copy, camera_id, sizeof(camera_id), NULL, 0, NULL, NULL, NULL, NULL, NULL, NULL)) {
 			in_camera = strcmp(camera_id, selected_id) == 0;
 			high_speed = false;
 		} else if (in_camera) {
@@ -836,6 +845,8 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 	int selected_fps[64];
 	size_t selected_fps_count = 0;
 	float selected_focus_max = 0.0f;
+	float selected_zoom_min = 1.0f;
+	float selected_zoom_max = 1.0f;
 	int selected_wb_min = 0;
 	int selected_wb_max = 0;
 	bool selected_wb_manual = false;
@@ -860,12 +871,14 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 		int fps[32];
 		size_t fps_count = 0;
 		float focus_max = 0.0f;
+		float zoom_min = 1.0f;
+		float zoom_max = 1.0f;
 		int wb_min = 0;
 		int wb_max = 0;
 		int sensor_orientation = 0;
 		bool wb_manual = false;
 		if (parse_camera_id_line(line_copy, id, sizeof(id), label, sizeof(label),
-					 fps, &fps_count, &focus_max, &wb_min, &wb_max, &sensor_orientation, &wb_manual)) {
+						 fps, &fps_count, &focus_max, &zoom_min, &zoom_max, &wb_min, &wb_max, &wb_manual)) {
 			in_selected_camera = selected_id[0] && strcmp(selected_id, id) == 0;
 			if (!first_id[0]) {
 				snprintf(first_id, sizeof(first_id), "%s", id);
@@ -880,14 +893,16 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 			}
 			if (in_selected_camera && focus_max > 0.0f)
 				selected_focus_max = focus_max;
+			if (in_selected_camera && zoom_max > zoom_min) {
+				selected_zoom_min = zoom_min;
+				selected_zoom_max = zoom_max;
+			}
 			if (in_selected_camera && wb_min > 0 && wb_max > wb_min) {
 				selected_wb_min = wb_min;
 				selected_wb_max = wb_max;
 			}
 			if (in_selected_camera && wb_manual)
 				selected_wb_manual = true;
-			if (in_selected_camera)
-				obs_data_set_int(settings, "camera_sensor_orientation", sensor_orientation);
 		}
 
 		if (!end)
@@ -943,6 +958,16 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 		if (!focus_supported || current_focus > selected_focus_max)
 			obs_data_set_double(settings, "camera_focus_distance",
 					   focus_supported ? selected_focus_max : 0.0);
+	}
+
+	obs_property_t *zoom_prop = obs_properties_get(props, "camera_zoom");
+	if (zoom_prop) {
+		float zoom_min = selected_zoom_max > selected_zoom_min ? selected_zoom_min : 1.0f;
+		float zoom_max = selected_zoom_max > selected_zoom_min ? selected_zoom_max : 10.0f;
+		obs_property_float_set_limits(zoom_prop, zoom_min, zoom_max, 0.05);
+		double current_zoom = obs_data_get_double(settings, "camera_zoom");
+		if (current_zoom < zoom_min || current_zoom > zoom_max)
+			obs_data_set_double(settings, "camera_zoom", zoom_min);
 	}
 
 	obs_property_t *wb_prop = obs_properties_get(props, "camera_wb_kelvin");
