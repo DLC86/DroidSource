@@ -1034,7 +1034,9 @@ static bool video_source_modified(obs_properties_t *props, obs_property_t *p, ob
 		obs_property_set_visible(camera_id, is_camera);
 	const char *keys[] = {"camera_size", "camera_fps", "camera_zoom",
 			      "camera_torch", "camera_iso", "camera_shutter_us",
-			      "camera_focus_distance", "camera_wb_kelvin"};
+			      "camera_focus_distance", "camera_wb_kelvin",
+			      "video_buffer_ms", "flip_vertical", "hardware_decoding",
+			      "pixel_format", "color_space", "color_range", "transfer"};
 	for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
 		obs_property_t *prop = obs_properties_get(props, keys[i]);
 		if (prop)
