@@ -246,7 +246,6 @@ patch("server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java", [
         """import android.hardware.camera2.params.OutputConfiguration;
 import android.hardware.camera2.params.SessionConfiguration;
 import android.hardware.camera2.params.StreamConfigurationMap;
-import android.util.Range;
 """,
         """import android.hardware.camera2.params.ColorSpaceTransform;
 import android.hardware.camera2.params.OutputConfiguration;
