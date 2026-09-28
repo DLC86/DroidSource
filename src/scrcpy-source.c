@@ -439,6 +439,7 @@ static bool camera_restart_required(const struct scrcpy_src *ctx, obs_data_t *se
 	    || setting_string_changed(ctx->codec, obs_data_get_string(settings, "codec"))
 	    || ctx->hardware_decoding != obs_data_get_bool(settings, "hardware_decoding")
 	    || ctx->flip_vertical != obs_data_get_bool(settings, "flip_vertical")
+	    || ctx->portrait_mode != obs_data_get_bool(settings, "portrait_mode")
 	    || ctx->video_buffer_ms != (int)obs_data_get_int(settings, "video_buffer_ms");
 }
 
@@ -489,10 +490,6 @@ static void src_get_defaults(obs_data_t *settings)
 	obs_data_set_default_bool(settings, "hardware_decoding", true);
 	obs_data_set_default_bool(settings, "flip_vertical", false);
 	obs_data_set_default_int(settings, "video_buffer_ms", 0);
-	obs_data_set_default_string(settings, "pixel_format", "auto");
-	obs_data_set_default_string(settings, "color_space", "auto");
-	obs_data_set_default_string(settings, "color_range", "auto");
-	obs_data_set_default_string(settings, "transfer", "auto");
 }
 
 static void populate_shutter_list(obs_property_t *prop, int fps);
@@ -863,7 +860,6 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 		float zoom_max = 1.0f;
 		int wb_min = 0;
 		int wb_max = 0;
-		int sensor_orientation = 0;
 		bool wb_manual = false;
 		if (parse_camera_id_line(line_copy, id, sizeof(id), label, sizeof(label),
 						 fps, &fps_count, &focus_max, &zoom_min, &zoom_max, &wb_min, &wb_max, &wb_manual)) {
