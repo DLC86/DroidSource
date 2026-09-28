@@ -464,7 +464,14 @@ static bool camera_restart_required(const struct scrcpy_src *ctx, obs_data_t *se
 	    || ctx->max_size != (int)obs_data_get_int(settings, "max_size")
 	    || ctx->bitrate_kbps != (int)obs_data_get_int(settings, "bitrate_kbps")
 	    || setting_string_changed(ctx->codec, obs_data_get_string(settings, "codec"))
-	    || ctx->camera_apply_rotation != obs_data_get_bool(settings, "camera_apply_rotation");
+	    || ctx->camera_apply_rotation != obs_data_get_bool(settings, "camera_apply_rotation")
+	    || ctx->hardware_decoding != obs_data_get_bool(settings, "hardware_decoding")
+	    || ctx->flip_vertical != obs_data_get_bool(settings, "flip_vertical")
+	    || ctx->video_buffer_ms != (int)obs_data_get_int(settings, "video_buffer_ms")
+	    || setting_string_changed(ctx->pixel_format, obs_data_get_string(settings, "pixel_format"))
+	    || setting_string_changed(ctx->color_space, obs_data_get_string(settings, "color_space"))
+	    || setting_string_changed(ctx->color_range, obs_data_get_string(settings, "color_range"))
+	    || setting_string_changed(ctx->transfer, obs_data_get_string(settings, "transfer"));
 }
 
 static void src_update(void *data, obs_data_t *settings)
