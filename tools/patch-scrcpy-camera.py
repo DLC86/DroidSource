@@ -4,6 +4,7 @@ from pathlib import Path
 ROOT = Path("scrcpy")
 CAMERA_CONTROL_OPTION = "__scrcpy_obs_camera_control_port"
 
+
 def patch(path, replacements):
     p = ROOT / path
     s = p.read_text(encoding="utf-8")
@@ -13,31 +14,37 @@ def patch(path, replacements):
         s = s.replace(old, new, 1)
     p.write_text(s, encoding="utf-8")
 
+
 patch("server/src/main/java/com/genymobile/scrcpy/Options.java", [
-("""public class Options {
+    (
+        """public class Options {
 
     private Ln.Level logLevel = Ln.Level.DEBUG;
 """,
-"""public class Options {
+        """public class Options {
 
     private static final String CAMERA_CONTROL_OPTION = "__scrcpy_obs_camera_control_port";
 
     private Ln.Level logLevel = Ln.Level.DEBUG;
-"""),
-("""    private boolean cameraTorch;
+""",
+    ),
+    (
+        """    private boolean cameraTorch;
     private boolean showTouches;
 """,
-"""    private boolean cameraTorch;
+        """    private boolean cameraTorch;
     private int cameraControlPort;
     private boolean showTouches;
-"""),
-("""    public boolean getCameraTorch() {
+""",
+    ),
+    (
+        """    public boolean getCameraTorch() {
         return cameraTorch;
     }
 
     public boolean getShowTouches() {
 """,
-"""    public boolean getCameraTorch() {
+        """    public boolean getCameraTorch() {
         return cameraTorch;
     }
 
@@ -46,12 +53,14 @@ patch("server/src/main/java/com/genymobile/scrcpy/Options.java", [
     }
 
     public boolean getShowTouches() {
-"""),
-("""                case "video_codec_options":
+""",
+    ),
+    (
+        """                case "video_codec_options":
                     options.videoCodecOptions = CodecOption.parse(value);
                     break;
 """,
-"""                case "video_codec_options": {
+        """                case "video_codec_options": {
                     List<CodecOption> codecOptions = CodecOption.parse(value);
                     if (codecOptions != null) {
                         for (int j = 0; j < codecOptions.size();) {
@@ -72,15 +81,14 @@ patch("server/src/main/java/com/genymobile/scrcpy/Options.java", [
                     options.videoCodecOptions = codecOptions;
                     break;
                 }
-"""),
+""",
+    ),
 ])
 
+
 patch("server/src/main/java/com/genymobile/scrcpy/util/LogUtils.java", [
-("""                            builder.append(" (").append(getHwCodecType(info)).append(')');
-""",
-"""                            builder.append(" (").append(getHwCodecType(info)).append(')');
-"""),
-("""                    if (Build.VERSION.SDK_INT >= AndroidVersions.API_30_ANDROID_11) {
+    (
+        """                    if (Build.VERSION.SDK_INT >= AndroidVersions.API_30_ANDROID_11) {
                         try {
                             Range<Float> zoomRange = characteristics.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE);
                             if (zoomRange != null) {
@@ -94,7 +102,7 @@ patch("server/src/main/java/com/genymobile/scrcpy/util/LogUtils.java", [
 
                     builder.append(')');
 """,
-"""                    if (Build.VERSION.SDK_INT >= AndroidVersions.API_30_ANDROID_11) {
+        """                    if (Build.VERSION.SDK_INT >= AndroidVersions.API_30_ANDROID_11) {
                         try {
                             Range<Float> zoomRange = characteristics.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE);
                             if (zoomRange != null) {
@@ -108,27 +116,34 @@ patch("server/src/main/java/com/genymobile/scrcpy/util/LogUtils.java", [
 
                     Float focusMax = characteristics.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE);
                     if (focusMax != null && focusMax > 0) {
-                        builder.append(", focus-range=[0, ").append(String.format(java.util.Locale.ROOT, "%.3f", focusMax)).append(']');
+                        builder.append(", focus-range=[0, ")
+                                .append(String.format(java.util.Locale.ROOT, "%.3f", focusMax))
+                                .append(']');
                     }
 
                     builder.append(')');
-"""),
+""",
+    ),
 ])
 
+
 patch("server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java", [
-("""import android.hardware.camera2.params.OutputConfiguration;
+    (
+        """import android.hardware.camera2.params.OutputConfiguration;
 import android.hardware.camera2.params.SessionConfiguration;
 import android.hardware.camera2.params.StreamConfigurationMap;
 """,
-"""import android.hardware.camera2.params.OutputConfiguration;
+        """import android.hardware.camera2.params.OutputConfiguration;
 import android.hardware.camera2.params.RggbChannelVector;
 import android.hardware.camera2.params.SessionConfiguration;
 import android.hardware.camera2.params.StreamConfigurationMap;
-"""),
-("""    private final boolean initialTorch;
+""",
+    ),
+    (
+        """    private final boolean initialTorch;
     private float zoom;
 """,
-"""    private final boolean initialTorch;
+        """    private final boolean initialTorch;
     private final int cameraControlPort;
     private float zoom;
     private boolean torchEnabled;
@@ -138,29 +153,34 @@ import android.hardware.camera2.params.StreamConfigurationMap;
     private int whiteBalanceKelvin;
 
     private CameraControlServer cameraControlServer;
-"""),
-("""    private Range<Float> zoomRange;
+""",
+    ),
+    (
+        """    private Range<Float> zoomRange;
 
     private AffineMatrix transform;
 """,
-"""    private Range<Float> zoomRange;
+        """    private Range<Float> zoomRange;
     private CameraCharacteristics cameraCharacteristics;
 
     private AffineMatrix transform;
-"""),
-("""        this.initialTorch = options.getCameraTorch();
+""",
+    ),
+    (
+        """        this.initialTorch = options.getCameraTorch();
         this.zoom = options.getCameraZoom();
 """,
-"""        this.initialTorch = options.getCameraTorch();
+        """        this.initialTorch = options.getCameraTorch();
         this.cameraControlPort = options.getCameraControlPort();
         this.zoom = options.getCameraZoom();
         this.torchEnabled = initialTorch;
-"""),
-("""            Ln.i("Using camera '" + cameraId + "'");
-            cameraDevice = openCamera(cameraId);
-        } catch (CameraAccessException | InterruptedException e) {
 """,
-"""            Ln.i("Using camera '" + cameraId + "'");
+    ),
+    (
+        """            Ln.i("Using camera '" + cameraId + "'");
+            cameraDevice = openCamera(cameraId);
+""",
+        """            Ln.i("Using camera '" + cameraId + "'");
 
             if (cameraControlPort > 0) {
                 try {
@@ -173,16 +193,19 @@ import android.hardware.camera2.params.StreamConfigurationMap;
             }
 
             cameraDevice = openCamera(cameraId);
-        } catch (CameraAccessException | InterruptedException e) {
-"""),
-("""                    CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
+""",
+    ),
+    (
+        """                    CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
                     zoomRange = characteristics.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE);
 """,
-"""                    CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
+        """                    CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
                     zoomRange = characteristics.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE);
                     cameraCharacteristics = characteristics;
-"""),
-("""                    if (initialTorch) {
+""",
+    ),
+    (
+        """                    if (initialTorch) {
                         Ln.i("Turn camera torch on");
                         requestBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH);
                     }
@@ -194,69 +217,30 @@ import android.hardware.camera2.params.StreamConfigurationMap;
 
                     CaptureRequest request = requestBuilder.build();
 """,
-"""                    applyCurrentCameraSettings();
+        """                    applyCurrentCameraSettings();
 
                     CaptureRequest request = requestBuilder.build();
-"""),
-("""    @Override
+""",
+    ),
+    (
+        """    @Override
     public void release() {
         if (cameraDevice != null) {
 """,
-"""    @Override
+        """    @Override
     public void release() {
         if (cameraControlServer != null) {
             cameraControlServer.stop();
             cameraControlServer = null;
         }
         if (cameraDevice != null) {
-"""),
-("""    public void setTorchEnabled(boolean enabled) {
-        cameraHandler.post(() -> {
-            assertCameraThread();
-            torchEnabled = enabled;
-            try {
-                ServiceManager.getCameraManager().setTorchMode(cameraId, enabled);
-                Ln.i("Camera torch " + (enabled ? "enabled" : "disabled") + " via CameraManager");
-            } catch (CameraAccessException | IllegalArgumentException e) {
-                Ln.w("CameraManager torch control failed: " + e.getMessage());
-                if (currentSession != null && requestBuilder != null) {
-                    try {
-                        requestBuilder.set(CaptureRequest.FLASH_MODE,
-                                enabled ? CaptureRequest.FLASH_MODE_TORCH : CaptureRequest.FLASH_MODE_OFF);
-                        setRepeatingRequest(currentSession, requestBuilder.build());
-                    } catch (CameraAccessException | IllegalArgumentException | IllegalStateException ex) {
-                        Ln.e("Camera request torch control failed: " + ex.getMessage());
-                    }
-                }
-            }
-        });
-    }
-"""
-),
-"""    public void setTorchEnabled(boolean enabled) {
-        cameraHandler.post(() -> {
-            assertCameraThread();
-            torchEnabled = enabled;
-            if (currentSession != null && requestBuilder != null) {
-                try {
-                    requestBuilder.set(CaptureRequest.FLASH_MODE,
-                            enabled ? CaptureRequest.FLASH_MODE_TORCH : CaptureRequest.FLASH_MODE_OFF);
-                    setRepeatingRequest(currentSession, requestBuilder.build());
-                } catch (CameraAccessException e) {
-                    Ln.e("Camera error while setting torch: " + e.getMessage());
-                }
-            }
-        });
-    }
-"""),
+""",
+    ),
 ])
 
 
-
-# Add the runtime camera controls to the pristine scrcpy 4.0 CameraCapture.
 p = ROOT / "server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java"
 s = p.read_text(encoding="utf-8")
-
 marker = """    @TargetApi(AndroidVersions.API_30_ANDROID_11)
     private void zoom(boolean in) {
 """
@@ -297,14 +281,10 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
 
         Boolean flashAvailable =
                 cameraCharacteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
-        if (torchEnabled && Boolean.TRUE.equals(flashAvailable)) {
-            requestBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH);
-        } else {
-            requestBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF);
-            if (torchEnabled) {
-                Ln.w("Torch requested but this camera reports no flash unit");
-            }
-        }
+        requestBuilder.set(CaptureRequest.FLASH_MODE,
+                torchEnabled && Boolean.TRUE.equals(flashAvailable)
+                        ? CaptureRequest.FLASH_MODE_TORCH
+                        : CaptureRequest.FLASH_MODE_OFF);
     }
 
     private void clearManualExposureKeys() {
@@ -379,9 +359,10 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
             return;
         }
 
+        int[] priorityModes = cameraCharacteristics.get(
+                CameraCharacteristics.CONTROL_AE_AVAILABLE_PRIORITY_MODES);
+
         if (hasIso) {
-            int[] priorityModes = cameraCharacteristics.get(
-                    CameraCharacteristics.CONTROL_AE_AVAILABLE_PRIORITY_MODES);
             if (!contains(priorityModes,
                     CaptureRequest.CONTROL_AE_PRIORITY_MODE_SENSOR_SENSITIVITY_PRIORITY)) {
                 Ln.w("Sensor-sensitivity AE priority mode is unavailable");
@@ -400,8 +381,6 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
             requestBuilder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, null);
             requestBuilder.set(CaptureRequest.SENSOR_FRAME_DURATION, null);
         } else {
-            int[] priorityModes = cameraCharacteristics.get(
-                    CameraCharacteristics.CONTROL_AE_AVAILABLE_PRIORITY_MODES);
             if (!contains(priorityModes,
                     CaptureRequest.CONTROL_AE_PRIORITY_MODE_SENSOR_EXPOSURE_TIME_PRIORITY)) {
                 Ln.w("Sensor-exposure-time AE priority mode is unavailable");
@@ -461,6 +440,8 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
             if (android.os.Build.VERSION.SDK_INT >= 36) {
                 requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TEMPERATURE, null);
                 requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TINT, null);
+                requestBuilder.set(CaptureRequest.COLOR_CORRECTION_MODE,
+                        CaptureRequest.COLOR_CORRECTION_MODE_FAST);
             }
             return;
         }
@@ -551,11 +532,13 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
         float redGain = (float) (green / red);
         float blueGain = (float) (green / blue);
         float maxGain = Math.max(redGain, blueGain);
+
         if (maxGain > 8f) {
             float scale = 8f / maxGain;
             redGain *= scale;
             blueGain *= scale;
         }
+
         return new RggbChannelVector(redGain, 1f, 1f, blueGain);
     }
 
@@ -573,11 +556,11 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
 
 '''
 if marker not in s:
-    raise SystemExit("CameraCapture zoom marker not found")
+    raise SystemExit("CameraCapture insertion marker not found")
 s = s.replace(marker, methods + marker, 1)
 p.write_text(s, encoding="utf-8")
 
-# Replace the CameraControlServer generator with the final coalesced protocol.
+
 p = ROOT / "server/src/main/java/com/genymobile/scrcpy/video/CameraControlServer.java"
 p.write_text("""package com.genymobile.scrcpy.video;
 
