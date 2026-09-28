@@ -9,6 +9,7 @@
 #include "scrcpy-adb.h"
 #include "scrcpy-process.h"
 #include "scrcpy-reader.h"
+#include "scrcpy-camera-control.h"
 
 #include <obs-module.h>
 #include <plugin-support.h>
@@ -34,6 +35,8 @@ struct scrcpy_src {
 	bool proc_alive;
 	scrcpy_reader_t *reader;
 	uint16_t port;
+	uint16_t camera_control_port;
+	scrcpy_camera_control_t *camera_control;
 
 	char *serial;
 	char *video_source;
@@ -46,7 +49,7 @@ struct scrcpy_src {
 	int camera_iso;
 	int camera_shutter_us;
 	float camera_focus_distance;
-	char *camera_awb_mode;
+	int camera_wb_kelvin;
 	int max_size;
 	int bitrate_kbps;
 	char *codec;
@@ -104,12 +107,25 @@ static bool pick_ephemeral_port(uint16_t *out)
 
 static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 {
+	UNUSED_PARAMETER(settings);
+
 	uint16_t port = 0;
 	if (!pick_ephemeral_port(&port)) {
-		obs_log(LOG_ERROR, "scrcpy-source: could not pick port");
+		obs_log(LOG_ERROR, "scrcpy-source: could not pick video port");
 		return;
 	}
 	ctx->port = port;
+
+	uint16_t control_port = 0;
+	if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0) {
+		if (!pick_ephemeral_port(&control_port)) {
+			obs_log(LOG_ERROR, "scrcpy-source: could not pick camera control port");
+			return;
+		}
+		ctx->camera_control_port = control_port;
+	} else {
+		ctx->camera_control_port = 0;
+	}
 
 	char *bin_dir = get_bin_dir();
 	if (!bin_dir) {
@@ -117,19 +133,16 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 				   "(set SCRCPY_OBS_BIN_DIR)");
 		return;
 	}
-
 	char *exe_path = path_join(bin_dir, SCRCPY_EXE_NAME);
+
 	char bitrate_arg[64];
 	snprintf(bitrate_arg, sizeof(bitrate_arg), "--video-bit-rate=%dK", ctx->bitrate_kbps);
-
 	char max_size_arg[64] = {0};
 	if (ctx->max_size > 0)
 		snprintf(max_size_arg, sizeof(max_size_arg), "--max-size=%d", ctx->max_size);
-
 	char codec_arg[64] = {0};
 	if (ctx->codec && *ctx->codec)
 		snprintf(codec_arg, sizeof(codec_arg), "--video-codec=%s", ctx->codec);
-
 	char source_arg[64] = {0};
 	if (ctx->video_source && *ctx->video_source)
 		snprintf(source_arg, sizeof(source_arg), "--video-source=%s", ctx->video_source);
@@ -137,91 +150,59 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 	char camera_arg[64] = {0};
 	char camera_size_arg[64] = {0};
 	char camera_fps_arg[64] = {0};
-	char camera_zoom_arg[64] = {0};
-	char camera_torch_arg[64] = {0};
-	char camera_iso_arg[64] = {0};
-	char camera_shutter_arg[64] = {0};
-	char camera_focus_arg[64] = {0};
-	char camera_awb_arg[64] = {0};
+	char camera_high_speed_arg[64] = {0};
+	char control_codec_arg[160] = {0};
 	if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0) {
 		snprintf(camera_arg, sizeof(camera_arg), "--camera-id=%s", ctx->camera_id ? ctx->camera_id : "0");
 		if (ctx->camera_size && *ctx->camera_size)
 			snprintf(camera_size_arg, sizeof(camera_size_arg), "--camera-size=%s", ctx->camera_size);
 		if (ctx->camera_fps > 0)
 			snprintf(camera_fps_arg, sizeof(camera_fps_arg), "--camera-fps=%d", ctx->camera_fps);
-		if (ctx->camera_zoom > 0)
-			snprintf(camera_zoom_arg, sizeof(camera_zoom_arg), "--camera-zoom=%.3f", ctx->camera_zoom);
-		if (ctx->camera_torch)
-			snprintf(camera_torch_arg, sizeof(camera_torch_arg), "--camera-torch=true");
-		if (ctx->camera_iso > 0)
-			snprintf(camera_iso_arg, sizeof(camera_iso_arg), "--camera-iso=%d", ctx->camera_iso);
-		if (ctx->camera_shutter_us > 0)
-			snprintf(camera_shutter_arg, sizeof(camera_shutter_arg), "--camera-shutter=%d",
-				 ctx->camera_shutter_us);
-		if (ctx->camera_focus_distance > 0)
-			snprintf(camera_focus_arg, sizeof(camera_focus_arg), "--camera-focus=%.3f",
-				 ctx->camera_focus_distance);
-		if (ctx->camera_awb_mode && *ctx->camera_awb_mode && strcmp(ctx->camera_awb_mode, "auto") != 0)
-			snprintf(camera_awb_arg, sizeof(camera_awb_arg), "--camera-awb=%s", ctx->camera_awb_mode);
+		if (ctx->camera_high_speed)
+			snprintf(camera_high_speed_arg, sizeof(camera_high_speed_arg), "--camera-high-speed=true");
+		snprintf(control_codec_arg, sizeof(control_codec_arg),
+			 "--video-codec-options=__scrcpy_obs_camera_control_port:int=%u",
+			 (unsigned)control_port);
 	}
 
 	char serial_arg[128] = {0};
 	if (ctx->serial && *ctx->serial)
 		snprintf(serial_arg, sizeof(serial_arg), "--serial=%s", ctx->serial);
 
-	const char *argv[32];
+	const char *argv[24];
 	size_t n = 0;
 	argv[n++] = "--no-window";
 	argv[n++] = "--no-audio";
 	argv[n++] = "--no-control";
 	argv[n++] = bitrate_arg;
-	/* Tell patched scrcpy to listen on this port and stream raw video
-	 * packets (12-byte header + NAL) to the first accepted client. */
+
 	struct dstr sink_arg = {0};
 	dstr_printf(&sink_arg, "--raw-video-tcp=%u", (unsigned)port);
 	argv[n++] = sink_arg.array;
-	if (max_size_arg[0])
-		argv[n++] = max_size_arg;
-	if (codec_arg[0])
-		argv[n++] = codec_arg;
-	if (source_arg[0])
-		argv[n++] = source_arg;
-	if (camera_arg[0])
-		argv[n++] = camera_arg;
-	if (camera_size_arg[0])
-		argv[n++] = camera_size_arg;
-	if (camera_fps_arg[0])
-		argv[n++] = camera_fps_arg;
-	if (camera_zoom_arg[0])
-		argv[n++] = camera_zoom_arg;
-	if (camera_torch_arg[0])
-		argv[n++] = camera_torch_arg;
-	if (camera_iso_arg[0])
-		argv[n++] = camera_iso_arg;
-	if (camera_shutter_arg[0])
-		argv[n++] = camera_shutter_arg;
-	if (camera_focus_arg[0])
-		argv[n++] = camera_focus_arg;
-	if (camera_awb_arg[0])
-		argv[n++] = camera_awb_arg;
-	if (serial_arg[0])
-		argv[n++] = serial_arg;
+	if (max_size_arg[0]) argv[n++] = max_size_arg;
+	if (codec_arg[0]) argv[n++] = codec_arg;
+	if (source_arg[0]) argv[n++] = source_arg;
+	if (camera_arg[0]) argv[n++] = camera_arg;
+	if (camera_size_arg[0]) argv[n++] = camera_size_arg;
+	if (camera_fps_arg[0]) argv[n++] = camera_fps_arg;
+	if (camera_high_speed_arg[0]) argv[n++] = camera_high_speed_arg;
+	if (control_codec_arg[0]) argv[n++] = control_codec_arg;
+	if (serial_arg[0]) argv[n++] = serial_arg;
 	argv[n] = NULL;
 
 	char *log_path = NULL;
 	{
 		const char *tmp = getenv("TEMP");
-		if (!tmp || !*tmp)
-			tmp = getenv("TMP");
-		if (!tmp || !*tmp)
-			tmp = ".";
+		if (!tmp || !*tmp) tmp = getenv("TMP");
+		if (!tmp || !*tmp) tmp = ".";
 		struct dstr lp = {0};
 		dstr_printf(&lp, "%s/scrcpy-obs-child.log", tmp);
 		log_path = lp.array;
 	}
 
-	obs_log(LOG_INFO, "scrcpy-source: spawning %s (port=%u, log=%s)", exe_path, (unsigned)port,
-		log_path ? log_path : "(none)");
+	obs_log(LOG_INFO,
+		"scrcpy-source: spawning %s (video-port=%u, control-port=%u, log=%s)",
+		exe_path, (unsigned)port, (unsigned)control_port, log_path ? log_path : "(none)");
 
 	if (scrcpy_proc_spawn(&ctx->proc, exe_path, argv, log_path)) {
 		ctx->proc_alive = true;
@@ -232,6 +213,17 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 
 	ctx->reader = scrcpy_reader_create(ctx->source, port);
 
+	if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0 &&
+	    control_port != 0 && ctx->serial && *ctx->serial) {
+		ctx->camera_control = scrcpy_camera_control_create(ctx->serial, control_port);
+		if (ctx->camera_control &&
+		    !scrcpy_camera_control_apply(ctx->camera_control, ctx->camera_zoom, ctx->camera_torch,
+							ctx->camera_iso, ctx->camera_shutter_us,
+							ctx->camera_focus_distance, ctx->camera_wb_kelvin)) {
+			obs_log(LOG_WARNING, "scrcpy-source: camera control connection not ready");
+		}
+	}
+
 	dstr_free(&sink_arg);
 	bfree(exe_path);
 	bfree(bin_dir);
@@ -239,6 +231,11 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 
 static void stop_scrcpy(struct scrcpy_src *ctx)
 {
+	if (ctx->camera_control) {
+		scrcpy_camera_control_destroy(ctx->camera_control);
+		ctx->camera_control = NULL;
+	}
+	ctx->camera_control_port = 0;
 	if (ctx->reader) {
 		scrcpy_reader_destroy(ctx->reader);
 		ctx->reader = NULL;
@@ -257,7 +254,6 @@ static void load_settings(struct scrcpy_src *ctx, obs_data_t *settings)
 	bfree(ctx->camera_id);
 	bfree(ctx->codec);
 	bfree(ctx->camera_size);
-	bfree(ctx->camera_awb_mode);
 	ctx->serial = bstrdup(obs_data_get_string(settings, "serial"));
 	ctx->video_source = bstrdup(obs_data_get_string(settings, "video_source"));
 	ctx->codec = bstrdup(obs_data_get_string(settings, "codec"));
@@ -279,7 +275,7 @@ static void load_settings(struct scrcpy_src *ctx, obs_data_t *settings)
 	ctx->camera_iso = (int)obs_data_get_int(settings, "camera_iso");
 	ctx->camera_shutter_us = (int)obs_data_get_int(settings, "camera_shutter_us");
 	ctx->camera_focus_distance = (float)obs_data_get_double(settings, "camera_focus_distance");
-	ctx->camera_awb_mode = bstrdup(obs_data_get_string(settings, "camera_awb_mode"));
+	ctx->camera_wb_kelvin = (int)obs_data_get_int(settings, "camera_wb_kelvin");
 	ctx->max_size = (int)obs_data_get_int(settings, "max_size");
 	ctx->bitrate_kbps = (int)obs_data_get_int(settings, "bitrate_kbps");
 }
@@ -315,16 +311,48 @@ static void src_destroy(void *data)
 	bfree(ctx->video_source);
 	bfree(ctx->codec);
 	bfree(ctx->camera_size);
-	bfree(ctx->camera_awb_mode);
 	bfree(ctx);
+}
+
+static bool setting_string_changed(const char *old_value, const char *new_value)
+{
+	if (!old_value) old_value = "";
+	if (!new_value) new_value = "";
+	return strcmp(old_value, new_value) != 0;
+}
+
+static bool camera_restart_required(const struct scrcpy_src *ctx, obs_data_t *settings)
+{
+	return setting_string_changed(ctx->serial, obs_data_get_string(settings, "serial"))
+	    || setting_string_changed(ctx->video_source, obs_data_get_string(settings, "video_source"))
+	    || setting_string_changed(ctx->camera_id, obs_data_get_string(settings, "camera_id"))
+	    || setting_string_changed(ctx->camera_size, obs_data_get_string(settings, "camera_size"))
+	    || ctx->camera_fps != (int)obs_data_get_int(settings, "camera_fps")
+	    || ctx->camera_high_speed != obs_data_get_bool(settings, "camera_high_speed")
+	    || ctx->max_size != (int)obs_data_get_int(settings, "max_size")
+	    || ctx->bitrate_kbps != (int)obs_data_get_int(settings, "bitrate_kbps")
+	    || setting_string_changed(ctx->codec, obs_data_get_string(settings, "codec"));
 }
 
 static void src_update(void *data, obs_data_t *settings)
 {
 	struct scrcpy_src *ctx = data;
-	stop_scrcpy(ctx);
+	if (camera_restart_required(ctx, settings)) {
+		stop_scrcpy(ctx);
+		load_settings(ctx, settings);
+		start_scrcpy(ctx, settings);
+		return;
+	}
+
 	load_settings(ctx, settings);
-	start_scrcpy(ctx, settings);
+	if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0) {
+		if (!ctx->camera_control && ctx->serial && *ctx->serial && ctx->camera_control_port != 0)
+			ctx->camera_control = scrcpy_camera_control_create(ctx->serial, ctx->camera_control_port);
+		if (ctx->camera_control)
+			(void)scrcpy_camera_control_apply(ctx->camera_control, ctx->camera_zoom, ctx->camera_torch,
+								ctx->camera_iso, ctx->camera_shutter_us,
+								ctx->camera_focus_distance, ctx->camera_wb_kelvin);
+	}
 }
 
 static void src_get_defaults(obs_data_t *settings)
@@ -339,7 +367,7 @@ static void src_get_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "camera_iso", 0);
 	obs_data_set_default_int(settings, "camera_shutter_us", 0);
 	obs_data_set_default_double(settings, "camera_focus_distance", 0.0);
-	obs_data_set_default_string(settings, "camera_awb_mode", "auto");
+	obs_data_set_default_int(settings, "camera_wb_kelvin", 0);
 	obs_data_set_default_int(settings, "max_size", 0);
 	obs_data_set_default_int(settings, "bitrate_kbps", 8000);
 	obs_data_set_default_string(settings, "codec", "h264");
@@ -822,7 +850,7 @@ static bool video_source_modified(obs_properties_t *props, obs_property_t *p, ob
 		obs_property_set_visible(camera_id, is_camera);
 	const char *keys[] = {"camera_size", "camera_fps", "camera_high_speed", "camera_zoom",
 			      "camera_torch", "camera_iso", "camera_shutter_us",
-			      "camera_focus_distance", "camera_awb_mode"};
+			      "camera_focus_distance", "camera_wb_kelvin"};
 	for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
 		obs_property_t *prop = obs_properties_get(props, keys[i]);
 		if (prop)
@@ -882,14 +910,8 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_data_release(current_settings);
 	obs_property_t *camera_focus = obs_properties_add_float_slider(props, "camera_focus_distance",
 								       obs_module_text("CameraFocus"), 0.0, 20.0, 0.1);
-	obs_property_t *camera_awb = obs_properties_add_list(props, "camera_awb_mode",
-							     obs_module_text("CameraWhiteBalance"), OBS_COMBO_TYPE_LIST,
-							     OBS_COMBO_FORMAT_STRING);
-	obs_property_list_add_string(camera_awb, "Auto", "auto");
-	obs_property_list_add_string(camera_awb, "Incandescent", "incandescent");
-	obs_property_list_add_string(camera_awb, "Fluorescent", "fluorescent");
-	obs_property_list_add_string(camera_awb, "Daylight", "daylight");
-	obs_property_list_add_string(camera_awb, "Cloudy", "cloudy");
+	obs_property_t *camera_wb = obs_properties_add_int_slider(
+		props, "camera_wb_kelvin", obs_module_text("CameraWhiteBalance"), 0, 12000, 100);
 
 	obs_properties_add_button2(props, "refresh_cameras", obs_module_text("RefreshCameras"), refresh_cameras_clicked,
 				   ctx);
@@ -909,7 +931,7 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_set_visible(camera_iso, is_camera);
 	obs_property_set_visible(camera_shutter, is_camera);
 	obs_property_set_visible(camera_focus, is_camera);
-	obs_property_set_visible(camera_awb, is_camera);
+	obs_property_set_visible(camera_wb, is_camera);
 
 	populate_camera_fallbacks(camera_id, camera_size, camera_fps);
 

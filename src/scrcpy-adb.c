@@ -4,6 +4,7 @@
 #endif
 
 #include "scrcpy-adb.h"
+#include "scrcpy-process.h"
 
 #include <obs-module.h>
 #include <util/dstr.h>
@@ -130,6 +131,45 @@ static char *adb_devices_l(const char *adb_exe)
 	return out.array;
 }
 #endif
+
+bool adb_forward_tcp(const char *serial, uint16_t port)
+{
+	if (!serial || !*serial || port == 0)
+		return false;
+
+	char port_arg[32];
+	snprintf(port_arg, sizeof(port_arg), "tcp:%u", (unsigned)port);
+
+	char *adb = get_adb_exe();
+	if (!adb)
+		return false;
+
+	const char *argv[] = {"-s", serial, "forward", port_arg, port_arg, NULL};
+	char *output = NULL;
+	bool ok = scrcpy_proc_run_capture(adb, argv, &output);
+	bfree(output);
+	bfree(adb);
+	return ok;
+}
+
+void adb_remove_forward(const char *serial, uint16_t port)
+{
+	if (!serial || !*serial || port == 0)
+		return;
+
+	char port_arg[32];
+	snprintf(port_arg, sizeof(port_arg), "tcp:%u", (unsigned)port);
+
+	char *adb = get_adb_exe();
+	if (!adb)
+		return;
+
+	const char *argv[] = {"-s", serial, "forward", "--remove", port_arg, NULL};
+	char *output = NULL;
+	(void)scrcpy_proc_run_capture(adb, argv, &output);
+	bfree(output);
+	bfree(adb);
+}
 
 void fill_device_list(obs_property_t *list)
 {

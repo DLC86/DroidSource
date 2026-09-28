@@ -184,12 +184,16 @@ bool scrcpy_proc_run_capture(const char *exe_path, const char *const *argv, char
 		dstr_ncat(&out, buf, n);
 	}
 	CloseHandle(rd);
-	WaitForSingleObject(pi.hProcess, 5000);
+	DWORD exit_code = STILL_ACTIVE;
+	DWORD wait_result = WaitForSingleObject(pi.hProcess, 5000);
+	if (wait_result == WAIT_TIMEOUT)
+		TerminateProcess(pi.hProcess, 1);
+	GetExitCodeProcess(pi.hProcess, &exit_code);
 	CloseHandle(pi.hProcess);
 	CloseHandle(pi.hThread);
 
 	*output = out.array;
-	return true;
+	return exit_code == 0;
 }
 
 bool scrcpy_proc_alive(const scrcpy_proc_t *proc)
@@ -313,7 +317,7 @@ bool scrcpy_proc_run_capture(const char *exe_path, const char *const *argv, char
 	int status = 0;
 	waitpid(pid, &status, 0);
 	*output = out.array;
-	return true;
+	return WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
 
 bool scrcpy_proc_alive(const scrcpy_proc_t *proc)

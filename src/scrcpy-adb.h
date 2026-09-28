@@ -14,3 +14,6 @@ char *first_adb_serial(void);
 #ifdef __cplusplus
 }
 #endif
+
+bool adb_forward_tcp(const char *serial, uint16_t port);
+void adb_remove_forward(const char *serial, uint16_t port);
