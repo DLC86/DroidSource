@@ -330,6 +330,9 @@ static void *scrcpy_watchdog(void *data)
 			obs_data_t *settings = obs_source_get_settings(ctx->source);
 			load_settings(ctx, settings);
 			start_scrcpy(ctx, settings);
+			if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0 &&
+			    ctx->serial && *ctx->serial)
+				refresh_camera_capabilities_cache(ctx->serial, true);
 			obs_data_release(settings);
 		}
 		pthread_mutex_unlock(&ctx->state_mutex);
@@ -346,6 +349,12 @@ static void *src_create(obs_data_t *settings, obs_source_t *source)
 	ctx->watchdog_stop = false;
 	ctx->updating = false;
 	load_settings(ctx, settings);
+
+	/* Prime camera capabilities outside the OBS properties dialog, so opening
+	 * the properties does not block for the scrcpy camera query. */
+	if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0 &&
+	    ctx->serial && *ctx->serial)
+		refresh_camera_capabilities_cache(ctx->serial, false);
 
 	/* Mimic OBS Video Capture Device: auto-select first available device
 	 * when none is configured, so the source is immediately usable. */
@@ -478,6 +487,7 @@ static bool run_scrcpy_camera_query(const char *serial, char **output)
 
 static char *g_camera_capabilities_serial;
 static char *g_camera_capabilities_output;
+static pthread_mutex_t g_camera_capabilities_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static bool parse_camera_id_line(const char *line, char *id, size_t id_size, char *label, size_t label_size, int *fps,
 				 size_t *fps_count, float *focus_max)
@@ -670,6 +680,32 @@ static void add_unique_fps(int *values, size_t *count, int value)
 	values[(*count)++] = value;
 }
 
+static void refresh_camera_capabilities_cache(const char *serial, bool force)
+{
+	if (!serial || !*serial)
+		return;
+
+	pthread_mutex_lock(&g_camera_capabilities_mutex);
+
+	bool cached = g_camera_capabilities_output && g_camera_capabilities_serial &&
+		      strcmp(g_camera_capabilities_serial, serial) == 0;
+	if (cached && !force) {
+		pthread_mutex_unlock(&g_camera_capabilities_mutex);
+		return;
+	}
+
+	char *output = NULL;
+	bool ok = run_scrcpy_camera_query(serial, &output);
+	if (ok && output && *output) {
+		bfree(g_camera_capabilities_serial);
+		bfree(g_camera_capabilities_output);
+		g_camera_capabilities_serial = bstrdup(serial);
+		g_camera_capabilities_output = bstrdup(output);
+	}
+	bfree(output);
+	pthread_mutex_unlock(&g_camera_capabilities_mutex);
+}
+
 static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *settings,
 					 bool refresh_ids)
 {
@@ -686,18 +722,22 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 	char *camera_output = NULL;
 	bool have_query = false;
 
+	pthread_mutex_lock(&g_camera_capabilities_mutex);
 	if (g_camera_capabilities_output && g_camera_capabilities_serial &&
-		strcmp(g_camera_capabilities_serial, serial) == 0) {
+	    strcmp(g_camera_capabilities_serial, serial) == 0) {
 		camera_output = bstrdup(g_camera_capabilities_output);
-	} else {
+	}
+	pthread_mutex_unlock(&g_camera_capabilities_mutex);
+
+	if (!camera_output) {
 		have_query = run_scrcpy_camera_query(serial, &camera_output);
-		if (!have_query)
-			camera_output = NULL;
-		else {
+		if (have_query && camera_output && *camera_output) {
+			pthread_mutex_lock(&g_camera_capabilities_mutex);
 			bfree(g_camera_capabilities_serial);
 			bfree(g_camera_capabilities_output);
 			g_camera_capabilities_serial = bstrdup(serial);
 			g_camera_capabilities_output = bstrdup(camera_output);
+			pthread_mutex_unlock(&g_camera_capabilities_mutex);
 		}
 	}
 
@@ -782,10 +822,11 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 		memcpy(selected_fps, first_fps, first_fps_count * sizeof(int));
 		selected_fps_count = first_fps_count;
 	}
-	if (selected_fps_count == 0) {
-		int saved_fps = (int)obs_data_get_int(settings, "camera_fps");
-		add_unique_fps(selected_fps, &selected_fps_count, saved_fps > 0 ? saved_fps : 30);
-	}
+	int saved_fps = (int)obs_data_get_int(settings, "camera_fps");
+	if (saved_fps > 0)
+		add_unique_fps(selected_fps, &selected_fps_count, saved_fps);
+	if (selected_fps_count == 0)
+		add_unique_fps(selected_fps, &selected_fps_count, 30);
 
 	for (size_t i = 0; i < selected_fps_count; ++i) {
 		for (size_t j = i + 1; j < selected_fps_count; ++j) {
@@ -967,11 +1008,14 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_properties_t *props = obs_properties_create();
 
 	obs_property_t *dev_list = obs_properties_add_list(props, "serial", obs_module_text("Device"),
-							   OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
-	if (ctx->serial && *ctx->serial)
-		obs_property_list_add_string(dev_list, ctx->serial, ctx->serial);
-	else
-		obs_property_list_add_string(dev_list, "No device selected", "");
+						   OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+	fill_device_list(dev_list);
+	if (obs_property_list_item_count(dev_list) == 0) {
+		if (ctx->serial && *ctx->serial)
+			obs_property_list_add_string(dev_list, ctx->serial, ctx->serial);
+		else
+			obs_property_list_add_string(dev_list, "No device selected", "");
+	}
 	obs_property_set_modified_callback(dev_list, serial_modified);
 
 	obs_properties_add_button2(props, "refresh_devices", obs_module_text("RefreshDevices"), refresh_devices_clicked,
@@ -1030,6 +1074,13 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_set_visible(camera_wb, is_camera);
 
 	populate_camera_fallbacks(camera_id, camera_size, camera_fps);
+
+	if (is_camera) {
+		obs_data_t *settings_now = obs_source_get_settings(ctx->source);
+		if (ctx->serial && *ctx->serial)
+			refresh_camera_capabilities(props, settings_now, false);
+		obs_data_release(settings_now);
+	}
 
 	obs_property_t *focus_prop = obs_properties_get(props, "camera_focus_distance");
 	if (focus_prop) {
