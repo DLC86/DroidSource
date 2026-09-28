@@ -25,6 +25,9 @@ typedef int socklen_t;
 
 #include <stdint.h>
 #include <string.h>
+#ifndef _WIN32
+#include <sys/ioctl.h>
+#endif
 
 #define SC_PACKET_FLAG_CONFIG    (UINT64_C(1) << 63)
 #define SC_PACKET_FLAG_KEY_FRAME (UINT64_C(1) << 62)
@@ -61,6 +64,7 @@ struct scrcpy_reader {
 	pthread_t thread;
 	bool thread_started;
 	volatile bool stop;
+	volatile bool running;
 
 	sock_t sock;
 
@@ -99,6 +103,33 @@ static bool recv_all(sock_t s, void *buf, size_t len, volatile bool *stop)
 			return false;
 		p += r;
 		len -= (size_t)r;
+	}
+	return true;
+}
+
+static size_t socket_pending_bytes(sock_t s)
+{
+#ifdef _WIN32
+	u_long pending = 0;
+	if (ioctlsocket(s, FIONREAD, &pending) != 0)
+		return 0;
+	return (size_t)pending;
+#else
+	int pending = 0;
+	if (ioctl(s, FIONREAD, &pending) != 0 || pending <= 0)
+		return 0;
+	return (size_t)pending;
+#endif
+}
+
+static bool discard_all(sock_t s, size_t len, volatile bool *stop)
+{
+	uint8_t buffer[65536];
+	while (len > 0) {
+		size_t chunk = len < sizeof(buffer) ? len : sizeof(buffer);
+		if (!recv_all(s, buffer, chunk, stop))
+			return false;
+		len -= chunk;
 	}
 	return true;
 }
@@ -178,6 +209,8 @@ static bool open_decoder(struct scrcpy_reader *r, uint32_t codec_id, uint32_t wi
 		return false;
 
 	r->codec_ctx->flags |= AV_CODEC_FLAG_LOW_DELAY;
+	r->codec_ctx->thread_type = FF_THREAD_SLICE;
+	r->codec_ctx->thread_count = 0;
 	r->codec_ctx->width = (int)width;
 	r->codec_ctx->height = (int)height;
 	r->codec_ctx->pix_fmt = AV_PIX_FMT_YUV420P;
@@ -232,10 +265,12 @@ static void *reader_thread(void *data)
 	struct scrcpy_reader *r = data;
 
 	os_set_thread_name("scrcpy-reader");
+	os_atomic_set_bool(&r->running, true);
 
 	r->sock = connect_with_retry(r->port, &r->stop);
 	if (r->sock == INVALID_SOCK) {
 		obs_log(LOG_ERROR, "scrcpy-reader: could not connect to 127.0.0.1:%u", (unsigned)r->port);
+		os_atomic_set_bool(&r->running, false);
 		return NULL;
 	}
 	obs_log(LOG_INFO, "scrcpy-reader: connected to 127.0.0.1:%u, awaiting prelude", (unsigned)r->port);
@@ -254,7 +289,18 @@ static void *reader_thread(void *data)
 	if (!open_decoder(r, codec_id, width, height))
 		goto done;
 
+	bool drop_until_keyframe = false;
+
 	while (!os_atomic_load_bool(&r->stop)) {
+		if (!drop_until_keyframe && socket_pending_bytes(r->sock) > (512 * 1024)) {
+			obs_log(LOG_WARNING, "scrcpy-reader: video backlog exceeded 512 KiB; dropping to next keyframe");
+			drop_until_keyframe = true;
+			avcodec_flush_buffers(r->codec_ctx);
+			bfree(r->pending_config);
+			r->pending_config = NULL;
+			r->pending_config_size = 0;
+		}
+
 		uint8_t hdr[12];
 		if (!recv_all(r->sock, hdr, sizeof(hdr), &r->stop))
 			break;
@@ -281,6 +327,15 @@ static void *reader_thread(void *data)
 			r->pending_config_size = size;
 			continue;
 		}
+
+		if (drop_until_keyframe && !is_key) {
+			if (!discard_all(r->sock, size, &r->stop))
+				break;
+			continue;
+		}
+
+		if (drop_until_keyframe && is_key)
+			drop_until_keyframe = false;
 
 		size_t cfg = r->pending_config ? r->pending_config_size : 0;
 		if (av_new_packet(r->packet, (int)(cfg + size)) != 0) {
@@ -328,6 +383,7 @@ static void *reader_thread(void *data)
 	}
 
 done:
+	os_atomic_set_bool(&r->running, false);
 	obs_log(LOG_INFO, "scrcpy-reader: thread exiting");
 	return NULL;
 }
@@ -339,6 +395,7 @@ scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port)
 	r->port = port;
 	r->sock = INVALID_SOCK;
 	r->stop = false;
+	r->running = false;
 
 	if (pthread_create(&r->thread, NULL, reader_thread, r) != 0) {
 		obs_log(LOG_ERROR, "scrcpy-reader: pthread_create failed");
@@ -347,6 +404,11 @@ scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port)
 	}
 	r->thread_started = true;
 	return r;
+}
+
+bool scrcpy_reader_is_alive(const scrcpy_reader_t *r)
+{
+	return r && os_atomic_load_bool(&r->running);
 }
 
 void scrcpy_reader_destroy(scrcpy_reader_t *r)

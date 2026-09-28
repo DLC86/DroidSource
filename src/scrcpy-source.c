@@ -14,6 +14,7 @@
 #include <obs-module.h>
 #include <plugin-support.h>
 #include <util/dstr.h>
+#include <util/threading.h>
 
 #include <ctype.h>
 #include <stdio.h>
@@ -50,6 +51,13 @@ struct scrcpy_src {
 	int camera_shutter_us;
 	float camera_focus_distance;
 	int camera_wb_kelvin;
+
+	pthread_mutex_t state_mutex;
+	pthread_t watchdog_thread;
+	bool watchdog_started;
+	volatile bool watchdog_stop;
+	volatile bool updating;
+
 	int max_size;
 	int bitrate_kbps;
 	char *codec;
@@ -280,10 +288,51 @@ static void load_settings(struct scrcpy_src *ctx, obs_data_t *settings)
 	ctx->bitrate_kbps = (int)obs_data_get_int(settings, "bitrate_kbps");
 }
 
+static bool scrcpy_stream_healthy(struct scrcpy_src *ctx)
+{
+	if (!ctx->proc_alive || !scrcpy_proc_alive(&ctx->proc))
+		return false;
+	return scrcpy_reader_is_alive(ctx->reader);
+}
+
+static void *scrcpy_watchdog(void *data)
+{
+	struct scrcpy_src *ctx = data;
+	os_set_thread_name("scrcpy-watchdog");
+
+	while (!os_atomic_load_bool(&ctx->watchdog_stop)) {
+		os_sleep_ms(500);
+		if (os_atomic_load_bool(&ctx->watchdog_stop) || os_atomic_load_bool(&ctx->updating))
+			continue;
+
+		if (scrcpy_stream_healthy(ctx))
+			continue;
+
+		pthread_mutex_lock(&ctx->state_mutex);
+		if (!os_atomic_load_bool(&ctx->watchdog_stop) && !os_atomic_load_bool(&ctx->updating) &&
+		    !scrcpy_stream_healthy(ctx)) {
+			obs_log(LOG_WARNING, "scrcpy-source: video stream lost; restarting scrcpy");
+			obs_source_output_video(ctx->source, NULL);
+
+			stop_scrcpy(ctx);
+			obs_data_t *settings = obs_source_get_settings(ctx->source);
+			load_settings(ctx, settings);
+			start_scrcpy(ctx, settings);
+			obs_data_release(settings);
+		}
+		pthread_mutex_unlock(&ctx->state_mutex);
+	}
+
+	return NULL;
+}
+
 static void *src_create(obs_data_t *settings, obs_source_t *source)
 {
 	struct scrcpy_src *ctx = bzalloc(sizeof(*ctx));
 	ctx->source = source;
+	pthread_mutex_init(&ctx->state_mutex, NULL);
+	ctx->watchdog_stop = false;
+	ctx->updating = false;
 	load_settings(ctx, settings);
 
 	/* Mimic OBS Video Capture Device: auto-select first available device
@@ -298,6 +347,10 @@ static void *src_create(obs_data_t *settings, obs_source_t *source)
 	}
 
 	start_scrcpy(ctx, settings);
+	if (pthread_create(&ctx->watchdog_thread, NULL, scrcpy_watchdog, ctx) == 0)
+		ctx->watchdog_started = true;
+	else
+		obs_log(LOG_WARNING, "scrcpy-source: could not start watchdog thread");
 	return ctx;
 }
 
@@ -306,11 +359,17 @@ static void src_destroy(void *data)
 	struct scrcpy_src *ctx = data;
 	if (!ctx)
 		return;
+	os_atomic_set_bool(&ctx->watchdog_stop, true);
+	if (ctx->watchdog_started) {
+		pthread_join(ctx->watchdog_thread, NULL);
+		ctx->watchdog_started = false;
+	}
 	stop_scrcpy(ctx);
 	bfree(ctx->serial);
 	bfree(ctx->video_source);
 	bfree(ctx->codec);
 	bfree(ctx->camera_size);
+	pthread_mutex_destroy(&ctx->state_mutex);
 	bfree(ctx);
 }
 
@@ -337,22 +396,28 @@ static bool camera_restart_required(const struct scrcpy_src *ctx, obs_data_t *se
 static void src_update(void *data, obs_data_t *settings)
 {
 	struct scrcpy_src *ctx = data;
+
+	pthread_mutex_lock(&ctx->state_mutex);
+	os_atomic_set_bool(&ctx->updating, true);
+
 	if (camera_restart_required(ctx, settings)) {
 		stop_scrcpy(ctx);
 		load_settings(ctx, settings);
 		start_scrcpy(ctx, settings);
-		return;
-	}
-
-	load_settings(ctx, settings);
-	if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0) {
-		if (!ctx->camera_control && ctx->serial && *ctx->serial && ctx->camera_control_port != 0)
-			ctx->camera_control = scrcpy_camera_control_create(ctx->serial, ctx->camera_control_port);
-		if (ctx->camera_control)
-			(void)scrcpy_camera_control_apply(ctx->camera_control, ctx->camera_zoom, ctx->camera_torch,
+	} else {
+		load_settings(ctx, settings);
+		if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0) {
+			if (!ctx->camera_control && ctx->serial && *ctx->serial && ctx->camera_control_port != 0)
+				ctx->camera_control = scrcpy_camera_control_create(ctx->serial, ctx->camera_control_port);
+			if (ctx->camera_control)
+				(void)scrcpy_camera_control_apply(ctx->camera_control, ctx->camera_zoom, ctx->camera_torch,
 								ctx->camera_iso, ctx->camera_shutter_us,
 								ctx->camera_focus_distance, ctx->camera_wb_kelvin);
+		}
 	}
+
+	os_atomic_set_bool(&ctx->updating, false);
+	pthread_mutex_unlock(&ctx->state_mutex);
 }
 
 static void src_get_defaults(obs_data_t *settings)

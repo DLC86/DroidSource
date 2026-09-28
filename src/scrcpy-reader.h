@@ -24,6 +24,7 @@ typedef struct scrcpy_reader scrcpy_reader_t;
 scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port);
 
 void scrcpy_reader_destroy(scrcpy_reader_t *r);
+bool scrcpy_reader_is_alive(const scrcpy_reader_t *r);
 
 #ifdef __cplusplus
 }
