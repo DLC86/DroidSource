@@ -386,12 +386,6 @@ static void *src_create(obs_data_t *settings, obs_source_t *source)
 	ctx->updating = false;
 	load_settings(ctx, settings);
 
-	/* Prime camera capabilities outside the OBS properties dialog, so opening
-	 * the properties does not block for the scrcpy camera query. */
-	if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0 &&
-	    ctx->serial && *ctx->serial)
-		refresh_camera_capabilities_cache(ctx->serial, false);
-
 	/* Mimic OBS Video Capture Device: auto-select first available device
 	 * when none is configured, so the source is immediately usable. */
 	if (!ctx->serial || !*ctx->serial) {
@@ -402,6 +396,12 @@ static void *src_create(obs_data_t *settings, obs_source_t *source)
 			obs_data_set_string(settings, "serial", first);
 		}
 	}
+
+	/* Prime capabilities after auto-selecting the device, but before OBS can
+	 * open the properties dialog. */
+	if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0 &&
+	    ctx->serial && *ctx->serial)
+		refresh_camera_capabilities_cache(ctx->serial, false);
 
 	start_scrcpy(ctx, settings);
 	if (pthread_create(&ctx->watchdog_thread, NULL, scrcpy_watchdog, ctx) == 0)
@@ -1219,12 +1219,6 @@ static obs_properties_t *src_get_properties(void *data)
 
 	populate_camera_fallbacks(camera_id, camera_size, camera_fps);
 
-	if (is_camera) {
-		obs_data_t *settings_now = obs_source_get_settings(ctx->source);
-		if (ctx->serial && *ctx->serial)
-			refresh_camera_capabilities(props, settings_now, false);
-		obs_data_release(settings_now);
-	}
 
 	obs_property_t *focus_prop = obs_properties_get(props, "camera_focus_distance");
 	if (focus_prop) {
