@@ -997,11 +997,9 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 
 	obs_property_t *wb_prop = obs_properties_get(props, "camera_wb_kelvin");
 	if (wb_prop) {
-		int min_kelvin = selected_wb_min > 0 ? selected_wb_min : 1000;
 		int max_kelvin = selected_wb_max > 0 ? selected_wb_max : 12000;
 		obs_property_int_set_limits(wb_prop, 0, max_kelvin, 100);
 		obs_property_set_enabled(wb_prop, selected_wb_min > 0 || selected_wb_manual);
-		int current_wb = (int)obs_data_get_int(settings, "camera_wb_kelvin");
 	}
 
 	obs_property_t *iso_prop = obs_properties_get(props, "camera_iso");
