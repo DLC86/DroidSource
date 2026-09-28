@@ -25,6 +25,7 @@ typedef int socklen_t;
 
 #include <stdint.h>
 #include <string.h>
+#include <pthread.h>
 #ifndef _WIN32
 #include <sys/ioctl.h>
 #endif
@@ -65,6 +66,9 @@ struct scrcpy_reader {
 	bool thread_started;
 	volatile bool stop;
 	volatile bool running;
+
+	pthread_mutex_t state_mutex;
+	uint64_t last_frame_ns;
 
 	sock_t sock;
 
@@ -210,7 +214,14 @@ static bool open_decoder(struct scrcpy_reader *r, uint32_t codec_id, uint32_t wi
 
 	r->codec_ctx->flags |= AV_CODEC_FLAG_LOW_DELAY;
 	r->codec_ctx->thread_type = FF_THREAD_SLICE;
-	r->codec_ctx->thread_count = 0;
+	if (codec_id == SC_CODEC_ID_H265) {
+		r->codec_ctx->flags2 |= AV_CODEC_FLAG2_FAST;
+		/* HEVC frame threading adds pipeline depth; keep only a small
+		 * slice-thread pool to avoid trading CPU efficiency for latency. */
+		r->codec_ctx->thread_count = 2;
+	} else {
+		r->codec_ctx->thread_count = 0;
+	}
 	r->codec_ctx->width = (int)width;
 	r->codec_ctx->height = (int)height;
 	r->codec_ctx->pix_fmt = AV_PIX_FMT_YUV420P;
@@ -254,6 +265,10 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	else
 		obs_frame.timestamp = (uint64_t)f->pts * 1000ULL;
 
+	pthread_mutex_lock(&r->state_mutex);
+	r->last_frame_ns = os_gettime_ns();
+	pthread_mutex_unlock(&r->state_mutex);
+
 	video_format_get_parameters_for_format(VIDEO_CS_DEFAULT, VIDEO_RANGE_DEFAULT, fmt, obs_frame.color_matrix,
 					       obs_frame.color_range_min, obs_frame.color_range_max);
 
@@ -266,6 +281,9 @@ static void *reader_thread(void *data)
 
 	os_set_thread_name("scrcpy-reader");
 	os_atomic_set_bool(&r->running, true);
+	pthread_mutex_lock(&r->state_mutex);
+	r->last_frame_ns = os_gettime_ns();
+	pthread_mutex_unlock(&r->state_mutex);
 
 	r->sock = connect_with_retry(r->port, &r->stop);
 	if (r->sock == INVALID_SOCK) {
@@ -292,8 +310,10 @@ static void *reader_thread(void *data)
 	bool drop_until_keyframe = false;
 
 	while (!os_atomic_load_bool(&r->stop)) {
-		if (!drop_until_keyframe && socket_pending_bytes(r->sock) > (512 * 1024)) {
-			obs_log(LOG_WARNING, "scrcpy-reader: video backlog exceeded 512 KiB; dropping to next keyframe");
+		size_t backlog_limit = codec_id == SC_CODEC_ID_H265 ? (96 * 1024) : (128 * 1024);
+		if (!drop_until_keyframe && socket_pending_bytes(r->sock) > backlog_limit) {
+			obs_log(LOG_WARNING, "scrcpy-reader: video backlog exceeded %zu KiB; dropping to next keyframe",
+				 backlog_limit / 1024);
 			drop_until_keyframe = true;
 			avcodec_flush_buffers(r->codec_ctx);
 			bfree(r->pending_config);
@@ -396,9 +416,12 @@ scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port)
 	r->sock = INVALID_SOCK;
 	r->stop = false;
 	r->running = false;
+	r->last_frame_ns = 0;
+	pthread_mutex_init(&r->state_mutex, NULL);
 
 	if (pthread_create(&r->thread, NULL, reader_thread, r) != 0) {
 		obs_log(LOG_ERROR, "scrcpy-reader: pthread_create failed");
+		pthread_mutex_destroy(&r->state_mutex);
 		bfree(r);
 		return NULL;
 	}
@@ -409,6 +432,23 @@ scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port)
 bool scrcpy_reader_is_alive(const scrcpy_reader_t *r)
 {
 	return r && os_atomic_load_bool(&r->running);
+}
+
+bool scrcpy_reader_is_stale(const scrcpy_reader_t *r, uint32_t max_age_ms)
+{
+	if (!r || !os_atomic_load_bool(&r->running))
+		return true;
+
+	pthread_mutex_lock((pthread_mutex_t *)&r->state_mutex);
+	uint64_t last_frame_ns = r->last_frame_ns;
+	pthread_mutex_unlock((pthread_mutex_t *)&r->state_mutex);
+
+	if (last_frame_ns == 0)
+		return false;
+
+	uint64_t now = os_gettime_ns();
+	uint64_t max_age_ns = (uint64_t)max_age_ms * UINT64_C(1000000);
+	return now > last_frame_ns && now - last_frame_ns > max_age_ns;
 }
 
 void scrcpy_reader_destroy(scrcpy_reader_t *r)
@@ -443,5 +483,6 @@ void scrcpy_reader_destroy(scrcpy_reader_t *r)
 	if (r->pending_config)
 		bfree(r->pending_config);
 
+	pthread_mutex_destroy(&r->state_mutex);
 	bfree(r);
 }
