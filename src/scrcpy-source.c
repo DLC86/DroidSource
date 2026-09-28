@@ -1098,29 +1098,82 @@ static bool video_source_modified(obs_properties_t *props, obs_property_t *p, ob
 	UNUSED_PARAMETER(p);
 	const char *source = obs_data_get_string(settings, "video_source");
 	bool is_camera = source && strcmp(source, "camera") == 0;
-	obs_property_t *camera_id = obs_properties_get(props, "camera_id");
-	if (camera_id)
-		obs_property_set_visible(camera_id, is_camera);
-	const char *keys[] = {"camera_size", "camera_fps", "camera_zoom",
-			      "camera_torch", "camera_iso", "camera_shutter_us",
-			      "camera_focus_distance", "camera_wb_kelvin",
-			      "video_buffer_ms", "flip_vertical", "hardware_decoding",
-			      "pixel_format", "color_space", "color_range", "transfer"};
-	for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
-		obs_property_t *prop = obs_properties_get(props, keys[i]);
-		if (prop)
-			obs_property_set_visible(prop, is_camera);
-	}
-	obs_property_t *buffering = obs_properties_add_list(
-		props, "video_buffer_ms", obs_module_text("Buffering"),
-		OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
-	obs_property_list_add_int(buffering, "Automatic (OBS)", 0);
-	obs_property_list_add_int(buffering, "50 ms", 50);
-	obs_property_list_add_int(buffering, "100 ms", 100);
-	obs_property_list_add_int(buffering, "200 ms", 200);
+	const char *keys[] = {
+		"camera_id", "camera_size", "camera_fps", "camera_zoom", "camera_torch",
+		"camera_iso", "camera_shutter_us", "camera_focus_distance", "camera_wb_kelvin",
+		"portrait_mode", "flip_vertical", "hardware_decoding", "refresh_cameras",
+		"video_buffer_ms"
+	};
 
-	obs_properties_add_bool(props, "flip_vertical", obs_module_text("FlipVertical"));
-	obs_properties_add_bool(props, "hardware_decoding", obs_module_text("HardwareDecoding"));
+	for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
+		obs_property_t *property = obs_properties_get(props, keys[i]);
+		if (property)
+			obs_property_set_visible(property, is_camera);
+	}
+
+	obs_property_t *max_size = obs_properties_get(props, "max_size");
+	if (max_size)
+		obs_property_set_visible(max_size, !is_camera);
+
+	return true;
+}
+
+static obs_properties_t *src_get_properties(void *data)
+{
+	struct scrcpy_src *ctx = data;
+	obs_properties_t *props = obs_properties_create();
+
+	obs_property_t *dev_list = obs_properties_add_list(props, "serial", obs_module_text("Device"),
+						   OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+	fill_device_list(dev_list);
+	if (obs_property_list_item_count(dev_list) == 0) {
+		if (ctx->serial && *ctx->serial)
+			obs_property_list_add_string(dev_list, ctx->serial, ctx->serial);
+		else
+			obs_property_list_add_string(dev_list, "No device selected", "");
+	}
+	obs_property_set_modified_callback(dev_list, serial_modified);
+
+	obs_properties_add_button2(props, "refresh_devices", obs_module_text("RefreshDevices"), refresh_devices_clicked,
+				   NULL);
+
+	obs_property_t *src_list = obs_properties_add_list(props, "video_source", obs_module_text("VideoSource"),
+							   OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+	obs_property_list_add_string(src_list, "Display", "display");
+	obs_property_list_add_string(src_list, "Camera", "camera");
+	obs_property_set_modified_callback(src_list, video_source_modified);
+
+	obs_property_t *camera_id = obs_properties_add_list(props, "camera_id", obs_module_text("CameraId"),
+							    OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+	obs_property_set_modified_callback(camera_id, camera_id_modified);
+
+	obs_property_t *camera_size = obs_properties_add_list(props, "camera_size", obs_module_text("CameraResolution"),
+							      OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+
+	obs_property_t *camera_fps = obs_properties_add_list(props, "camera_fps", obs_module_text("CameraFps"),
+							     OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_set_modified_callback(camera_fps, camera_fps_modified);
+
+	obs_property_t *camera_zoom =
+		obs_properties_add_float_slider(props, "camera_zoom", obs_module_text("CameraZoom"), 1.0, 10.0, 0.1);
+	obs_property_t *camera_torch = obs_properties_add_bool(props, "camera_torch", obs_module_text("CameraTorch"));
+	obs_property_t *camera_iso =
+		obs_properties_add_int_slider(props, "camera_iso", obs_module_text("CameraIso"), 0, 12800, 50);
+	obs_property_t *camera_shutter = obs_properties_add_list(props, "camera_shutter_us",
+								 obs_module_text("CameraShutter"), OBS_COMBO_TYPE_LIST,
+								 OBS_COMBO_FORMAT_INT);
+	obs_data_t *current_settings = obs_source_get_settings(ctx->source);
+	populate_shutter_list(camera_shutter, (int)obs_data_get_int(current_settings, "camera_fps"));
+	obs_data_release(current_settings);
+	obs_property_t *camera_focus = obs_properties_add_float_slider(props, "camera_focus_distance",
+								       obs_module_text("CameraFocus"), 0.0, 20.0, 0.1);
+	obs_property_t *camera_wb = obs_properties_add_int_slider(
+		props, "camera_wb_kelvin", obs_module_text("CameraWhiteBalance"), 0, 12000, 100);
+	obs_property_t *portrait_mode =
+		obs_properties_add_bool(props, "portrait_mode", obs_module_text("PortraitMode"));
+
+	obs_property_t *flip_vertical = obs_properties_add_bool(props, "flip_vertical", obs_module_text("FlipVertical"));
+	obs_property_t *hardware_decoding = obs_properties_add_bool(props, "hardware_decoding", obs_module_text("HardwareDecoding"));
 
 	obs_property_t *refresh_cameras =
 		obs_properties_add_button2(props, "refresh_cameras", obs_module_text("RefreshCameras"),
@@ -1143,13 +1196,8 @@ static bool video_source_modified(obs_properties_t *props, obs_property_t *p, ob
 	obs_property_set_visible(camera_wb, is_camera);
 	obs_property_set_visible(portrait_mode, is_camera);
 	obs_property_set_visible(refresh_cameras, is_camera);
-	obs_property_set_visible(buffering, is_camera);
 	obs_property_set_visible(flip_vertical, is_camera);
 	obs_property_set_visible(hardware_decoding, is_camera);
-	obs_property_set_visible(pixel_format, is_camera);
-	obs_property_set_visible(color_space, is_camera);
-	obs_property_set_visible(color_range, is_camera);
-	obs_property_set_visible(transfer, is_camera);
 
 	if (ctx->serial && *ctx->serial) {
 		pthread_mutex_lock(&g_camera_capabilities_mutex);
@@ -1185,6 +1233,15 @@ static bool video_source_modified(obs_properties_t *props, obs_property_t *p, ob
 	obs_property_list_add_string(codec_list, "H.264", "h264");
 	obs_property_list_add_string(codec_list, "H.265", "h265");
 	obs_property_list_add_string(codec_list, "AV1", "av1");
+
+	obs_property_t *buffering = obs_properties_add_list(
+		props, "video_buffer_ms", obs_module_text("Buffering"),
+		OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(buffering, "Automatic (OBS)", 0);
+	obs_property_list_add_int(buffering, "50 ms", 50);
+	obs_property_list_add_int(buffering, "100 ms", 100);
+	obs_property_list_add_int(buffering, "200 ms", 200);
+	obs_property_set_visible(buffering, is_camera);
 
 	return props;
 }
