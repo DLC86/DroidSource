@@ -127,9 +127,8 @@ static bool connect_control(struct scrcpy_camera_control *control)
 	return true;
 }
 
-static bool send_snapshot(struct scrcpy_camera_control *control,
-				 float zoom, bool torch, int iso, int shutter_us,
-				 float focus_distance, int wb_kelvin)
+static bool send_snapshot(struct scrcpy_camera_control *control, float zoom, bool torch, int iso, int shutter_us,
+			  float focus_distance, int wb_kelvin)
 {
 	if (!connect_control(control))
 		return false;
@@ -192,7 +191,6 @@ static void *camera_control_worker(void *data)
 
 scrcpy_camera_control_t *scrcpy_camera_control_create(const char *serial, uint16_t port)
 {
-	/* Keep camera control independent from the OBS properties thread. */
 	if (!serial || !*serial || port == 0)
 		return NULL;
 
@@ -241,9 +239,8 @@ void scrcpy_camera_control_destroy(scrcpy_camera_control_t *control)
 	bfree(control);
 }
 
-bool scrcpy_camera_control_apply(scrcpy_camera_control_t *control,
-				 float zoom, bool torch, int iso, int shutter_us,
-				 float focus_distance, int wb_kelvin)
+bool scrcpy_camera_control_apply(scrcpy_camera_control_t *control, float zoom, bool torch, int iso, int shutter_us,
+					 float focus_distance, int wb_kelvin)
 {
 	if (!control)
 		return false;
