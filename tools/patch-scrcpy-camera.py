@@ -218,7 +218,7 @@ methods = r'''    public void setZoomRatio(float value) {
                 try {
                     requestBuilder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom);
                     setRepeatingRequest(currentSession, requestBuilder.build());
-                } catch (CameraAccessException e) {
+                } catch (CameraAccessException | IllegalArgumentException | IllegalStateException e) {
                     Ln.e("Camera error while setting zoom: " + e.getMessage());
                 }
             }
@@ -234,7 +234,7 @@ methods = r'''    public void setZoomRatio(float value) {
                 try {
                     applyExposure();
                     setRepeatingRequest(currentSession, requestBuilder.build());
-                } catch (CameraAccessException e) {
+                } catch (CameraAccessException | IllegalArgumentException | IllegalStateException e) {
                     Ln.e("Camera error while setting exposure: " + e.getMessage());
                 }
             }
@@ -249,7 +249,7 @@ methods = r'''    public void setZoomRatio(float value) {
                 try {
                     applyFocus();
                     setRepeatingRequest(currentSession, requestBuilder.build());
-                } catch (CameraAccessException e) {
+                } catch (CameraAccessException | IllegalArgumentException | IllegalStateException e) {
                     Ln.e("Camera error while setting focus: " + e.getMessage());
                 }
             }
@@ -264,7 +264,7 @@ methods = r'''    public void setZoomRatio(float value) {
                 try {
                     applyWhiteBalance();
                     setRepeatingRequest(currentSession, requestBuilder.build());
-                } catch (CameraAccessException e) {
+                } catch (CameraAccessException | IllegalArgumentException | IllegalStateException e) {
                     Ln.e("Camera error while setting white balance: " + e.getMessage());
                 }
             }
@@ -282,15 +282,33 @@ methods = r'''    public void setZoomRatio(float value) {
             requestBuilder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom);
         }
 
-        applyExposure();
-        applyFocus();
-        applyWhiteBalance();
+        try {
+            applyExposure();
+        } catch (RuntimeException e) {
+            Ln.w("Could not apply manual exposure: " + e.getMessage());
+            manualIso = 0;
+            manualShutterUs = 0;
+            requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
+        }
+        try {
+            applyFocus();
+        } catch (RuntimeException e) {
+            Ln.w("Could not apply manual focus: " + e.getMessage());
+            manualFocusDistance = 0;
+        }
+        try {
+            applyWhiteBalance();
+        } catch (RuntimeException e) {
+            Ln.w("Could not apply manual white balance: " + e.getMessage());
+            whiteBalanceKelvin = 0;
+            requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO);
+        }
     }
 
     private void applyExposure() {
         assertCameraThread();
 
-        if (manualIso <= 0 || manualShutterUs <= 0 || highSpeed || cameraCharacteristics == null) {
+        if ((manualIso <= 0 && manualShutterUs <= 0) || highSpeed || cameraCharacteristics == null) {
             requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
             return;
         }
@@ -314,8 +332,10 @@ methods = r'''    public void setZoomRatio(float value) {
             return;
         }
 
-        int iso = isoRange.clamp(manualIso);
-        long exposureNs = exposureRange.clamp(manualShutterUs * 1000L);
+        int iso = isoRange.clamp(manualIso > 0 ? manualIso : isoRange.getLower());
+        long defaultExposureUs = fps > 0 ? 1_000_000L / fps : exposureRange.getLower() / 1000L;
+        long requestedExposureUs = manualShutterUs > 0 ? manualShutterUs : defaultExposureUs;
+        long exposureNs = exposureRange.clamp(requestedExposureUs * 1000L);
         long frameDurationNs = fps > 0 ? 1_000_000_000L / fps : exposureNs;
 
         requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF);
@@ -364,9 +384,13 @@ methods = r'''    public void setZoomRatio(float value) {
         int[] capabilities =
                 cameraCharacteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
 
+        int[] colorCorrectionModes =
+                cameraCharacteristics.get(CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_MODES);
         boolean manualSupported = contains(modes, CaptureRequest.CONTROL_AWB_MODE_OFF)
                 && contains(capabilities,
-                        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING);
+                        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING)
+                && contains(colorCorrectionModes,
+                        CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX);
 
         if (whiteBalanceKelvin <= 0) {
             requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
