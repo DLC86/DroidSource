@@ -437,6 +437,22 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
         boolean hasIso = manualIso > 0;
         boolean hasShutter = manualShutterUs > 0;
 
+        // A fixed [fps,fps] AE target can conflict with an exposure longer
+        // than one frame period. In that case let Camera2 reduce frame rate.
+        if (fps > 0 && hasShutter) {
+            long requestedExposureNs = manualShutterUs * 1000L;
+            long nominalFrameNs = 1_000_000_000L / fps;
+            if (requestedExposureNs > nominalFrameNs) {
+                requestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, null);
+            } else {
+                requestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                        new Range<>(fps, fps));
+            }
+        } else if (fps > 0) {
+            requestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                    new Range<>(fps, fps));
+        }
+
         Range<Integer> isoRange =
                 cameraCharacteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE);
         Range<Long> exposureRange =
@@ -591,6 +607,8 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
         assertCameraThread();
 
         if (whiteBalanceKelvin <= 0) {
+            requestBuilder.set(CaptureRequest.CONTROL_MODE,
+                    CaptureRequest.CONTROL_MODE_AUTO);
             requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
                     CaptureRequest.CONTROL_AWB_MODE_AUTO);
             requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS, null);
@@ -612,6 +630,8 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
                     && contains(correctionModes, CaptureRequest.COLOR_CORRECTION_MODE_CCT);
 
             if (cctSupported) {
+                requestBuilder.set(CaptureRequest.CONTROL_MODE,
+                        CaptureRequest.CONTROL_MODE_AUTO);
                 requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
                         CaptureRequest.CONTROL_AWB_MODE_OFF);
                 requestBuilder.set(CaptureRequest.COLOR_CORRECTION_MODE,
@@ -632,14 +652,19 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
         int[] correctionModes = cameraCharacteristics.get(
                 CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_MODES);
 
-        boolean manualSupported =
-                contains(capabilities,
-                        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING)
-                && contains(awbModes, CaptureRequest.CONTROL_AWB_MODE_OFF)
-                && contains(correctionModes,
-                        CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX);
+        boolean manualPostProcessing = contains(capabilities,
+                CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING);
+        boolean awbOff = contains(awbModes, CaptureRequest.CONTROL_AWB_MODE_OFF);
 
-        if (manualSupported) {
+        // COLOR_CORRECTION_AVAILABLE_MODES was introduced in API 36.
+        // Before API 36, MANUAL_POST_PROCESSING + AWB OFF is sufficient for
+        // the standard transform/gains path.
+        boolean transformMatrix = android.os.Build.VERSION.SDK_INT < 36
+                || contains(correctionModes, CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX);
+
+        if (manualPostProcessing && awbOff && transformMatrix) {
+            requestBuilder.set(CaptureRequest.CONTROL_MODE,
+                    CaptureRequest.CONTROL_MODE_AUTO);
             requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
                     CaptureRequest.CONTROL_AWB_MODE_OFF);
             requestBuilder.set(CaptureRequest.COLOR_CORRECTION_MODE,
@@ -660,7 +685,8 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
             return;
         }
 
-        // Last fallback: use only a real AWB preset exposed by the device.
+        requestBuilder.set(CaptureRequest.CONTROL_MODE,
+                CaptureRequest.CONTROL_MODE_AUTO);
         requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS, null);
         if (android.os.Build.VERSION.SDK_INT >= 36) {
             requestBuilder.set(CaptureRequest.COLOR_CORRECTION_MODE,
