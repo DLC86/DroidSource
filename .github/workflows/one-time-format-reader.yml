@@ -20,12 +20,14 @@ jobs:
         shell: bash
         run: |
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           brew install --quiet obsproject/tools/clang-format@19
+          echo "/home/linuxbrew/.linuxbrew/opt/clang-format@19/bin" >> "$GITHUB_PATH"
 
       - name: Format reader
         shell: bash
         run: |
-          /home/linuxbrew/.linuxbrew/opt/clang-format@19/bin/clang-format -style=file -i src/scrcpy-reader.c
+          clang-format -style=file -i src/scrcpy-reader.c
 
       - name: Commit formatting
         shell: bash
