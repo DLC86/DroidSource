@@ -281,15 +281,15 @@ import android.hardware.camera2.params.StreamConfigurationMap;
                         requestBuilder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom);
                     }
 
-                    try {
+                    CaptureRequest request = requestBuilder.build();
+""",
+        """                    try {
                         applyCurrentCameraSettings();
                     } catch (RuntimeException e) {
                         Ln.w("Could not apply initial camera settings: " + e.getMessage());
                     }
 
                     CaptureRequest request = requestBuilder.build();
-""",
-        """                    CaptureRequest request = requestBuilder.build();
 """,
     ),
     (
