@@ -192,6 +192,7 @@ static void *camera_control_worker(void *data)
 
 scrcpy_camera_control_t *scrcpy_camera_control_create(const char *serial, uint16_t port)
 {
+	/* Keep camera control independent from the OBS properties thread. */
 	if (!serial || !*serial || port == 0)
 		return NULL;
 
