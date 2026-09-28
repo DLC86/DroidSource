@@ -173,20 +173,11 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 			snprintf(camera_size_arg, sizeof(camera_size_arg), "--camera-size=%s", ctx->camera_size);
 		if (ctx->camera_fps > 0)
 			snprintf(camera_fps_arg, sizeof(camera_fps_arg), "--camera-fps=%d", ctx->camera_fps);
-		if (ctx->codec && strcmp(ctx->codec, "h265") == 0) {
-			/* Keep startup Camera2 configuration independent from runtime camera controls. */
-			snprintf(control_codec_arg, sizeof(control_codec_arg),
-				 "--video-codec-options=__scrcpy_obs_camera_control_port:int=%u,"
-				 "max-bframes:int=0,latency:int=1,priority:int=0,"
-				 "max-fps-to-encoder:float=%.3f,operating-rate:int=%d",
-				 (unsigned)control_port,
-				 ctx->camera_fps > 0 ? (float)ctx->camera_fps : 30.0f,
-				 ctx->camera_fps > 0 ? ctx->camera_fps : 30);
-		} else {
-			snprintf(control_codec_arg, sizeof(control_codec_arg),
-				 "--video-codec-options=__scrcpy_obs_camera_control_port:int=%u",
-				 (unsigned)control_port);
-		}
+		/* Keep startup Camera2 and encoder configuration independent from
+		 * runtime camera controls. */
+		snprintf(control_codec_arg, sizeof(control_codec_arg),
+			 "--video-codec-options=__scrcpy_obs_camera_control_port:int=%u",
+			 (unsigned)control_port);
 	}
 
 	char serial_arg[128] = {0};
