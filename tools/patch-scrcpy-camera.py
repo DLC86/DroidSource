@@ -85,9 +85,9 @@ patch("server/src/main/java/com/genymobile/scrcpy/Options.java", [
                     if (codecOptions != null) {
                         for (int j = 0; j < codecOptions.size();) {
                             CodecOption option = codecOptions.get(j);
-                            String key = option.getKey();
+                            String optionKey = option.getKey();
                             Object valueObj = option.getValue();
-                            if (CAMERA_CONTROL_OPTION.equals(key)
+                            if (CAMERA_CONTROL_OPTION.equals(optionKey)
                                     && valueObj instanceof Integer) {
                                 int port = (Integer) valueObj;
                                 if (port < 1 || port > 65535) {
@@ -95,16 +95,16 @@ patch("server/src/main/java/com/genymobile/scrcpy/Options.java", [
                                 }
                                 options.cameraControlPort = port;
                                 codecOptions.remove(j);
-                            } else if ("__scrcpy_obs_camera_iso".equals(key) && valueObj instanceof Integer) {
+                            } else if ("__scrcpy_obs_camera_iso".equals(optionKey) && valueObj instanceof Integer) {
                                 options.cameraIso = (Integer) valueObj;
                                 codecOptions.remove(j);
-                            } else if ("__scrcpy_obs_camera_shutter".equals(key) && valueObj instanceof Integer) {
+                            } else if ("__scrcpy_obs_camera_shutter".equals(optionKey) && valueObj instanceof Integer) {
                                 options.cameraShutterUs = (Integer) valueObj;
                                 codecOptions.remove(j);
-                            } else if ("__scrcpy_obs_camera_focus".equals(key) && valueObj instanceof Float) {
+                            } else if ("__scrcpy_obs_camera_focus".equals(optionKey) && valueObj instanceof Float) {
                                 options.cameraFocusDistance = (Float) valueObj;
                                 codecOptions.remove(j);
-                            } else if ("__scrcpy_obs_camera_wb".equals(key) && valueObj instanceof Integer) {
+                            } else if ("__scrcpy_obs_camera_wb".equals(optionKey) && valueObj instanceof Integer) {
                                 options.cameraWbKelvin = (Integer) valueObj;
                                 codecOptions.remove(j);
                             } else {
