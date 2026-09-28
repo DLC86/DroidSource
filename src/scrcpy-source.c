@@ -178,14 +178,16 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 			 * still ignore unsupported hints, but these prevent avoidable queueing. */
 			snprintf(control_codec_arg, sizeof(control_codec_arg),
 				 "--video-codec-options=__scrcpy_obs_camera_control_port:int=%u,"
+				 "__scrcpy_obs_camera_zoom:float=%.3f,"
+				 "__scrcpy_obs_camera_torch:bool=%d,"
 				 "__scrcpy_obs_camera_iso:int=%d,"
 				 "__scrcpy_obs_camera_shutter:int=%d,"
 				 "__scrcpy_obs_camera_focus:float=%.3f,"
 				 "__scrcpy_obs_camera_wb:int=%d,"
 				 "max-bframes:int=0,latency:int=1,priority:int=0,"
 				 "max-fps-to-encoder:float=%.3f,operating-rate:int=%d",
-				 (unsigned)control_port, ctx->camera_iso, ctx->camera_shutter_us,
-				 ctx->camera_focus_distance, ctx->camera_wb_kelvin,
+				 (unsigned)control_port, ctx->camera_zoom, ctx->camera_torch, ctx->camera_iso,
+				 ctx->camera_shutter_us, ctx->camera_focus_distance, ctx->camera_wb_kelvin,
 				 ctx->camera_fps > 0 ? (float)ctx->camera_fps : 30.0f,
 				 ctx->camera_fps > 0 ? ctx->camera_fps : 30);
 		} else {
@@ -195,8 +197,8 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 				 "__scrcpy_obs_camera_shutter:int=%d,"
 				 "__scrcpy_obs_camera_focus:float=%.3f,"
 				 "__scrcpy_obs_camera_wb:int=%d",
-				 (unsigned)control_port, ctx->camera_iso, ctx->camera_shutter_us,
-				 ctx->camera_focus_distance, ctx->camera_wb_kelvin);
+				 (unsigned)control_port, ctx->camera_zoom, ctx->camera_torch, ctx->camera_iso,
+				 ctx->camera_shutter_us, ctx->camera_focus_distance, ctx->camera_wb_kelvin);
 		}
 	}
 
@@ -486,7 +488,7 @@ static void src_get_defaults(obs_data_t *settings)
 	obs_data_set_default_string(settings, "camera_id", "0");
 	obs_data_set_default_string(settings, "camera_size", "1920x1080");
 	obs_data_set_default_int(settings, "camera_fps", 30);
-	obs_data_set_default_double(settings, "camera_zoom", 1.0);
+	obs_data_set_default_double(settings, "camera_zoom", 0.6);
 	obs_data_set_default_bool(settings, "camera_torch", false);
 	obs_data_set_default_int(settings, "camera_iso", 0);
 	obs_data_set_default_int(settings, "camera_shutter_us", 0);
