@@ -116,6 +116,22 @@ patch("server/src/main/java/com/genymobile/scrcpy/util/LogUtils.java", [
                         }
                     }
 
+                    Range<Integer> isoRange = characteristics.get(
+                            CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE);
+                    if (isoRange != null) {
+                        builder.append(", iso-range=[")
+                                .append(isoRange.getLower()).append(", ")
+                                .append(isoRange.getUpper()).append(']');
+                    }
+
+                    Range<Long> exposureRange = characteristics.get(
+                            CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE);
+                    if (exposureRange != null) {
+                        builder.append(", exposure-time-range-ns=[")
+                                .append(exposureRange.getLower()).append(", ")
+                                .append(exposureRange.getUpper()).append(']');
+                    }
+
                     Float focusMax = characteristics.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE);
                     if (focusMax != null && focusMax > 0) {
                         builder.append(", focus-range=[0, ")
@@ -265,6 +281,12 @@ import android.hardware.camera2.params.StreamConfigurationMap;
                         requestBuilder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom);
                     }
 
+                    try {
+                        applyCurrentCameraSettings();
+                    } catch (RuntimeException e) {
+                        Ln.w("Could not apply initial camera settings: " + e.getMessage());
+                    }
+
                     CaptureRequest request = requestBuilder.build();
 """,
         """                    CaptureRequest request = requestBuilder.build();
@@ -337,9 +359,29 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
             }
         }
 
-        applyExposure();
-        applyFocus();
-        applyWhiteBalance();
+        try {
+            applyExposure();
+        } catch (RuntimeException e) {
+            Ln.w("Could not apply camera exposure: " + e.getMessage());
+        }
+        try {
+            applyFocus();
+        } catch (RuntimeException e) {
+            Ln.w("Could not apply camera focus: " + e.getMessage());
+        }
+        try {
+            applyWhiteBalance();
+        } catch (RuntimeException e) {
+            Ln.w("Could not apply camera white balance: " + e.getMessage());
+            requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
+                    CaptureRequest.CONTROL_AWB_MODE_AUTO);
+            if (android.os.Build.VERSION.SDK_INT >= 36) {
+                requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TEMPERATURE, null);
+                requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TINT, null);
+                requestBuilder.set(CaptureRequest.COLOR_CORRECTION_MODE,
+                        CaptureRequest.COLOR_CORRECTION_MODE_FAST);
+            }
+        }
 
         Boolean flashAvailable =
                 cameraCharacteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
