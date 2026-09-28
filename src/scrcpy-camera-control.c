@@ -128,8 +128,8 @@ static bool connect_control(struct scrcpy_camera_control *control)
 }
 
 static bool send_snapshot(struct scrcpy_camera_control *control,
-			  float zoom, bool torch, int iso, int shutter_us,
-			  float focus_distance, int wb_kelvin)
+				 float zoom, bool torch, int iso, int shutter_us,
+				 float focus_distance, int wb_kelvin)
 {
 	if (!connect_control(control))
 		return false;
@@ -241,8 +241,8 @@ void scrcpy_camera_control_destroy(scrcpy_camera_control_t *control)
 }
 
 bool scrcpy_camera_control_apply(scrcpy_camera_control_t *control,
-					 float zoom, bool torch, int iso, int shutter_us,
-					 float focus_distance, int wb_kelvin)
+				 float zoom, bool torch, int iso, int shutter_us,
+				 float focus_distance, int wb_kelvin)
 {
 	if (!control)
 		return false;
