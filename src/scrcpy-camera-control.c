@@ -5,6 +5,7 @@
 #include <obs-module.h>
 #include <util/threading.h>
 #include <util/bmem.h>
+#include <util/platform.h>
 
 #include <pthread.h>
 #include <string.h>
