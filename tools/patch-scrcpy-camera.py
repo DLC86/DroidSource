@@ -458,7 +458,9 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
             }
             requestBuilder.set(CaptureRequest.SENSOR_SENSITIVITY, iso);
             requestBuilder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureNs);
-            requestBuilder.set(CaptureRequest.SENSOR_FRAME_DURATION, exposureNs);
+            long frameDurationNs = fps > 0 ? 1_000_000_000L / fps : exposureNs;
+            requestBuilder.set(CaptureRequest.SENSOR_FRAME_DURATION,
+                    Math.max(exposureNs, frameDurationNs));
             return;
         }
 
