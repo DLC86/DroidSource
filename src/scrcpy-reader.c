@@ -253,8 +253,7 @@ static bool open_decoder(struct scrcpy_reader *r, uint32_t codec_id, uint32_t wi
 			}
 		}
 		if (r->hw_pix_fmt != AV_PIX_FMT_NONE) {
-			if (av_hwdevice_ctx_create(&r->hw_device_ctx, AV_HWDEVICE_TYPE_D3D11VA,
-						NULL, NULL, 0) == 0) {
+			if (av_hwdevice_ctx_create(&r->hw_device_ctx, AV_HWDEVICE_TYPE_D3D11VA, NULL, NULL, 0) == 0) {
 				r->codec_ctx->get_format = get_hw_format;
 				r->codec_ctx->hw_device_ctx = av_buffer_ref(r->hw_device_ctx);
 				obs_log(LOG_INFO, "scrcpy-reader: using D3D11VA hardware decoding");
@@ -308,7 +307,8 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 
 	if (r->portrait_mode) {
 		if (!rotate_frame_90_ccw(r, out)) {
-			obs_log(LOG_WARNING, "scrcpy-reader: portrait mode unsupported for pixel format %d", out->format);
+			obs_log(LOG_WARNING, "scrcpy-reader: portrait mode unsupported for pixel format %d",
+				out->format);
 			return;
 		}
 		out = r->portrait_frame;
@@ -342,7 +342,7 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	enum video_colorspace cs = obs_colorspace_from_av(out);
 	enum video_range_type range = obs_range_from_av(out);
 	video_format_get_parameters_for_format(cs, range, fmt, obs_frame.color_matrix, obs_frame.color_range_min,
-						obs_frame.color_range_max);
+					       obs_frame.color_range_max);
 	obs_frame.full_range = range == VIDEO_RANGE_FULL;
 	obs_frame.trc = obs_trc_from_av(out);
 
@@ -387,7 +387,7 @@ static void *reader_thread(void *data)
 		size_t backlog_limit = codec_id == SC_CODEC_ID_H265 ? (256 * 1024) : (512 * 1024);
 		if (!drop_until_keyframe && socket_pending_bytes(r->sock) > backlog_limit) {
 			obs_log(LOG_WARNING, "scrcpy-reader: video backlog exceeded %zu KiB; dropping to next keyframe",
-				 backlog_limit / 1024);
+				backlog_limit / 1024);
 			drop_until_keyframe = true;
 			avcodec_flush_buffers(r->codec_ctx);
 			bfree(r->pending_config);
@@ -482,8 +482,8 @@ done:
 	return NULL;
 }
 
-scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port, bool hardware_decoding,
-							bool flip_vertical, int video_buffer_ms, bool portrait_mode)
+scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port, bool hardware_decoding, bool flip_vertical,
+				      int video_buffer_ms, bool portrait_mode)
 {
 	struct scrcpy_reader *r = bzalloc(sizeof(*r));
 	r->source = source;
