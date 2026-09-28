@@ -1220,9 +1220,7 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_t *camera_shutter = obs_properties_add_list(props, "camera_shutter_us",
 								 obs_module_text("CameraShutter"), OBS_COMBO_TYPE_LIST,
 								 OBS_COMBO_FORMAT_INT);
-	obs_data_t *current_settings = obs_source_get_settings(ctx->source);
 	populate_shutter_list(camera_shutter, 1000, 200000000);
-	obs_data_release(current_settings);
 	obs_property_t *camera_focus = obs_properties_add_float_slider(props, "camera_focus_distance",
 								       obs_module_text("CameraFocus"), 0.0, 20.0, 0.1);
 	obs_property_t *camera_wb = obs_properties_add_int_slider(props, "camera_wb_kelvin",
