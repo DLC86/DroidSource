@@ -414,8 +414,12 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	r->last_frame_ns = os_gettime_ns();
 	pthread_mutex_unlock(&r->state_mutex);
 
-	video_format_get_parameters_for_format(VIDEO_CS_DEFAULT, VIDEO_RANGE_DEFAULT, fmt, obs_frame.color_matrix,
-					       obs_frame.color_range_min, obs_frame.color_range_max);
+	enum video_colorspace cs = parse_color_space(r->color_space);
+	enum video_range_type range = parse_color_range(r->color_range);
+	video_format_get_parameters_for_format(cs, range, fmt, obs_frame.color_matrix, obs_frame.color_range_min,
+						obs_frame.color_range_max);
+	obs_frame.full_range = range == VIDEO_RANGE_FULL;
+	obs_frame.trc = (uint8_t)parse_transfer(r->transfer, cs);
 
 	obs_source_output_video(r->source, &obs_frame);
 }
@@ -553,11 +557,9 @@ done:
 	return NULL;
 }
 
-scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port,
-							bool hardware_decoding, bool flip_vertical,
-							int video_buffer_ms, const char *pixel_format,
-							const char *color_space, const char *color_range,
-							const char *transfer)
+scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port, bool hardware_decoding,
+							bool flip_vertical, int video_buffer_ms, const char *pixel_format,
+							const char *color_space, const char *color_range, const char *transfer)
 {
 	struct scrcpy_reader *r = bzalloc(sizeof(*r));
 	r->source = source;
