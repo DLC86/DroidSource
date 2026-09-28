@@ -677,7 +677,7 @@ static bool parse_selected_camera_sizes(const char *output, const char *selected
 
 		char camera_id[64];
 		if (parse_camera_id_line(line_copy, camera_id, sizeof(camera_id), NULL, 0, NULL, NULL, NULL, NULL, NULL,
-					 NULL, NULL)) {
+					 NULL, NULL, NULL)) {
 			in_camera = strcmp(camera_id, selected_id) == 0;
 			high_speed = false;
 		} else if (in_camera) {
