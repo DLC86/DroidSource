@@ -54,8 +54,8 @@ patch("server/src/main/java/com/genymobile/scrcpy/Options.java", [
 """                case "video_codec_options": {
                     List<CodecOption> codecOptions = CodecOption.parse(value);
                     if (codecOptions != null) {
-                        for (int i = 0; i < codecOptions.size();) {
-                            CodecOption option = codecOptions.get(i);
+                        for (int j = 0; j < codecOptions.size();) {
+                            CodecOption option = codecOptions.get(j);
                             if (CAMERA_CONTROL_OPTION.equals(option.getKey())
                                     && option.getValue() instanceof Integer) {
                                 int port = (Integer) option.getValue();
@@ -63,9 +63,9 @@ patch("server/src/main/java/com/genymobile/scrcpy/Options.java", [
                                     throw new IllegalArgumentException("Invalid camera control port: " + port);
                                 }
                                 options.cameraControlPort = port;
-                                codecOptions.remove(i);
+                                codecOptions.remove(j);
                             } else {
-                                ++i;
+                                ++j;
                             }
                         }
                     }
@@ -89,6 +89,7 @@ import android.hardware.camera2.params.StreamConfigurationMap;
     private float zoom;
 """,
 """    private final boolean initialTorch;
+    private final int cameraControlPort;
     private float zoom;
     private boolean torchEnabled;
     private int manualIso;
@@ -111,6 +112,7 @@ import android.hardware.camera2.params.StreamConfigurationMap;
         this.zoom = options.getCameraZoom();
 """,
 """        this.initialTorch = options.getCameraTorch();
+        this.cameraControlPort = options.getCameraControlPort();
         this.zoom = options.getCameraZoom();
         this.torchEnabled = initialTorch;
 """),
@@ -121,10 +123,9 @@ import android.hardware.camera2.params.StreamConfigurationMap;
 """            Ln.i("Using camera '" + cameraId + "'");
             cameraDevice = openCamera(cameraId);
 
-            int controlPort = options.getCameraControlPort();
-            if (controlPort > 0) {
+            if (cameraControlPort > 0) {
                 try {
-                    cameraControlServer = new CameraControlServer(this, controlPort);
+                    cameraControlServer = new CameraControlServer(this, cameraControlPort);
                     cameraControlServer.start();
                 } catch (IOException e) {
                     Ln.w("Could not start camera control server: " + e.getMessage());
