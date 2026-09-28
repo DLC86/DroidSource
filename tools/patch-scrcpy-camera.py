@@ -148,11 +148,6 @@ patch("server/src/main/java/com/genymobile/scrcpy/util/LogUtils.java", [
                         }
                     }
 
-                    Integer sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
-                    if (sensorOrientation != null) {
-                        builder.append(", sensor-orientation=").append(sensorOrientation);
-                    }
-
                     Float focusMax = characteristics.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE);
                     if (focusMax != null && focusMax > 0) {
                         builder.append(", focus-range=[0, ")
@@ -364,17 +359,20 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
         }
 
         zoom = clampZoom(zoom);
-        Rect activeArray = cameraCharacteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE);
-        if (activeArray != null) {
-            float safeZoom = Math.max(1f, zoom);
-            int cropWidth = Math.max(1, Math.round(activeArray.width() / safeZoom));
-            int cropHeight = Math.max(1, Math.round(activeArray.height() / safeZoom));
-            int left = activeArray.left + (activeArray.width() - cropWidth) / 2;
-            int top = activeArray.top + (activeArray.height() - cropHeight) / 2;
-            requestBuilder.set(CaptureRequest.SCALER_CROP_REGION,
-                    new Rect(left, top, left + cropWidth, top + cropHeight));
-        } else {
+        if (android.os.Build.VERSION.SDK_INT >= 30 && zoomRange != null) {
             requestBuilder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom);
+        } else {
+            Rect activeArray = cameraCharacteristics.get(
+                    CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE);
+            if (activeArray != null) {
+                float safeZoom = Math.max(1f, zoom);
+                int cropWidth = Math.max(1, Math.round(activeArray.width() / safeZoom));
+                int cropHeight = Math.max(1, Math.round(activeArray.height() / safeZoom));
+                int left = activeArray.left + (activeArray.width() - cropWidth) / 2;
+                int top = activeArray.top + (activeArray.height() - cropHeight) / 2;
+                requestBuilder.set(CaptureRequest.SCALER_CROP_REGION,
+                        new Rect(left, top, left + cropWidth, top + cropHeight));
+            }
         }
 
         applyExposure();
@@ -560,13 +558,8 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
                     CameraCharacteristics.COLOR_CORRECTION_COLOR_TEMPERATURE_RANGE);
             int[] correctionModes = cameraCharacteristics.get(
                     CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_MODES);
-            int[] capabilities = cameraCharacteristics.get(
-                    CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
-
             boolean cctSupported = cctRange != null
-                    && contains(correctionModes, CaptureRequest.COLOR_CORRECTION_MODE_CCT)
-                    && contains(capabilities,
-                            CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING);
+                    && contains(correctionModes, CaptureRequest.COLOR_CORRECTION_MODE_CCT);
 
             if (cctSupported) {
                 requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
@@ -582,6 +575,12 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
 
         int[] awbModes =
                 cameraCharacteristics.get(CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES);
+        requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TEMPERATURE, null);
+        requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TINT, null);
+        if (android.os.Build.VERSION.SDK_INT >= 36) {
+            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_MODE,
+                    CaptureRequest.COLOR_CORRECTION_MODE_FAST);
+        }
         int wbMode = chooseAwbMode(whiteBalanceKelvin, awbModes);
         if (wbMode != CaptureRequest.CONTROL_AWB_MODE_AUTO) {
             requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE, wbMode);
