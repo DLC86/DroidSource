@@ -638,11 +638,29 @@ static void populate_camera_fallbacks(obs_property_t *camera_id_prop,
 	}
 
 	if (obs_property_list_item_count(fps_prop) == 0) {
-		static const int fps[] = {24, 25, 30, 50, 60};
+		static const int fps[] = {24, 25, 30, 50, 60, 90, 120, 240};
 		for (size_t i = 0; i < sizeof(fps) / sizeof(fps[0]); ++i) {
 			char label[32];
 			snprintf(label, sizeof(label), "%d fps", fps[i]);
 			obs_property_list_add_int(fps_prop, label, fps[i]);
+		}
+	}
+}
+
+static void parse_fps_values_from_line(const char *line, int *values, size_t *count)
+{
+	const char *p = strstr(line, "fps=");
+	if (!p)
+		return;
+	p += 4;
+	while (*p && *p != ']' && *p != '}') {
+		if (isdigit((unsigned char)*p)) {
+			char *next;
+			long value = strtol(p, &next, 10);
+			add_unique_fps(values, count, (int)value);
+			p = next;
+		} else {
+			++p;
 		}
 	}
 }
@@ -735,7 +753,9 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 			if (in_selected_camera && focus_max > 0.0f)
 				selected_focus_max = focus_max;
 		} else if (in_selected_camera) {
-			/* High-speed capture is intentionally excluded. */
+			/* High-speed FPS values are exposed, but the constrained
+			 * high-speed camera session is never enabled by the plugin. */
+			parse_fps_values_from_line(line_copy, selected_fps, &selected_fps_count);
 		}
 
 		if (!end)
