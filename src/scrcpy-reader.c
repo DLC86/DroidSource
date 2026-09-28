@@ -26,6 +26,7 @@ typedef int socklen_t;
 #include <libswscale/swscale.h>
 
 #include <stdint.h>
+#include <math.h>
 #include <string.h>
 #include <pthread.h>
 #ifndef _WIN32
@@ -86,6 +87,9 @@ struct scrcpy_reader {
 	AVFrame *transfer_frame;
 	struct SwsContext *convert_ctx;
 	AVFrame *converted_frame;
+	AVFrame *rgb_frame;
+	struct SwsContext *to_rgb_ctx;
+	struct SwsContext *from_rgb_ctx;
 	enum AVPixelFormat requested_pix_fmt;
 
 	AVCodecContext *codec_ctx;
@@ -348,11 +352,191 @@ static bool open_decoder(struct scrcpy_reader *r, uint32_t codec_id, uint32_t wi
 	r->frame = av_frame_alloc();
 	r->transfer_frame = av_frame_alloc();
 	r->converted_frame = av_frame_alloc();
-	if (!r->packet || !r->frame || !r->transfer_frame || !r->converted_frame) {
+	r->rgb_frame = av_frame_alloc();
+	if (!r->packet || !r->frame || !r->transfer_frame || !r->converted_frame || !r->rgb_frame) {
 		obs_log(LOG_ERROR, "scrcpy-reader: av alloc failed");
 		return false;
 	}
 	return true;
+}
+
+static enum AVColorTransferCharacteristic source_trc_from_frame(const AVFrame *f)
+{
+	if (!f)
+		return AVCOL_TRC_UNSPECIFIED;
+	return (enum AVColorTransferCharacteristic)f->color_trc;
+}
+
+enum color_xfer {
+	XFER_SRGB,
+	XFER_HLG,
+	XFER_PQ,
+};
+
+static enum color_xfer parse_target_xfer(const char *value)
+{
+	if (value && strcmp(value, "hlg") == 0)
+		return XFER_HLG;
+	if (value && strcmp(value, "pq") == 0)
+		return XFER_PQ;
+	return XFER_SRGB;
+}
+
+static enum color_xfer source_xfer_from_frame(const AVFrame *f)
+{
+	switch (source_trc_from_frame(f)) {
+	case AVCOL_TRC_ARIB_STD_B67:
+		return XFER_HLG;
+	case AVCOL_TRC_SMPTE2084:
+		return XFER_PQ;
+	default:
+		return XFER_SRGB;
+	}
+}
+
+static int sws_cs_from_av(const AVFrame *f)
+{
+	switch ((enum AVColorSpace)f->colorspace) {
+	case AVCOL_SPC_BT709:
+		return SWS_CS_ITU709;
+	case AVCOL_SPC_BT470BG:
+	case AVCOL_SPC_SMPTE170M:
+		return SWS_CS_ITU601;
+	case AVCOL_SPC_SMPTE240M:
+		return SWS_CS_SMPTE240M;
+	case AVCOL_SPC_BT2020_NCL:
+	case AVCOL_SPC_BT2020_CL:
+		return SWS_CS_BT2020;
+	default:
+		return SWS_CS_ITU709;
+	}
+}
+
+static int sws_cs_from_output(const char *value, int source_cs)
+{
+	if (!value || strcmp(value, "auto") == 0)
+		return source_cs;
+	if (strcmp(value, "601") == 0)
+		return SWS_CS_ITU601;
+	if (strcmp(value, "709") == 0 || strcmp(value, "srgb") == 0)
+		return SWS_CS_ITU709;
+	if (strcmp(value, "2100pq") == 0 || strcmp(value, "2100hlg") == 0)
+		return SWS_CS_BT2020;
+	return source_cs;
+}
+
+static enum video_colorspace obs_cs_from_output(const char *value, int source_cs)
+{
+	if (!value || strcmp(value, "auto") == 0) {
+		switch (source_cs) {
+		case SWS_CS_ITU601:
+			return VIDEO_CS_601;
+		case SWS_CS_BT2020:
+			return VIDEO_CS_2100_PQ;
+		default:
+			return VIDEO_CS_709;
+		}
+	}
+	if (strcmp(value, "601") == 0)
+		return VIDEO_CS_601;
+	if (strcmp(value, "709") == 0)
+		return VIDEO_CS_709;
+	if (strcmp(value, "srgb") == 0)
+		return VIDEO_CS_SRGB;
+	if (strcmp(value, "2100pq") == 0)
+		return VIDEO_CS_2100_PQ;
+	if (strcmp(value, "2100hlg") == 0)
+		return VIDEO_CS_2100_HLG;
+	return VIDEO_CS_DEFAULT;
+}
+
+static bool output_is_full_range(const char *value, const AVFrame *f)
+{
+	if (value && strcmp(value, "full") == 0)
+		return true;
+	if (value && strcmp(value, "limited") == 0)
+		return false;
+	return f->color_range == AVCOL_RANGE_JPEG;
+}
+
+static double decode_xfer(double v, enum color_xfer xfer)
+{
+	if (xfer == XFER_HLG) {
+		if (v <= 0.5)
+			return (v * v) / 3.0;
+		const double a = 0.17883277;
+		const double b = 0.28466892;
+		const double c = 0.55991073;
+		return (exp((v - c) / a) + b) / 12.0;
+	}
+	if (xfer == XFER_PQ) {
+		/* Treat SDR white as 100 nits when moving into PQ. */
+		const double m1 = 2610.0 / 16384.0;
+		const double m2 = 2523.0 / 32.0;
+		const double c1 = 3424.0 / 4096.0;
+		const double c2 = 2413.0 / 128.0;
+		const double c3 = 2392.0 / 128.0;
+		const double p = pow(fmax(v, 0.0), 1.0 / m2);
+		double n = pow(fmax(p - c1, 0.0) / fmax(c2 - c3 * p, 1e-9), 1.0 / m1);
+		return n * 10000.0 / 100.0;
+	}
+	if (v <= 0.04045)
+		return v / 12.92;
+	return pow((v + 0.055) / 1.055, 2.4);
+}
+
+static double encode_xfer(double v, enum color_xfer xfer)
+{
+	v = fmax(0.0, fmin(1.0, v));
+	if (xfer == XFER_HLG) {
+		const double a = 0.17883277;
+		const double b = 0.28466892;
+		const double c = 0.55991073;
+		if (v <= 1.0 / 12.0)
+			return sqrt(3.0 * v);
+		return a * log(12.0 * v - b) + c;
+	}
+	if (xfer == XFER_PQ) {
+		const double m1 = 2610.0 / 16384.0;
+		const double m2 = 2523.0 / 32.0;
+		const double c1 = 3424.0 / 4096.0;
+		const double c2 = 2413.0 / 128.0;
+		const double c3 = 2392.0 / 128.0;
+		const double nits = v * 100.0;
+		const double l = fmax(nits / 10000.0, 0.0);
+		const double p = pow(l, m1);
+		const double n = pow((c1 + c2 * p) / (1.0 + c3 * p), m2);
+		return n;
+	}
+	if (v <= 0.0031308)
+		return 12.92 * v;
+	return 1.055 * pow(v, 1.0 / 2.4) - 0.055;
+}
+
+static void build_xfer_lut(uint8_t lut[256], enum color_xfer src, enum color_xfer dst)
+{
+	for (int i = 0; i < 256; ++i) {
+		double code = i / 255.0;
+		double linear = decode_xfer(code, src);
+		double encoded = encode_xfer(linear, dst);
+		int out = (int)lrint(fmax(0.0, fmin(1.0, encoded)) * 255.0);
+		lut[i] = (uint8_t)out;
+	}
+}
+
+static void apply_xfer_lut(AVFrame *frame, const uint8_t lut[256])
+{
+	if (!frame || frame->format != AV_PIX_FMT_RGB24)
+		return;
+	for (int y = 0; y < frame->height; ++y) {
+		uint8_t *row = frame->data[0] + (size_t)y * frame->linesize[0];
+		for (int x = 0; x < frame->width; ++x) {
+			uint8_t *p = row + x * 3;
+			p[0] = lut[p[0]];
+			p[1] = lut[p[1]];
+			p[2] = lut[p[2]];
+		}
+	}
 }
 
 static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
@@ -368,12 +552,78 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 		out = r->transfer_frame;
 	}
 
-	if (r->requested_pix_fmt != AV_PIX_FMT_NONE && out->format != r->requested_pix_fmt) {
-		r->convert_ctx = sws_getCachedContext(r->convert_ctx,
+	bool want_processing =
+		(r->color_space && strcmp(r->color_space, "auto") != 0) ||
+		(r->color_range && strcmp(r->color_range, "auto") != 0) ||
+		(r->transfer && strcmp(r->transfer, "auto") != 0);
+
+	enum AVPixelFormat target_fmt = r->requested_pix_fmt != AV_PIX_FMT_NONE
+		? r->requested_pix_fmt
+		: (enum AVPixelFormat)out->format;
+
+	AVColorRange src_range = out->color_range;
+	bool target_full = output_is_full_range(r->color_range, out);
+	int src_cs = sws_cs_from_av(out);
+	int dst_cs = sws_cs_from_output(r->color_space, src_cs);
+	enum color_xfer src_xfer = source_xfer_from_frame(out);
+	enum color_xfer dst_xfer = parse_target_xfer(r->transfer);
+	bool range_changed = r->color_range && strcmp(r->color_range, "auto") != 0 &&
+		((target_full && src_range != AVCOL_RANGE_JPEG) || (!target_full && src_range == AVCOL_RANGE_JPEG));
+	bool cs_changed = r->color_space && strcmp(r->color_space, "auto") != 0 && dst_cs != src_cs;
+	bool xfer_changed = r->transfer && strcmp(r->transfer, "auto") != 0 && dst_xfer != src_xfer;
+
+	if (want_processing && (range_changed || cs_changed || xfer_changed)) {
+		r->to_rgb_ctx = sws_getCachedContext(r->to_rgb_ctx,
+			(int)out->width, (int)out->height, (enum AVPixelFormat)out->format,
+			(int)out->width, (int)out->height, AV_PIX_FMT_RGB24,
+			SWS_FAST_BILINEAR, NULL, NULL, NULL);
+		if (!r->to_rgb_ctx) {
+			obs_log(LOG_WARNING, "scrcpy-reader: RGB processing context creation failed");
+			return;
+		}
+		sws_setColorspaceDetails(r->to_rgb_ctx, sws_getCoefficients(src_cs),
+			src_range == AVCOL_RANGE_JPEG, sws_getCoefficients(dst_cs), 1, 0, 1 << 16, 1 << 16);
+
+		av_frame_unref(r->rgb_frame);
+		r->rgb_frame->format = AV_PIX_FMT_RGB24;
+		r->rgb_frame->width = out->width;
+		r->rgb_frame->height = out->height;
+		if (av_frame_get_buffer(r->rgb_frame, 32) < 0)
+			return;
+		sws_scale(r->to_rgb_ctx, (const uint8_t * const *)out->data, out->linesize,
+			0, (int)out->height, r->rgb_frame->data, r->rgb_frame->linesize);
+
+		if (xfer_changed) {
+			uint8_t lut[256];
+			build_xfer_lut(lut, src_xfer, dst_xfer);
+			apply_xfer_lut(r->rgb_frame, lut);
+		}
+
+		r->from_rgb_ctx = sws_getCachedContext(r->from_rgb_ctx,
+			(int)r->rgb_frame->width, (int)r->rgb_frame->height, AV_PIX_FMT_RGB24,
+			(int)r->rgb_frame->width, (int)r->rgb_frame->height, target_fmt,
+			SWS_FAST_BILINEAR, NULL, NULL, NULL);
+		if (!r->from_rgb_ctx)
+			return;
+		sws_setColorspaceDetails(r->from_rgb_ctx, sws_getCoefficients(dst_cs), 1,
+			sws_getCoefficients(dst_cs), target_full ? 1 : 0, 0, 1 << 16, 1 << 16);
+
+		av_frame_unref(r->converted_frame);
+		r->converted_frame->format = target_fmt;
+		r->converted_frame->width = out->width;
+		r->converted_frame->height = out->height;
+		if (av_frame_get_buffer(r->converted_frame, 32) < 0)
+			return;
+		sws_scale(r->from_rgb_ctx, (const uint8_t * const *)r->rgb_frame->data,
+			r->rgb_frame->linesize, 0, r->rgb_frame->height,
+			r->converted_frame->data, r->converted_frame->linesize);
+		out = r->converted_frame;
+	} else if (r->requested_pix_fmt != AV_PIX_FMT_NONE && out->format != r->requested_pix_fmt) {
+		r->from_rgb_ctx = sws_getCachedContext(r->from_rgb_ctx,
 			(int)out->width, (int)out->height, (enum AVPixelFormat)out->format,
 			(int)out->width, (int)out->height, r->requested_pix_fmt,
 			SWS_FAST_BILINEAR, NULL, NULL, NULL);
-		if (!r->convert_ctx)
+		if (!r->from_rgb_ctx)
 			return;
 		av_frame_unref(r->converted_frame);
 		r->converted_frame->format = r->requested_pix_fmt;
@@ -381,14 +631,14 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 		r->converted_frame->height = out->height;
 		if (av_frame_get_buffer(r->converted_frame, 32) < 0)
 			return;
-		sws_scale(r->convert_ctx, (const uint8_t * const *)out->data, out->linesize,
+		sws_scale(r->from_rgb_ctx, (const uint8_t * const *)out->data, out->linesize,
 			0, (int)out->height, r->converted_frame->data, r->converted_frame->linesize);
 		out = r->converted_frame;
 	}
 
-	enum video_format fmt = av_to_obs_format(out->format);
+	enum video_format fmt = av_to_obs_format((enum AVPixelFormat)out->format);
 	if (fmt == VIDEO_FORMAT_NONE) {
-		obs_log(LOG_WARNING, "scrcpy-reader: unsupported pix fmt %d", f->format);
+		obs_log(LOG_WARNING, "scrcpy-reader: unsupported pix fmt %d", out->format);
 		return;
 	}
 
@@ -400,9 +650,6 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 		obs_frame.data[i] = out->data[i];
 		obs_frame.linesize[i] = (uint32_t)out->linesize[i];
 	}
-	/* scrcpy PTS is microseconds; OBS expects nanoseconds. If PTS is
-	 * missing (rare post-first-IDR), fall back to the OS clock to keep
-	 * the async source moving. */
 	if (out->pts == AV_NOPTS_VALUE)
 		obs_frame.timestamp = (uint64_t)os_gettime_ns();
 	else
@@ -414,8 +661,8 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	r->last_frame_ns = os_gettime_ns();
 	pthread_mutex_unlock(&r->state_mutex);
 
-	enum video_colorspace cs = parse_color_space(r->color_space);
-	enum video_range_type range = parse_color_range(r->color_range);
+	enum video_colorspace cs = obs_cs_from_output(r->color_space, dst_cs);
+	enum video_range_type range = target_full ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
 	video_format_get_parameters_for_format(cs, range, fmt, obs_frame.color_matrix, obs_frame.color_range_min,
 						obs_frame.color_range_max);
 	obs_frame.full_range = range == VIDEO_RANGE_FULL;
@@ -423,6 +670,8 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 
 	obs_source_output_video(r->source, &obs_frame);
 }
+
+
 
 static void *reader_thread(void *data)
 {
@@ -641,6 +890,12 @@ void scrcpy_reader_destroy(scrcpy_reader_t *r)
 		av_frame_free(&r->transfer_frame);
 	if (r->converted_frame)
 		av_frame_free(&r->converted_frame);
+	if (r->rgb_frame)
+		av_frame_free(&r->rgb_frame);
+	if (r->to_rgb_ctx)
+		sws_freeContext(r->to_rgb_ctx);
+	if (r->from_rgb_ctx)
+		sws_freeContext(r->from_rgb_ctx);
 	if (r->convert_ctx)
 		sws_freeContext(r->convert_ctx);
 	if (r->hw_device_ctx)
