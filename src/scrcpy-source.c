@@ -771,9 +771,8 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 		selected_fps_count = first_fps_count;
 	}
 	if (selected_fps_count == 0) {
-		static const int fallback_fps[] = {24, 25, 30, 50, 60, 90, 120, 240};
-		for (size_t i = 0; i < sizeof(fallback_fps) / sizeof(fallback_fps[0]); ++i)
-			add_unique_fps(selected_fps, &selected_fps_count, fallback_fps[i]);
+		int saved_fps = (int)obs_data_get_int(settings, "camera_fps");
+		add_unique_fps(selected_fps, &selected_fps_count, saved_fps > 0 ? saved_fps : 30);
 	}
 
 	for (size_t i = 0; i < selected_fps_count; ++i) {
