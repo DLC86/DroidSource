@@ -561,7 +561,7 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 		? r->requested_pix_fmt
 		: (enum AVPixelFormat)out->format;
 
-	AVColorRange src_range = out->color_range;
+	enum AVColorRange src_range = out->color_range;
 	bool target_full = output_is_full_range(r->color_range, out);
 	int src_cs = sws_cs_from_av(out);
 	int dst_cs = sws_cs_from_output(r->color_space, src_cs);
