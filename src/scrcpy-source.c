@@ -168,16 +168,29 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 			snprintf(camera_fps_arg, sizeof(camera_fps_arg), "--camera-fps=%d", ctx->camera_fps);
 
 		if (ctx->codec && strcmp(ctx->codec, "h265") == 0) {
-			/* H.265 encoders on Android may introduce additional buffering.
-			 * Keep the encoder realtime-oriented and explicitly forbid B-frames. */
+			/* Prefer realtime encoder settings for HEVC. The device encoder may
+			 * still ignore unsupported hints, but these prevent avoidable queueing. */
 			snprintf(control_codec_arg, sizeof(control_codec_arg),
 				 "--video-codec-options=__scrcpy_obs_camera_control_port:int=%u,"
-				 "max-bframes:int=0,latency:int=0,priority:int=0",
-				 (unsigned)control_port);
+				 "__scrcpy_obs_camera_iso:int=%d,"
+				 "__scrcpy_obs_camera_shutter:int=%d,"
+				 "__scrcpy_obs_camera_focus:float=%.3f,"
+				 "__scrcpy_obs_camera_wb:int=%d,"
+				 "max-bframes:int=0,latency:int=0,priority:int=0,"
+				 "max-fps-to-encoder:float=%.3f,operating-rate:int=%d",
+				 (unsigned)control_port, ctx->camera_iso, ctx->camera_shutter_us,
+				 ctx->camera_focus_distance, ctx->camera_wb_kelvin,
+				 ctx->camera_fps > 0 ? (float)ctx->camera_fps : 30.0f,
+				 ctx->camera_fps > 0 ? ctx->camera_fps : 30);
 		} else {
 			snprintf(control_codec_arg, sizeof(control_codec_arg),
-				 "--video-codec-options=__scrcpy_obs_camera_control_port:int=%u",
-				 (unsigned)control_port);
+				 "--video-codec-options=__scrcpy_obs_camera_control_port:int=%u,"
+				 "__scrcpy_obs_camera_iso:int=%d,"
+				 "__scrcpy_obs_camera_shutter:int=%d,"
+				 "__scrcpy_obs_camera_focus:float=%.3f,"
+				 "__scrcpy_obs_camera_wb:int=%d",
+				 (unsigned)control_port, ctx->camera_iso, ctx->camera_shutter_us,
+				 ctx->camera_focus_distance, ctx->camera_wb_kelvin);
 		}
 	}
 
