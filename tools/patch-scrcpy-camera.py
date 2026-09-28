@@ -75,6 +75,46 @@ patch("server/src/main/java/com/genymobile/scrcpy/Options.java", [
 """),
 ])
 
+patch("server/src/main/java/com/genymobile/scrcpy/util/LogUtils.java", [
+("""                            builder.append(" (").append(getHwCodecType(info)).append(')');
+""",
+"""                            builder.append(" (").append(getHwCodecType(info)).append(')');
+"""),
+("""                    if (Build.VERSION.SDK_INT >= AndroidVersions.API_30_ANDROID_11) {
+                        try {
+                            Range<Float> zoomRange = characteristics.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE);
+                            if (zoomRange != null) {
+                                String zoom = getFormattedZoomRange(zoomRange);
+                                builder.append(", zoom-range=").append(zoom);
+                            }
+                        } catch (Exception e) {
+                            Ln.w("Could not get available zoom ranges for camera " + id, e);
+                        }
+                    }
+
+                    builder.append(')');
+""",
+"""                    if (Build.VERSION.SDK_INT >= AndroidVersions.API_30_ANDROID_11) {
+                        try {
+                            Range<Float> zoomRange = characteristics.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE);
+                            if (zoomRange != null) {
+                                String zoom = getFormattedZoomRange(zoomRange);
+                                builder.append(", zoom-range=").append(zoom);
+                            }
+                        } catch (Exception e) {
+                            Ln.w("Could not get available zoom ranges for camera " + id, e);
+                        }
+                    }
+
+                    Float focusMax = characteristics.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE);
+                    if (focusMax != null && focusMax > 0) {
+                        builder.append(", focus-range=[0, ").append(String.format(java.util.Locale.ROOT, "%.3f", focusMax)).append(']');
+                    }
+
+                    builder.append(')');
+"""),
+])
+
 patch("server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java", [
 ("""import android.hardware.camera2.params.OutputConfiguration;
 import android.hardware.camera2.params.SessionConfiguration;
