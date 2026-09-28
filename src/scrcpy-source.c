@@ -54,6 +54,8 @@ struct scrcpy_src {
 	int camera_shutter_us;
 	float camera_focus_distance;
 	int camera_wb_kelvin;
+	int camera_sensor_orientation;
+	bool camera_apply_rotation;
 
 	pthread_mutex_t state_mutex;
 	pthread_t watchdog_thread;
@@ -169,6 +171,7 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 	char camera_arg[64] = {0};
 	char camera_size_arg[64] = {0};
 	char camera_fps_arg[64] = {0};
+	char capture_orientation_arg[64] = {0};
 	char control_codec_arg[1024] = {0};
 	if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0) {
 		snprintf(camera_arg, sizeof(camera_arg), "--camera-id=%s", ctx->camera_id ? ctx->camera_id : "0");
@@ -176,6 +179,11 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 			snprintf(camera_size_arg, sizeof(camera_size_arg), "--camera-size=%s", ctx->camera_size);
 		if (ctx->camera_fps > 0)
 			snprintf(camera_fps_arg, sizeof(camera_fps_arg), "--camera-fps=%d", ctx->camera_fps);
+		if (ctx->camera_apply_rotation &&
+		    (ctx->camera_sensor_orientation == 0 || ctx->camera_sensor_orientation == 90 ||
+		     ctx->camera_sensor_orientation == 180 || ctx->camera_sensor_orientation == 270))
+			snprintf(capture_orientation_arg, sizeof(capture_orientation_arg),
+				 "--capture-orientation=%d", ctx->camera_sensor_orientation);
 
 		if (ctx->codec && strcmp(ctx->codec, "h265") == 0) {
 			/* Prefer realtime encoder settings for HEVC. The device encoder may
@@ -224,6 +232,7 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 	if (camera_arg[0]) argv[n++] = camera_arg;
 	if (camera_size_arg[0]) argv[n++] = camera_size_arg;
 	if (camera_fps_arg[0]) argv[n++] = camera_fps_arg;
+	if (capture_orientation_arg[0]) argv[n++] = capture_orientation_arg;
 	if (control_codec_arg[0]) argv[n++] = control_codec_arg;
 	if (serial_arg[0]) argv[n++] = serial_arg;
 	argv[n] = NULL;
@@ -316,6 +325,8 @@ static void load_settings(struct scrcpy_src *ctx, obs_data_t *settings)
 	ctx->camera_shutter_us = (int)obs_data_get_int(settings, "camera_shutter_us");
 	ctx->camera_focus_distance = (float)obs_data_get_double(settings, "camera_focus_distance");
 	ctx->camera_wb_kelvin = (int)obs_data_get_int(settings, "camera_wb_kelvin");
+	ctx->camera_sensor_orientation = (int)obs_data_get_int(settings, "camera_sensor_orientation");
+	ctx->camera_apply_rotation = obs_data_get_bool(settings, "camera_apply_rotation");
 	ctx->max_size = (int)obs_data_get_int(settings, "max_size");
 	ctx->bitrate_kbps = (int)obs_data_get_int(settings, "bitrate_kbps");
 	ctx->hardware_decoding = obs_data_get_bool(settings, "hardware_decoding");
@@ -494,6 +505,8 @@ static void src_get_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "camera_shutter_us", 0);
 	obs_data_set_default_double(settings, "camera_focus_distance", 0.0);
 	obs_data_set_default_int(settings, "camera_wb_kelvin", 0);
+	obs_data_set_default_int(settings, "camera_sensor_orientation", 0);
+	obs_data_set_default_bool(settings, "camera_apply_rotation", false);
 	obs_data_set_default_int(settings, "max_size", 0);
 	obs_data_set_default_int(settings, "bitrate_kbps", 8000);
 	obs_data_set_default_string(settings, "codec", "h264");
@@ -540,7 +553,7 @@ static pthread_mutex_t g_camera_capabilities_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 
 static bool parse_camera_id_line(const char *line, char *id, size_t id_size, char *label, size_t label_size, int *fps,
-				 size_t *fps_count, float *focus_max, int *wb_min, int *wb_max)
+				 size_t *fps_count, float *focus_max, int *wb_min, int *wb_max, int *sensor_orientation)
 {
 	const char *p = strstr(line, "--camera-id=");
 	if (!p)
@@ -626,6 +639,13 @@ static bool parse_camera_id_line(const char *line, char *id, size_t id_size, cha
 		}
 	}
 
+	if (sensor_orientation) {
+		*sensor_orientation = 0;
+		const char *orientation_start = strstr(line, "sensor-orientation=");
+		if (orientation_start)
+			sscanf(orientation_start + strlen("sensor-orientation="), "%d", sensor_orientation);
+	}
+
 	if (wb_min && wb_max) {
 		*wb_min = 0;
 		*wb_max = 0;
@@ -661,7 +681,7 @@ static bool parse_selected_camera_sizes(const char *output, const char *selected
 		line_copy[line_len] = '\0';
 
 		char camera_id[64];
-		if (parse_camera_id_line(line_copy, camera_id, sizeof(camera_id), NULL, 0, NULL, NULL, NULL, NULL, NULL)) {
+		if (parse_camera_id_line(line_copy, camera_id, sizeof(camera_id), NULL, 0, NULL, NULL, NULL, NULL, NULL, NULL)) {
 			in_camera = strcmp(camera_id, selected_id) == 0;
 			high_speed = false;
 		} else if (in_camera) {
@@ -849,8 +869,9 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 		float focus_max = 0.0f;
 		int wb_min = 0;
 		int wb_max = 0;
+		int sensor_orientation = 0;
 		if (parse_camera_id_line(line_copy, id, sizeof(id), label, sizeof(label),
-					 fps, &fps_count, &focus_max, &wb_min, &wb_max)) {
+					 fps, &fps_count, &focus_max, &wb_min, &wb_max, &sensor_orientation)) {
 			in_selected_camera = selected_id[0] && strcmp(selected_id, id) == 0;
 			if (!first_id[0]) {
 				snprintf(first_id, sizeof(first_id), "%s", id);
@@ -869,6 +890,8 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 				selected_wb_min = wb_min;
 				selected_wb_max = wb_max;
 			}
+			if (in_selected_camera)
+				obs_data_set_int(settings, "camera_sensor_orientation", sensor_orientation);
 		}
 
 		if (!end)
@@ -1182,6 +1205,8 @@ static obs_properties_t *src_get_properties(void *data)
 								       obs_module_text("CameraFocus"), 0.0, 20.0, 0.1);
 	obs_property_t *camera_wb = obs_properties_add_int_slider(
 		props, "camera_wb_kelvin", obs_module_text("CameraWhiteBalance"), 0, 12000, 100);
+	obs_property_t *camera_apply_rotation =
+		obs_properties_add_bool(props, "camera_apply_rotation", obs_module_text("ApplyCameraRotation"));
 
 	obs_property_t *buffering = obs_properties_add_list(
 		props, "video_buffer_ms", obs_module_text("Buffering"),
@@ -1244,6 +1269,7 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_set_visible(camera_shutter, is_camera);
 	obs_property_set_visible(camera_focus, is_camera);
 	obs_property_set_visible(camera_wb, is_camera);
+	obs_property_set_visible(camera_apply_rotation, is_camera);
 	obs_property_set_visible(buffering, is_camera);
 	obs_property_set_visible(flip_vertical, is_camera);
 	obs_property_set_visible(hardware_decoding, is_camera);
