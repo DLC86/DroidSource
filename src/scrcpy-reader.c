@@ -22,6 +22,9 @@ typedef int socklen_t;
 #include <libavcodec/avcodec.h>
 #include <libavutil/avutil.h>
 #include <libavutil/pixfmt.h>
+#include <libavutil/hwdevice.h>
+#include <libavutil/hwcontext.h>
+#include <libswscale/swscale.h>
 
 #include <stdint.h>
 #include <string.h>
@@ -71,6 +74,20 @@ struct scrcpy_reader {
 	uint64_t last_frame_ns;
 
 	sock_t sock;
+
+	bool hardware_decoding;
+	bool flip_vertical;
+	int video_buffer_ms;
+	char color_space[16];
+	char color_range[16];
+	char transfer[16];
+
+	AVBufferRef *hw_device_ctx;
+	enum AVPixelFormat hw_pix_fmt;
+	AVFrame *transfer_frame;
+	struct SwsContext *convert_ctx;
+	AVFrame *converted_frame;
+	enum AVPixelFormat requested_pix_fmt;
 
 	AVCodecContext *codec_ctx;
 	AVPacket *packet;
@@ -152,6 +169,63 @@ static enum AVCodecID scrcpy_codec_to_avcodec(uint32_t id)
 	}
 }
 
+static enum AVPixelFormat obs_to_av_pixfmt(const char *format)
+{
+	if (!format || strcmp(format, "auto") == 0)
+		return AV_PIX_FMT_NONE;
+	if (strcmp(format, "i420") == 0)
+		return AV_PIX_FMT_YUV420P;
+	if (strcmp(format, "nv12") == 0)
+		return AV_PIX_FMT_NV12;
+	return AV_PIX_FMT_NONE;
+}
+
+static enum video_colorspace parse_color_space(const char *value)
+{
+	if (!value || strcmp(value, "auto") == 0)
+		return VIDEO_CS_DEFAULT;
+	if (strcmp(value, "601") == 0)
+		return VIDEO_CS_601;
+	if (strcmp(value, "709") == 0)
+		return VIDEO_CS_709;
+	if (strcmp(value, "srgb") == 0)
+		return VIDEO_CS_SRGB;
+	if (strcmp(value, "2100pq") == 0)
+		return VIDEO_CS_2100_PQ;
+	if (strcmp(value, "2100hlg") == 0)
+		return VIDEO_CS_2100_HLG;
+	return VIDEO_CS_DEFAULT;
+}
+
+static enum video_range_type parse_color_range(const char *value)
+{
+	if (!value || strcmp(value, "auto") == 0)
+		return VIDEO_RANGE_DEFAULT;
+	if (strcmp(value, "full") == 0)
+		return VIDEO_RANGE_FULL;
+	if (strcmp(value, "limited") == 0)
+		return VIDEO_RANGE_PARTIAL;
+	return VIDEO_RANGE_DEFAULT;
+}
+
+static enum video_trc parse_transfer(const char *value, enum video_colorspace cs)
+{
+	if (!value || strcmp(value, "auto") == 0) {
+		if (cs == VIDEO_CS_2100_PQ)
+			return VIDEO_TRC_PQ;
+		if (cs == VIDEO_CS_2100_HLG)
+			return VIDEO_TRC_HLG;
+		return VIDEO_TRC_SRGB;
+	}
+	if (strcmp(value, "srgb") == 0)
+		return VIDEO_TRC_SRGB;
+	if (strcmp(value, "hlg") == 0)
+		return VIDEO_TRC_HLG;
+	if (strcmp(value, "pq") == 0)
+		return VIDEO_TRC_PQ;
+	return VIDEO_TRC_SRGB;
+}
+
 static enum video_format av_to_obs_format(enum AVPixelFormat pix)
 {
 	switch (pix) {
@@ -196,6 +270,20 @@ static sock_t connect_with_retry(uint16_t port, volatile bool *stop)
 	return INVALID_SOCK;
 }
 
+#ifdef _WIN32
+static enum AVPixelFormat get_hw_format(AVCodecContext *codec_ctx, const enum AVPixelFormat *pix_fmts)
+{
+	struct scrcpy_reader *r = codec_ctx->opaque;
+	if (r) {
+		for (const enum AVPixelFormat *p = pix_fmts; *p != AV_PIX_FMT_NONE; ++p) {
+			if (*p == r->hw_pix_fmt)
+				return *p;
+		}
+	}
+	return pix_fmts[0];
+}
+#endif
+
 static bool open_decoder(struct scrcpy_reader *r, uint32_t codec_id, uint32_t width, uint32_t height)
 {
 	enum AVCodecID av_id = scrcpy_codec_to_avcodec(codec_id);
@@ -213,6 +301,34 @@ static bool open_decoder(struct scrcpy_reader *r, uint32_t codec_id, uint32_t wi
 		return false;
 
 	r->codec_ctx->flags |= AV_CODEC_FLAG_LOW_DELAY;
+	r->codec_ctx->opaque = r;
+
+#ifdef _WIN32
+	if (r->hardware_decoding) {
+		for (int i = 0;; ++i) {
+			const AVCodecHWConfig *config = avcodec_get_hw_config(codec, i);
+			if (!config)
+				break;
+			if ((config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) &&
+			    config->device_type == AV_HWDEVICE_TYPE_D3D11VA) {
+				r->hw_pix_fmt = config->pix_fmt;
+				break;
+			}
+		}
+		if (r->hw_pix_fmt != AV_PIX_FMT_NONE) {
+			if (av_hwdevice_ctx_create(&r->hw_device_ctx, AV_HWDEVICE_TYPE_D3D11VA,
+						NULL, NULL, 0) == 0) {
+				r->codec_ctx->get_format = get_hw_format;
+				r->codec_ctx->hw_device_ctx = av_buffer_ref(r->hw_device_ctx);
+				obs_log(LOG_INFO, "scrcpy-reader: using D3D11VA hardware decoding");
+			} else {
+				r->hw_pix_fmt = AV_PIX_FMT_NONE;
+				obs_log(LOG_INFO, "scrcpy-reader: D3D11VA unavailable; using software decoding");
+			}
+		}
+	}
+#endif
+
 	r->codec_ctx->thread_type = FF_THREAD_SLICE;
 	if (codec_id == SC_CODEC_ID_H265)
 		r->codec_ctx->flags2 |= AV_CODEC_FLAG2_FAST;
@@ -231,7 +347,9 @@ static bool open_decoder(struct scrcpy_reader *r, uint32_t codec_id, uint32_t wi
 
 	r->packet = av_packet_alloc();
 	r->frame = av_frame_alloc();
-	if (!r->packet || !r->frame) {
+	r->transfer_frame = av_frame_alloc();
+	r->converted_frame = av_frame_alloc();
+	if (!r->packet || !r->frame || !r->transfer_frame || !r->converted_frame) {
 		obs_log(LOG_ERROR, "scrcpy-reader: av alloc failed");
 		return false;
 	}
@@ -240,7 +358,36 @@ static bool open_decoder(struct scrcpy_reader *r, uint32_t codec_id, uint32_t wi
 
 static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 {
-	enum video_format fmt = av_to_obs_format(f->format);
+	AVFrame *out = f;
+
+	if (r->hw_pix_fmt != AV_PIX_FMT_NONE && f->format == r->hw_pix_fmt) {
+		av_frame_unref(r->transfer_frame);
+		if (av_hwframe_transfer_data(r->transfer_frame, f, 0) < 0) {
+			obs_log(LOG_WARNING, "scrcpy-reader: hardware frame transfer failed");
+			return;
+		}
+		out = r->transfer_frame;
+	}
+
+	if (r->requested_pix_fmt != AV_PIX_FMT_NONE && out->format != r->requested_pix_fmt) {
+		r->convert_ctx = sws_getCachedContext(r->convert_ctx,
+			(int)out->width, (int)out->height, (enum AVPixelFormat)out->format,
+			(int)out->width, (int)out->height, r->requested_pix_fmt,
+			SWS_FAST_BILINEAR, NULL, NULL, NULL);
+		if (!r->convert_ctx)
+			return;
+		av_frame_unref(r->converted_frame);
+		r->converted_frame->format = r->requested_pix_fmt;
+		r->converted_frame->width = out->width;
+		r->converted_frame->height = out->height;
+		if (av_frame_get_buffer(r->converted_frame, 32) < 0)
+			return;
+		sws_scale(r->convert_ctx, (const uint8_t * const *)out->data, out->linesize,
+			0, (int)out->height, r->converted_frame->data, r->converted_frame->linesize);
+		out = r->converted_frame;
+	}
+
+	enum video_format fmt = av_to_obs_format(out->format);
 	if (fmt == VIDEO_FORMAT_NONE) {
 		obs_log(LOG_WARNING, "scrcpy-reader: unsupported pix fmt %d", f->format);
 		return;
@@ -248,19 +395,21 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 
 	struct obs_source_frame obs_frame = {0};
 	obs_frame.format = fmt;
-	obs_frame.width = (uint32_t)f->width;
-	obs_frame.height = (uint32_t)f->height;
+	obs_frame.width = (uint32_t)out->width;
+	obs_frame.height = (uint32_t)out->height;
 	for (int i = 0; i < 4; ++i) {
-		obs_frame.data[i] = f->data[i];
-		obs_frame.linesize[i] = (uint32_t)f->linesize[i];
+		obs_frame.data[i] = out->data[i];
+		obs_frame.linesize[i] = (uint32_t)out->linesize[i];
 	}
 	/* scrcpy PTS is microseconds; OBS expects nanoseconds. If PTS is
 	 * missing (rare post-first-IDR), fall back to the OS clock to keep
 	 * the async source moving. */
-	if (f->pts == AV_NOPTS_VALUE)
+	if (out->pts == AV_NOPTS_VALUE)
 		obs_frame.timestamp = (uint64_t)os_gettime_ns();
 	else
-		obs_frame.timestamp = (uint64_t)f->pts * 1000ULL;
+		obs_frame.timestamp = (uint64_t)out->pts * 1000ULL;
+	obs_frame.timestamp += (uint64_t)r->video_buffer_ms * UINT64_C(1000000);
+	obs_frame.flip = r->flip_vertical;
 
 	pthread_mutex_lock(&r->state_mutex);
 	r->last_frame_ns = os_gettime_ns();
@@ -405,12 +554,24 @@ done:
 	return NULL;
 }
 
-scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port)
+scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port,
+							bool hardware_decoding, bool flip_vertical,
+							int video_buffer_ms, const char *pixel_format,
+							const char *color_space, const char *color_range,
+							const char *transfer)
 {
 	struct scrcpy_reader *r = bzalloc(sizeof(*r));
 	r->source = source;
 	r->port = port;
 	r->sock = INVALID_SOCK;
+	r->hardware_decoding = hardware_decoding;
+	r->flip_vertical = flip_vertical;
+	r->video_buffer_ms = video_buffer_ms > 0 ? video_buffer_ms : 0;
+	r->hw_pix_fmt = AV_PIX_FMT_NONE;
+	r->requested_pix_fmt = obs_to_av_pixfmt(pixel_format);
+	snprintf(r->color_space, sizeof(r->color_space), "%s", color_space && *color_space ? color_space : "auto");
+	snprintf(r->color_range, sizeof(r->color_range), "%s", color_range && *color_range ? color_range : "auto");
+	snprintf(r->transfer, sizeof(r->transfer), "%s", transfer && *transfer ? transfer : "auto");
 	r->stop = false;
 	r->running = false;
 	r->last_frame_ns = 0;
@@ -475,6 +636,14 @@ void scrcpy_reader_destroy(scrcpy_reader_t *r)
 		av_packet_free(&r->packet);
 	if (r->frame)
 		av_frame_free(&r->frame);
+	if (r->transfer_frame)
+		av_frame_free(&r->transfer_frame);
+	if (r->converted_frame)
+		av_frame_free(&r->converted_frame);
+	if (r->convert_ctx)
+		sws_freeContext(r->convert_ctx);
+	if (r->hw_device_ctx)
+		av_buffer_unref(&r->hw_device_ctx);
 	if (r->codec_ctx)
 		avcodec_free_context(&r->codec_ctx);
 	if (r->pending_config)
