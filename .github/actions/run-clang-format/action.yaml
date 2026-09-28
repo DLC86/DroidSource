@@ -56,9 +56,7 @@ runs:
 
         print ::group::Run clang-format-19
         local -a changes=(${(s:,:)CHANGED_FILES//[\[\]\'\"]/})
-        if [[ -n "${DEBUG_CLANG_FORMAT:-}" ]]; then
-          clang-format-19 -style=file -fallback-style=none src/scrcpy-camera-control.c > /tmp/scrcpy-camera-control.formatted.c
-          diff -u src/scrcpy-camera-control.c /tmp/scrcpy-camera-control.formatted.c || true
-        fi
+        clang-format-19 -style=file -fallback-style=none src/scrcpy-camera-control.c > /tmp/scrcpy-camera-control.formatted.c
+        diff -u src/scrcpy-camera-control.c /tmp/scrcpy-camera-control.formatted.c || true
         ./build-aux/run-clang-format --fail-${{ inputs.failCondition }} --check ${changes}
         print ::endgroup::
