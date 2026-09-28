@@ -426,6 +426,7 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
 
     private void clearManualExposureKeys() {
         requestBuilder.set(CaptureRequest.SENSOR_SENSITIVITY, null);
+        requestBuilder.set(CaptureRequest.CONTROL_POST_RAW_SENSITIVITY_BOOST, null);
         requestBuilder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, null);
         requestBuilder.set(CaptureRequest.SENSOR_FRAME_DURATION, null);
     }
@@ -474,7 +475,22 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
                 return;
             }
 
-            int iso = isoRange.clamp(manualIso);
+            long targetIso = Math.max(1L, manualIso);
+            int sensorIso = isoRange.clamp((int)Math.min(targetIso, (long)isoRange.getUpper()));
+
+            Range<Integer> postRawBoostRange = cameraCharacteristics.get(
+                    CameraCharacteristics.CONTROL_POST_RAW_SENSITIVITY_BOOST_RANGE);
+            int postRawBoost = 100;
+            if (postRawBoostRange != null) {
+                postRawBoost = postRawBoostRange.clamp(100);
+                if (targetIso > sensorIso && sensorIso > 0) {
+                    long requiredBoost = Math.round((double)targetIso * 100.0 / sensorIso);
+                    int requestedBoost = requiredBoost > Integer.MAX_VALUE
+                            ? Integer.MAX_VALUE : (int)requiredBoost;
+                    postRawBoost = postRawBoostRange.clamp(requestedBoost);
+                }
+            }
+
             long exposureNs = exposureRange.clamp(manualShutterUs * 1000L);
             requestBuilder.set(CaptureRequest.CONTROL_AE_MODE,
                     CaptureRequest.CONTROL_AE_MODE_OFF);
@@ -482,7 +498,8 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
                 requestBuilder.set(CaptureRequest.CONTROL_AE_PRIORITY_MODE,
                         CaptureRequest.CONTROL_AE_PRIORITY_MODE_OFF);
             }
-            requestBuilder.set(CaptureRequest.SENSOR_SENSITIVITY, iso);
+            requestBuilder.set(CaptureRequest.SENSOR_SENSITIVITY, sensorIso);
+            requestBuilder.set(CaptureRequest.CONTROL_POST_RAW_SENSITIVITY_BOOST, postRawBoost);
             requestBuilder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureNs);
             long frameDurationNs = fps > 0 ? 1_000_000_000L / fps : exposureNs;
             requestBuilder.set(CaptureRequest.SENSOR_FRAME_DURATION,
@@ -576,6 +593,7 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
         if (whiteBalanceKelvin <= 0) {
             requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
                     CaptureRequest.CONTROL_AWB_MODE_AUTO);
+            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS, null);
             if (android.os.Build.VERSION.SDK_INT >= 36) {
                 requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TEMPERATURE, null);
                 requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TINT, null);
@@ -601,55 +619,96 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
                 requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TEMPERATURE,
                         cctRange.clamp(whiteBalanceKelvin));
                 requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TINT, 0);
+                requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS, null);
+                Ln.i("Camera white balance: native CCT " + whiteBalanceKelvin + " K");
                 return;
             }
         }
 
-        int[] awbModes =
-                cameraCharacteristics.get(CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES);
-        requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TEMPERATURE, null);
-        requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TINT, null);
+        int[] capabilities = cameraCharacteristics.get(
+                CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
+        int[] awbModes = cameraCharacteristics.get(
+                CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES);
+        int[] correctionModes = cameraCharacteristics.get(
+                CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_MODES);
+
+        boolean manualSupported =
+                contains(capabilities,
+                        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING)
+                && contains(awbModes, CaptureRequest.CONTROL_AWB_MODE_OFF)
+                && contains(correctionModes,
+                        CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX);
+
+        if (manualSupported) {
+            requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
+                    CaptureRequest.CONTROL_AWB_MODE_OFF);
+            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_MODE,
+                    CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX);
+            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM,
+                    new ColorSpaceTransform(new Rational[] {
+                            new Rational(1, 1), new Rational(0, 1), new Rational(0, 1),
+                            new Rational(0, 1), new Rational(1, 1), new Rational(0, 1),
+                            new Rational(0, 1), new Rational(0, 1), new Rational(1, 1)
+                    }));
+            RggbChannelVector gains = kelvinToGains(whiteBalanceKelvin);
+            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS, gains);
+            if (android.os.Build.VERSION.SDK_INT >= 36) {
+                requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TEMPERATURE, null);
+                requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TINT, null);
+            }
+            Ln.i("Camera white balance: manual gains " + whiteBalanceKelvin + " K -> " + gains);
+            return;
+        }
+
+        // Last fallback: use only a real AWB preset exposed by the device.
+        requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS, null);
         if (android.os.Build.VERSION.SDK_INT >= 36) {
             requestBuilder.set(CaptureRequest.COLOR_CORRECTION_MODE,
                     CaptureRequest.COLOR_CORRECTION_MODE_FAST);
+            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TEMPERATURE, null);
+            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TINT, null);
         }
+
         int wbMode = chooseAwbMode(whiteBalanceKelvin, awbModes);
         if (wbMode != CaptureRequest.CONTROL_AWB_MODE_AUTO) {
             requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE, wbMode);
-            Ln.i("Camera white balance preset: " + whiteBalanceKelvin + " K -> AWB mode " + wbMode);
+            Ln.i("Camera white balance: AWB preset " + wbMode + " for " + whiteBalanceKelvin + " K");
         } else {
-            Ln.w("Camera does not expose a usable manual white balance control");
             requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
                     CaptureRequest.CONTROL_AWB_MODE_AUTO);
+            Ln.w("Camera does not advertise manual white balance control");
         }
     }
 
-    private static int chooseAwbMode(int kelvin, int[] availableModes) {
-        if (availableModes == null) {
-            return CaptureRequest.CONTROL_AWB_MODE_AUTO;
+    private static RggbChannelVector kelvinToGains(int kelvin) {
+        double temperature = Math.max(1000, Math.min(15000, kelvin)) / 100.0;
+        double red;
+        double green;
+        double blue;
+
+        if (temperature <= 66.0) {
+            red = 255.0;
+            green = 99.4708025861 * Math.log(Math.max(1.0, temperature)) - 161.1195681661;
+        } else {
+            red = 329.698727446 * Math.pow(temperature - 60.0, -0.1332047592);
+            green = 288.1221695283 * Math.pow(temperature - 60.0, -0.0755148492);
         }
-        int[][] candidates = {
-                {3000, CaptureRequest.CONTROL_AWB_MODE_INCANDESCENT},
-                {4000, CaptureRequest.CONTROL_AWB_MODE_FLUORESCENT},
-                {3500, CaptureRequest.CONTROL_AWB_MODE_WARM_FLUORESCENT},
-                {5500, CaptureRequest.CONTROL_AWB_MODE_DAYLIGHT},
-                {6500, CaptureRequest.CONTROL_AWB_MODE_CLOUDY_DAYLIGHT},
-                {7000, CaptureRequest.CONTROL_AWB_MODE_TWILIGHT},
-                {7500, CaptureRequest.CONTROL_AWB_MODE_SHADE},
-        };
-        int bestMode = CaptureRequest.CONTROL_AWB_MODE_AUTO;
-        int bestDistance = Integer.MAX_VALUE;
-        for (int[] candidate : candidates) {
-            if (!contains(availableModes, candidate[1])) {
-                continue;
-            }
-            int distance = Math.abs(kelvin - candidate[0]);
-            if (distance < bestDistance) {
-                bestDistance = distance;
-                bestMode = candidate[1];
-            }
+
+        if (temperature >= 66.0) {
+            blue = 255.0;
+        } else if (temperature <= 19.0) {
+            blue = 1.0;
+        } else {
+            blue = 138.5177312231 * Math.log(temperature - 10.0) - 305.0447927303;
         }
-        return bestMode;
+
+        red = Math.max(1.0, Math.min(255.0, red));
+        green = Math.max(1.0, Math.min(255.0, green));
+        blue = Math.max(1.0, Math.min(255.0, blue));
+
+        float redGain = (float)Math.max(1.0, Math.min(8.0, green / red));
+        float blueGain = (float)Math.max(1.0, Math.min(8.0, green / blue));
+        return new RggbChannelVector(redGain, 1.0f, 1.0f, blueGain);
     }
 
     private static boolean contains(int[] values, int value) {
