@@ -481,7 +481,7 @@ static void src_get_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "video_buffer_ms", 0);
 }
 
-static void populate_shutter_list(obs_property_t *prop, int fps);
+static void populate_shutter_list(obs_property_t *prop, long long min_exposure_ns, long long max_exposure_ns);
 
 static bool run_scrcpy_camera_query(const char *serial, char **output)
 {
@@ -632,6 +632,35 @@ static bool parse_camera_id_line(const char *line, char *id, size_t id_size, cha
 		*wb_manual = strstr(line, "wb-kelvin-range=[") != NULL || strstr(line, "wb-presets=true") != NULL;
 
 	return true;
+}
+
+static void parse_camera_sensor_ranges(const char *line, int *iso_min, int *iso_max,
+					 long long *exposure_min_ns, long long *exposure_max_ns)
+{
+	if (!line)
+		return;
+
+	const char *iso_start = strstr(line, "iso-range=[");
+	if (iso_start && iso_min && iso_max) {
+		iso_start += strlen("iso-range=[");
+		int lo = 0;
+		int hi = 0;
+		if (sscanf(iso_start, "%d, %d", &lo, &hi) == 2 && lo > 0 && hi >= lo) {
+			*iso_min = lo;
+			*iso_max = hi;
+		}
+	}
+
+	const char *exp_start = strstr(line, "exposure-time-range-ns=[");
+	if (exp_start && exposure_min_ns && exposure_max_ns) {
+		exp_start += strlen("exposure-time-range-ns=[");
+		long long lo = 0;
+		long long hi = 0;
+		if (sscanf(exp_start, "%lld, %lld", &lo, &hi) == 2 && lo > 0 && hi >= lo) {
+			*exposure_min_ns = lo;
+			*exposure_max_ns = hi;
+		}
+	}
 }
 
 static bool parse_selected_camera_sizes(const char *output, const char *selected_id, obs_property_t *resolution)
@@ -819,6 +848,14 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 	int selected_wb_min = 0;
 	int selected_wb_max = 0;
 	bool selected_wb_manual = false;
+	int selected_iso_min = 0;
+	int selected_iso_max = 0;
+	long long selected_exposure_min_ns = 0;
+	long long selected_exposure_max_ns = 0;
+	int first_iso_min = 0;
+	int first_iso_max = 0;
+	long long first_exposure_min_ns = 0;
+	long long first_exposure_max_ns = 0;
 	int first_fps[64];
 	size_t first_fps_count = 0;
 	size_t camera_count = 0;
@@ -848,10 +885,22 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 		if (parse_camera_id_line(line_copy, id, sizeof(id), label, sizeof(label), fps, &fps_count, &focus_max,
 					 &zoom_min, &zoom_max, &wb_min, &wb_max, &wb_manual)) {
 			in_selected_camera = selected_id[0] && strcmp(selected_id, id) == 0;
+
+			int line_iso_min = 0;
+			int line_iso_max = 0;
+			long long line_exposure_min_ns = 0;
+			long long line_exposure_max_ns = 0;
+			parse_camera_sensor_ranges(line_copy, &line_iso_min, &line_iso_max,
+						   &line_exposure_min_ns, &line_exposure_max_ns);
+
 			if (!first_id[0]) {
 				snprintf(first_id, sizeof(first_id), "%s", id);
 				memcpy(first_fps, fps, fps_count * sizeof(int));
 				first_fps_count = fps_count;
+				first_iso_min = line_iso_min;
+				first_iso_max = line_iso_max;
+				first_exposure_min_ns = line_exposure_min_ns;
+				first_exposure_max_ns = line_exposure_max_ns;
 			}
 			obs_property_list_add_string(camera_id_prop, label, id);
 			camera_count++;
@@ -871,6 +920,12 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 			}
 			if (in_selected_camera && wb_manual)
 				selected_wb_manual = true;
+			if (in_selected_camera) {
+				selected_iso_min = line_iso_min;
+				selected_iso_max = line_iso_max;
+				selected_exposure_min_ns = line_exposure_min_ns;
+				selected_exposure_max_ns = line_exposure_max_ns;
+			}
 		}
 
 		if (!end)
@@ -895,6 +950,14 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 	if (selected_fps_count == 0 && first_fps_count > 0) {
 		memcpy(selected_fps, first_fps, first_fps_count * sizeof(int));
 		selected_fps_count = first_fps_count;
+	}
+	if (selected_iso_max <= 0 && first_iso_max > 0) {
+		selected_iso_min = first_iso_min;
+		selected_iso_max = first_iso_max;
+	}
+	if (selected_exposure_max_ns <= 0 && first_exposure_max_ns > 0) {
+		selected_exposure_min_ns = first_exposure_min_ns;
+		selected_exposure_max_ns = first_exposure_max_ns;
 	}
 	int saved_fps = (int)obs_data_get_int(settings, "camera_fps");
 	if (saved_fps > 0)
@@ -941,6 +1004,23 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 		int current_wb = (int)obs_data_get_int(settings, "camera_wb_kelvin");
 	}
 
+	obs_property_t *iso_prop = obs_properties_get(props, "camera_iso");
+	if (iso_prop) {
+		int iso_max = selected_iso_max > 0 ? selected_iso_max : 12800;
+		obs_property_int_set_limits(iso_prop, 0, iso_max, 1);
+		obs_property_set_enabled(iso_prop, true);
+
+		int current_iso = (int)obs_data_get_int(settings, "camera_iso");
+		if (current_iso > 0 && selected_iso_min > 0 && current_iso < selected_iso_min)
+			obs_data_set_int(settings, "camera_iso", selected_iso_min);
+		else if (current_iso > iso_max)
+			obs_data_set_int(settings, "camera_iso", iso_max);
+	}
+
+	obs_property_t *shutter_prop = obs_properties_get(props, "camera_shutter_us");
+	if (shutter_prop)
+		populate_shutter_list(shutter_prop, selected_exposure_min_ns, selected_exposure_max_ns);
+
 	parse_selected_camera_sizes(camera_output, selected_id, resolution_prop);
 	if (obs_property_list_item_count(resolution_prop) == 0)
 		populate_camera_fallbacks(camera_id_prop, resolution_prop, fps_prop);
@@ -976,32 +1056,40 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 	return true;
 }
 
-static void populate_shutter_list(obs_property_t *prop, int fps)
+static void populate_shutter_list(obs_property_t *prop, long long min_exposure_ns, long long max_exposure_ns)
 {
 	struct shutter_option {
-		int denominator;
+		const char *label;
 		int microseconds;
 	} options[] = {
-		{5, 200000}, {6, 166667}, {8, 125000},  {10, 100000}, {12, 83333}, {15, 66667},  {20, 50000},
-		{24, 41667}, {25, 40000}, {30, 33333},  {40, 25000},  {48, 20833}, {50, 20000},  {60, 16667},
-		{80, 12500}, {96, 10417}, {100, 10000}, {120, 8333},  {125, 8000}, {160, 6250},  {180, 5556},
-		{200, 5000}, {240, 4167}, {250, 4000},  {320, 3125},  {400, 2500}, {500, 2000},  {640, 1563},
-		{750, 1333}, {800, 1250}, {1000, 1000}, {1250, 800},  {1500, 667}, {2000, 500},  {2500, 400},
-		{3000, 333}, {4000, 250}, {5000, 200},  {6000, 167},  {8000, 125}, {10000, 100}, {12000, 83},
-		{16000, 63}, {20000, 50}, {32000, 31},
+		{"8 s", 8000000}, {"4 s", 4000000}, {"2 s", 2000000}, {"1 s", 1000000},
+		{"1/2 s", 500000}, {"1/3 s", 333333}, {"1/4 s", 250000}, {"1/5 s", 200000},
+		{"1/6 s", 166667}, {"1/8 s", 125000}, {"1/10 s", 100000}, {"1/12 s", 83333},
+		{"1/15 s", 66667}, {"1/20 s", 50000}, {"1/24 s", 41667}, {"1/25 s", 40000},
+		{"1/30 s", 33333}, {"1/40 s", 25000}, {"1/48 s", 20833}, {"1/50 s", 20000},
+		{"1/60 s", 16667}, {"1/80 s", 12500}, {"1/96 s", 10417}, {"1/100 s", 10000},
+		{"1/120 s", 8333}, {"1/125 s", 8000}, {"1/160 s", 6250}, {"1/180 s", 5556},
+		{"1/200 s", 5000}, {"1/240 s", 4167}, {"1/250 s", 4000}, {"1/320 s", 3125},
+		{"1/400 s", 2500}, {"1/500 s", 2000}, {"1/640 s", 1563}, {"1/750 s", 1333},
+		{"1/800 s", 1250}, {"1/1000 s", 1000}, {"1/1250 s", 800}, {"1/1500 s", 667},
+		{"1/2000 s", 500}, {"1/2500 s", 400}, {"1/3000 s", 333}, {"1/4000 s", 250},
+		{"1/5000 s", 200}, {"1/6000 s", 167}, {"1/8000 s", 125}, {"1/10000 s", 100},
+		{"1/12000 s", 83}, {"1/16000 s", 63}, {"1/20000 s", 50}, {"1/32000 s", 31},
 	};
 
 	obs_property_list_clear(prop);
 	obs_property_list_add_int(prop, "Auto", 0);
-	if (fps < 1)
-		fps = 30;
+
+	if (min_exposure_ns <= 0 || max_exposure_ns <= 0 || max_exposure_ns < min_exposure_ns) {
+		min_exposure_ns = 1000;
+		max_exposure_ns = 200000000;
+	}
 
 	for (size_t i = 0; i < sizeof(options) / sizeof(options[0]); ++i) {
-		if (options[i].denominator >= fps) {
-			char label[32];
-			snprintf(label, sizeof(label), "1/%d s", options[i].denominator);
-			obs_property_list_add_int(prop, label, options[i].microseconds);
-		}
+		const long long exposure_ns = (long long)options[i].microseconds * 1000LL;
+		if (exposure_ns < min_exposure_ns || exposure_ns > max_exposure_ns)
+			continue;
+		obs_property_list_add_int(prop, options[i].label, options[i].microseconds);
 	}
 }
 
@@ -1044,20 +1132,12 @@ static bool camera_id_modified(obs_properties_t *props, obs_property_t *p, obs_d
 
 static bool camera_fps_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
 {
+	UNUSED_PARAMETER(props);
 	UNUSED_PARAMETER(p);
-	obs_property_t *shutter = obs_properties_get(props, "camera_shutter_us");
-	int saved_shutter = (int)obs_data_get_int(settings, "camera_shutter_us");
-	if (shutter) {
-		populate_shutter_list(shutter, (int)obs_data_get_int(settings, "camera_fps"));
-		if (saved_shutter > 0) {
-			for (size_t i = 0; i < obs_property_list_item_count(shutter); ++i) {
-				if (obs_property_list_item_int(shutter, i) == saved_shutter) {
-					obs_data_set_int(settings, "camera_shutter_us", saved_shutter);
-					break;
-				}
-			}
-		}
-	}
+	UNUSED_PARAMETER(settings);
+	/* Shutter is constrained by the sensor exposure range, not by 1/FPS.
+	 * Camera2 may use a longer exposure and a correspondingly longer frame
+	 * duration when the device permits it. */
 	return true;
 }
 
@@ -1141,7 +1221,7 @@ static obs_properties_t *src_get_properties(void *data)
 								 obs_module_text("CameraShutter"), OBS_COMBO_TYPE_LIST,
 								 OBS_COMBO_FORMAT_INT);
 	obs_data_t *current_settings = obs_source_get_settings(ctx->source);
-	populate_shutter_list(camera_shutter, (int)obs_data_get_int(current_settings, "camera_fps"));
+	populate_shutter_list(camera_shutter, 1000, 200000000);
 	obs_data_release(current_settings);
 	obs_property_t *camera_focus = obs_properties_add_float_slider(props, "camera_focus_distance",
 								       obs_module_text("CameraFocus"), 0.0, 20.0, 0.1);
