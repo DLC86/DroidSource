@@ -180,6 +180,38 @@ patch("server/src/main/java/com/genymobile/scrcpy/util/LogUtils.java", [
                             }
                         }
                     }
+                    boolean manualWb = false;
+                    int[] awbModes = characteristics.get(CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES);
+                    int[] correctionModesForWb = characteristics.get(CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_MODES);
+                    int[] capabilitiesForWb = characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
+                    if (awbModes != null && correctionModesForWb != null && capabilitiesForWb != null) {
+                        boolean awbOff = false;
+                        boolean transformMatrix = false;
+                        boolean manualPostProcessing = false;
+                        for (int mode : awbModes) {
+                            if (mode == android.hardware.camera2.CaptureRequest.CONTROL_AWB_MODE_OFF) {
+                                awbOff = true;
+                                break;
+                            }
+                        }
+                        for (int mode : correctionModesForWb) {
+                            if (mode == android.hardware.camera2.CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX) {
+                                transformMatrix = true;
+                                break;
+                            }
+                        }
+                        for (int capability : capabilitiesForWb) {
+                            if (capability == CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING) {
+                                manualPostProcessing = true;
+                                break;
+                            }
+                        }
+                        manualWb = awbOff && transformMatrix && manualPostProcessing;
+                    }
+                    if (manualWb) {
+                        builder.append(", wb-manual=true");
+                    }
+
 
                     builder.append(')');
 """,
