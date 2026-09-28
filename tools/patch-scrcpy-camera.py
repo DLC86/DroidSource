@@ -251,133 +251,96 @@ import android.hardware.camera2.params.StreamConfigurationMap;
 """),
 ])
 
+
+
+# Add the runtime camera controls to the pristine scrcpy 4.0 CameraCapture.
 p = ROOT / "server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java"
 s = p.read_text(encoding="utf-8")
+
 marker = """    @TargetApi(AndroidVersions.API_30_ANDROID_11)
     private void zoom(boolean in) {
 """
-if marker not in s:
-    raise SystemExit("zoom marker not found")
-methods = r'''    public void setZoomRatio(float value) {
+methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, int iso, int shutterUs,
+                                  float focusDistance, int wbKelvin) {
         cameraHandler.post(() -> {
             assertCameraThread();
-            zoom = clampZoom(value);
-            if (currentSession != null && requestBuilder != null) {
-                try {
-                    requestBuilder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom);
-                    setRepeatingRequest(currentSession, requestBuilder.build());
-                } catch (CameraAccessException | IllegalArgumentException | IllegalStateException e) {
-                    Ln.e("Camera error while setting zoom: " + e.getMessage());
-                }
-            }
-        });
-    }
-
-    public void setManualExposure(int iso, int shutterUs) {
-        cameraHandler.post(() -> {
-            assertCameraThread();
+            zoom = zoomValue;
+            torchEnabled = torch;
             manualIso = Math.max(0, iso);
             manualShutterUs = Math.max(0, shutterUs);
+            manualFocusDistance = Math.max(0, focusDistance);
+            whiteBalanceKelvin = Math.max(0, wbKelvin);
+
             if (currentSession != null && requestBuilder != null) {
                 try {
-                    applyExposure();
+                    applyCurrentCameraSettings();
                     setRepeatingRequest(currentSession, requestBuilder.build());
                 } catch (CameraAccessException | IllegalArgumentException | IllegalStateException e) {
-                    Ln.e("Camera error while setting exposure: " + e.getMessage());
+                    Ln.e("Camera error while applying settings: " + e.getMessage());
                 }
             }
         });
     }
 
-    public void setFocusDistance(float distance) {
-        cameraHandler.post(() -> {
-            assertCameraThread();
-            manualFocusDistance = Math.max(0, distance);
-            if (currentSession != null && requestBuilder != null) {
-                try {
-                    applyFocus();
-                    setRepeatingRequest(currentSession, requestBuilder.build());
-                } catch (CameraAccessException | IllegalArgumentException | IllegalStateException e) {
-                    Ln.e("Camera error while setting focus: " + e.getMessage());
-                }
-            }
-        });
-    }
-
-    public void setWhiteBalanceKelvin(int kelvin) {
-        cameraHandler.post(() -> {
-            assertCameraThread();
-            whiteBalanceKelvin = Math.max(0, kelvin);
-            if (currentSession != null && requestBuilder != null) {
-                try {
-                    applyWhiteBalance();
-                    setRepeatingRequest(currentSession, requestBuilder.build());
-                } catch (CameraAccessException | IllegalArgumentException | IllegalStateException e) {
-                    Ln.e("Camera error while setting white balance: " + e.getMessage());
-                }
-            }
-        });
-    }
-
-    private void applyCurrentCameraSettings() throws CameraAccessException {
+    private void applyCurrentCameraSettings() {
         assertCameraThread();
-
-        try {
-            ServiceManager.getCameraManager().setTorchMode(cameraId, torchEnabled);
-        } catch (CameraAccessException | IllegalArgumentException e) {
-            Ln.w("Could not set camera torch through CameraManager: " + e.getMessage());
-            requestBuilder.set(CaptureRequest.FLASH_MODE,
-                    torchEnabled ? CaptureRequest.FLASH_MODE_TORCH : CaptureRequest.FLASH_MODE_OFF);
+        if (cameraCharacteristics == null || requestBuilder == null) {
+            return;
         }
 
         zoom = clampZoom(zoom);
         requestBuilder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom);
 
         applyExposure();
+        applyFocus();
+        applyWhiteBalance();
 
-        try {
-            applyFocus();
-        } catch (RuntimeException e) {
-            Ln.w("Could not apply manual focus: " + e.getMessage());
-            manualFocusDistance = 0;
-            applyFocus();
+        Boolean flashAvailable =
+                cameraCharacteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+        if (torchEnabled && Boolean.TRUE.equals(flashAvailable)) {
+            requestBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH);
+        } else {
+            requestBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF);
+            if (torchEnabled) {
+                Ln.w("Torch requested but this camera reports no flash unit");
+            }
         }
+    }
 
-        try {
-            applyWhiteBalance();
-        } catch (RuntimeException e) {
-            Ln.w("Could not apply manual white balance: " + e.getMessage());
-            whiteBalanceKelvin = 0;
-            requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO);
-        }
+    private void clearManualExposureKeys() {
+        requestBuilder.set(CaptureRequest.SENSOR_SENSITIVITY, null);
+        requestBuilder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, null);
+        requestBuilder.set(CaptureRequest.SENSOR_FRAME_DURATION, null);
     }
 
     private void applyExposure() {
         assertCameraThread();
 
-        if (cameraCharacteristics == null) {
-            return;
-        }
-
         boolean hasIso = manualIso > 0;
         boolean hasShutter = manualShutterUs > 0;
-
-        if (!hasIso && !hasShutter) {
-            requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
-            if (android.os.Build.VERSION.SDK_INT >= 36) {
-                requestBuilder.set(CaptureRequest.CONTROL_AE_PRIORITY_MODE,
-                        CaptureRequest.CONTROL_AE_PRIORITY_MODE_OFF);
-            }
-            Ln.i("Camera exposure: auto");
-            return;
-        }
 
         Range<Integer> isoRange =
                 cameraCharacteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE);
         Range<Long> exposureRange =
                 cameraCharacteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE);
+
+        if (!hasIso && !hasShutter) {
+            clearManualExposureKeys();
+            requestBuilder.set(CaptureRequest.CONTROL_AE_MODE,
+                    CaptureRequest.CONTROL_AE_MODE_ON);
+            if (android.os.Build.VERSION.SDK_INT >= 36) {
+                requestBuilder.set(CaptureRequest.CONTROL_AE_PRIORITY_MODE,
+                        CaptureRequest.CONTROL_AE_PRIORITY_MODE_OFF);
+            }
+            return;
+        }
+
         if (isoRange == null || exposureRange == null) {
-            throw new IllegalStateException("manual exposure ranges unavailable");
+            Ln.w("Camera does not expose manual ISO/exposure ranges");
+            clearManualExposureKeys();
+            requestBuilder.set(CaptureRequest.CONTROL_AE_MODE,
+                    CaptureRequest.CONTROL_AE_MODE_ON);
+            return;
         }
 
         int[] capabilities =
@@ -387,12 +350,17 @@ methods = r'''    public void setZoomRatio(float value) {
 
         if (hasIso && hasShutter) {
             if (!manualSensor) {
-                throw new IllegalStateException("manual sensor capability unavailable");
+                Ln.w("Camera does not expose MANUAL_SENSOR; using automatic exposure");
+                clearManualExposureKeys();
+                requestBuilder.set(CaptureRequest.CONTROL_AE_MODE,
+                        CaptureRequest.CONTROL_AE_MODE_ON);
+                return;
             }
 
             int iso = isoRange.clamp(manualIso);
             long exposureNs = exposureRange.clamp(manualShutterUs * 1000L);
-            requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF);
+            requestBuilder.set(CaptureRequest.CONTROL_AE_MODE,
+                    CaptureRequest.CONTROL_AE_MODE_OFF);
             if (android.os.Build.VERSION.SDK_INT >= 36) {
                 requestBuilder.set(CaptureRequest.CONTROL_AE_PRIORITY_MODE,
                         CaptureRequest.CONTROL_AE_PRIORITY_MODE_OFF);
@@ -400,36 +368,62 @@ methods = r'''    public void setZoomRatio(float value) {
             requestBuilder.set(CaptureRequest.SENSOR_SENSITIVITY, iso);
             requestBuilder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureNs);
             requestBuilder.set(CaptureRequest.SENSOR_FRAME_DURATION, exposureNs);
-            Ln.i("Manual exposure: ISO " + iso + ", " + manualShutterUs + " us");
             return;
         }
 
         if (android.os.Build.VERSION.SDK_INT < 36) {
-            throw new IllegalStateException("independent ISO/shutter control requires Android 16+");
+            Ln.w("Independent ISO/shutter control requires Android 16");
+            clearManualExposureKeys();
+            requestBuilder.set(CaptureRequest.CONTROL_AE_MODE,
+                    CaptureRequest.CONTROL_AE_MODE_ON);
+            return;
         }
 
         if (hasIso) {
+            int[] priorityModes = cameraCharacteristics.get(
+                    CameraCharacteristics.CONTROL_AE_AVAILABLE_PRIORITY_MODES);
+            if (!contains(priorityModes,
+                    CaptureRequest.CONTROL_AE_PRIORITY_MODE_SENSOR_SENSITIVITY_PRIORITY)) {
+                Ln.w("Sensor-sensitivity AE priority mode is unavailable");
+                clearManualExposureKeys();
+                requestBuilder.set(CaptureRequest.CONTROL_AE_MODE,
+                        CaptureRequest.CONTROL_AE_MODE_ON);
+                return;
+            }
+
             int iso = isoRange.clamp(manualIso);
-            requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
+            requestBuilder.set(CaptureRequest.CONTROL_AE_MODE,
+                    CaptureRequest.CONTROL_AE_MODE_ON);
             requestBuilder.set(CaptureRequest.CONTROL_AE_PRIORITY_MODE,
                     CaptureRequest.CONTROL_AE_PRIORITY_MODE_SENSOR_SENSITIVITY_PRIORITY);
             requestBuilder.set(CaptureRequest.SENSOR_SENSITIVITY, iso);
-            Ln.i("Camera ISO locked at " + iso + ", shutter automatic");
+            requestBuilder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, null);
+            requestBuilder.set(CaptureRequest.SENSOR_FRAME_DURATION, null);
         } else {
+            int[] priorityModes = cameraCharacteristics.get(
+                    CameraCharacteristics.CONTROL_AE_AVAILABLE_PRIORITY_MODES);
+            if (!contains(priorityModes,
+                    CaptureRequest.CONTROL_AE_PRIORITY_MODE_SENSOR_EXPOSURE_TIME_PRIORITY)) {
+                Ln.w("Sensor-exposure-time AE priority mode is unavailable");
+                clearManualExposureKeys();
+                requestBuilder.set(CaptureRequest.CONTROL_AE_MODE,
+                        CaptureRequest.CONTROL_AE_MODE_ON);
+                return;
+            }
+
             long exposureNs = exposureRange.clamp(manualShutterUs * 1000L);
-            requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
+            requestBuilder.set(CaptureRequest.CONTROL_AE_MODE,
+                    CaptureRequest.CONTROL_AE_MODE_ON);
             requestBuilder.set(CaptureRequest.CONTROL_AE_PRIORITY_MODE,
                     CaptureRequest.CONTROL_AE_PRIORITY_MODE_SENSOR_EXPOSURE_TIME_PRIORITY);
+            requestBuilder.set(CaptureRequest.SENSOR_SENSITIVITY, null);
             requestBuilder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureNs);
-            Ln.i("Camera shutter locked at " + manualShutterUs + " us, ISO automatic");
+            requestBuilder.set(CaptureRequest.SENSOR_FRAME_DURATION, null);
         }
     }
 
     private void applyFocus() {
         assertCameraThread();
-        if (cameraCharacteristics == null) {
-            return;
-        }
 
         int[] modes =
                 cameraCharacteristics.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES);
@@ -445,44 +439,80 @@ methods = r'''    public void setZoomRatio(float value) {
             requestBuilder.set(CaptureRequest.CONTROL_AF_MODE,
                     CaptureRequest.CONTROL_AF_MODE_OFF);
             requestBuilder.set(CaptureRequest.LENS_FOCUS_DISTANCE, distance);
-        } else if (contains(modes, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)) {
+            return;
+        }
+
+        requestBuilder.set(CaptureRequest.LENS_FOCUS_DISTANCE, null);
+        if (contains(modes, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)) {
             requestBuilder.set(CaptureRequest.CONTROL_AF_MODE,
                     CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO);
         } else if (contains(modes, CaptureRequest.CONTROL_AF_MODE_AUTO)) {
-            requestBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO);
+            requestBuilder.set(CaptureRequest.CONTROL_AF_MODE,
+                    CaptureRequest.CONTROL_AF_MODE_AUTO);
         }
     }
 
     private void applyWhiteBalance() {
         assertCameraThread();
-        if (cameraCharacteristics == null) {
-            return;
-        }
-
-        int[] modes =
-                cameraCharacteristics.get(CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES);
-        int[] capabilities =
-                cameraCharacteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
-
-        int[] colorCorrectionModes =
-                cameraCharacteristics.get(CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_MODES);
-        boolean manualSupported = contains(modes, CaptureRequest.CONTROL_AWB_MODE_OFF)
-                && contains(capabilities,
-                        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING)
-                && contains(colorCorrectionModes,
-                        CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX);
 
         if (whiteBalanceKelvin <= 0) {
             requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
                     CaptureRequest.CONTROL_AWB_MODE_AUTO);
-        } else if (manualSupported) {
-            requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_OFF);
+            if (android.os.Build.VERSION.SDK_INT >= 36) {
+                requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TEMPERATURE, null);
+                requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TINT, null);
+            }
+            return;
+        }
+
+        if (android.os.Build.VERSION.SDK_INT >= 36) {
+            Range<Integer> cctRange = cameraCharacteristics.get(
+                    CameraCharacteristics.COLOR_CORRECTION_COLOR_TEMPERATURE_RANGE);
+            int[] correctionModes = cameraCharacteristics.get(
+                    CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_MODES);
+            int[] capabilities = cameraCharacteristics.get(
+                    CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
+
+            boolean cctSupported = cctRange != null
+                    && contains(correctionModes, CaptureRequest.COLOR_CORRECTION_MODE_CCT)
+                    && contains(capabilities,
+                            CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING);
+
+            if (cctSupported) {
+                requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
+                        CaptureRequest.CONTROL_AWB_MODE_OFF);
+                requestBuilder.set(CaptureRequest.COLOR_CORRECTION_MODE,
+                        CaptureRequest.COLOR_CORRECTION_MODE_CCT);
+                requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TEMPERATURE,
+                        cctRange.clamp(whiteBalanceKelvin));
+                requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TINT, 0);
+                return;
+            }
+        }
+
+        int[] awbModes =
+                cameraCharacteristics.get(CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES);
+        int[] capabilities =
+                cameraCharacteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
+        int[] correctionModes =
+                cameraCharacteristics.get(CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_MODES);
+
+        boolean manualSupported =
+                contains(awbModes, CaptureRequest.CONTROL_AWB_MODE_OFF)
+                && contains(capabilities,
+                        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING)
+                && contains(correctionModes,
+                        CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX);
+
+        if (manualSupported) {
+            requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
+                    CaptureRequest.CONTROL_AWB_MODE_OFF);
             requestBuilder.set(CaptureRequest.COLOR_CORRECTION_MODE,
                     CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX);
             requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS,
                     kelvinToGains(whiteBalanceKelvin));
         } else {
-            Ln.w("Manual Kelvin white balance is not supported by this camera");
+            Ln.w("Manual white balance is unsupported on this camera");
             requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
                     CaptureRequest.CONTROL_AWB_MODE_AUTO);
         }
@@ -520,14 +550,12 @@ methods = r'''    public void setZoomRatio(float value) {
 
         float redGain = (float) (green / red);
         float blueGain = (float) (green / blue);
-
         float maxGain = Math.max(redGain, blueGain);
         if (maxGain > 8f) {
             float scale = 8f / maxGain;
             redGain *= scale;
             blueGain *= scale;
         }
-
         return new RggbChannelVector(redGain, 1f, 1f, blueGain);
     }
 
@@ -544,280 +572,145 @@ methods = r'''    public void setZoomRatio(float value) {
     }
 
 '''
-s=s.replace(marker,methods+marker,1)
+if marker not in s:
+    raise SystemExit("CameraCapture zoom marker not found")
+s = s.replace(marker, methods + marker, 1)
 p.write_text(s, encoding="utf-8")
 
+# Replace the CameraControlServer generator with the final coalesced protocol.
+p = ROOT / "server/src/main/java/com/genymobile/scrcpy/video/CameraControlServer.java"
+p.write_text("""package com.genymobile.scrcpy.video;
 
-# Replace the camera-control implementation with a single coalesced settings update.
-p = ROOT / "server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java"
-s = p.read_text(encoding="utf-8")
+import com.genymobile.scrcpy.util.Ln;
 
-control_marker = """    @TargetApi(AndroidVersions.API_30_ANDROID_11)
-    private void zoom(boolean in) {
-"""
-control_method = r'''    public void setCameraSettings(float zoomValue, boolean torch, int iso, int shutterUs,
-                                  float focusDistance, int wbKelvin) {
-        cameraHandler.post(() -> {
-            assertCameraThread();
-            zoom = zoomValue;
-            torchEnabled = torch;
-            manualIso = Math.max(0, iso);
-            manualShutterUs = Math.max(0, shutterUs);
-            manualFocusDistance = Math.max(0, focusDistance);
-            whiteBalanceKelvin = Math.max(0, wbKelvin);
+import java.io.DataInputStream;
+import java.io.EOFException;
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.SocketException;
 
-            if (currentSession != null && requestBuilder != null) {
-                try {
-                    applyCurrentCameraSettings();
-                    setRepeatingRequest(currentSession, requestBuilder.build());
-                } catch (CameraAccessException | IllegalArgumentException | IllegalStateException e) {
-                    Ln.e("Camera error while applying settings: " + e.getMessage());
+final class CameraControlServer {
+
+    private static final int TYPE_SETTINGS = 6;
+    private static final int SETTINGS_SIZE = 21;
+
+    private final CameraCapture capture;
+    private final int port;
+
+    private volatile boolean stopped;
+    private ServerSocket serverSocket;
+    private Socket clientSocket;
+    private Thread thread;
+
+    CameraControlServer(CameraCapture capture, int port) {
+        this.capture = capture;
+        this.port = port;
+    }
+
+    void start() throws IOException {
+        serverSocket = new ServerSocket(port, 1, InetAddress.getLoopbackAddress());
+        serverSocket.setReuseAddress(true);
+        thread = new Thread(this::run, "camera-control");
+        thread.start();
+        Ln.i("Camera control server listening on 127.0.0.1:" + port);
+    }
+
+    void stop() {
+        stopped = true;
+        closeSocket(clientSocket);
+        closeSocket(serverSocket);
+        clientSocket = null;
+        serverSocket = null;
+        if (thread != null && Thread.currentThread() != thread) {
+            try {
+                thread.join(1000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        thread = null;
+    }
+
+    private void run() {
+        while (!stopped) {
+            Socket socket = null;
+            try {
+                socket = serverSocket.accept();
+                if (stopped) {
+                    closeSocket(socket);
+                    break;
+                }
+                clientSocket = socket;
+                socket.setTcpNoDelay(true);
+                readMessages(socket);
+            } catch (SocketException e) {
+                if (!stopped) {
+                    Ln.w("Camera control socket error: " + e.getMessage());
+                }
+            } catch (IOException e) {
+                if (!stopped) {
+                    Ln.w("Camera control connection error: " + e.getMessage());
+                }
+            } finally {
+                closeSocket(socket);
+                if (clientSocket == socket) {
+                    clientSocket = null;
                 }
             }
-        });
-    }
-
-'''
-if "public void setCameraSettings(" not in s:
-    if control_marker not in s:
-        raise SystemExit("camera settings insertion marker not found")
-    s = s.replace(control_marker, control_method + control_marker, 1)
-
-start = s.index("    private void applyCurrentCameraSettings()")
-end = s.index("    private void applyExposure()", start)
-new_apply_current = r'''    private void applyCurrentCameraSettings() throws CameraAccessException {
-        assertCameraThread();
-        if (cameraCharacteristics == null) {
-            return;
-        }
-
-        Boolean flashAvailable =
-                cameraCharacteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
-        if (torchEnabled && Boolean.TRUE.equals(flashAvailable)) {
-            requestBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH);
-        } else {
-            if (torchEnabled && !Boolean.TRUE.equals(flashAvailable)) {
-                Ln.w("Camera torch requested but this camera has no available flash unit");
-            }
-            requestBuilder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF);
-        }
-
-        zoom = clampZoom(zoom);
-        requestBuilder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom);
-
-        applyExposure();
-        applyFocus();
-        applyWhiteBalance();
-    }
-
-'''
-s = s[:start] + new_apply_current + s[end:]
-
-start = s.index("    private void applyExposure()")
-end = s.index("    private void applyFocus()", start)
-new_exposure = r'''    private void clearManualSensorControls() {
-        requestBuilder.set(CaptureRequest.SENSOR_SENSITIVITY, null);
-        requestBuilder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, null);
-        requestBuilder.set(CaptureRequest.SENSOR_FRAME_DURATION, null);
-    }
-
-    private void applyExposure() {
-        assertCameraThread();
-
-        if (cameraCharacteristics == null) {
-            return;
-        }
-
-        boolean hasIso = manualIso > 0;
-        boolean hasShutter = manualShutterUs > 0;
-
-        Range<Integer> isoRange =
-                cameraCharacteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE);
-        Range<Long> exposureRange =
-                cameraCharacteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE);
-
-        if (!hasIso && !hasShutter) {
-            clearManualSensorControls();
-            requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
-            if (android.os.Build.VERSION.SDK_INT >= 36) {
-                requestBuilder.set(CaptureRequest.CONTROL_AE_PRIORITY_MODE,
-                        CaptureRequest.CONTROL_AE_PRIORITY_MODE_OFF);
-            }
-            Ln.i("Camera exposure: auto");
-            return;
-        }
-
-        if (isoRange == null || exposureRange == null) {
-            throw new IllegalStateException("manual exposure ranges unavailable");
-        }
-
-        int[] capabilities =
-                cameraCharacteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
-        boolean manualSensor = contains(capabilities,
-                CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR);
-
-        if (hasIso && hasShutter) {
-            if (!manualSensor) {
-                throw new IllegalStateException("manual sensor capability unavailable");
-            }
-
-            int iso = isoRange.clamp(manualIso);
-            long exposureNs = exposureRange.clamp(manualShutterUs * 1000L);
-
-            requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF);
-            if (android.os.Build.VERSION.SDK_INT >= 36) {
-                requestBuilder.set(CaptureRequest.CONTROL_AE_PRIORITY_MODE,
-                        CaptureRequest.CONTROL_AE_PRIORITY_MODE_OFF);
-            }
-            requestBuilder.set(CaptureRequest.SENSOR_SENSITIVITY, iso);
-            requestBuilder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureNs);
-            requestBuilder.set(CaptureRequest.SENSOR_FRAME_DURATION, exposureNs);
-            Ln.i("Manual exposure: ISO " + iso + ", " + manualShutterUs + " us");
-            return;
-        }
-
-        if (android.os.Build.VERSION.SDK_INT < 36) {
-            throw new IllegalStateException("independent ISO/shutter control requires Android 16+");
-        }
-
-        if (hasIso) {
-            int iso = isoRange.clamp(manualIso);
-            requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
-            requestBuilder.set(CaptureRequest.CONTROL_AE_PRIORITY_MODE,
-                    CaptureRequest.CONTROL_AE_PRIORITY_MODE_SENSOR_SENSITIVITY_PRIORITY);
-            requestBuilder.set(CaptureRequest.SENSOR_SENSITIVITY, iso);
-            requestBuilder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, null);
-            requestBuilder.set(CaptureRequest.SENSOR_FRAME_DURATION, null);
-            Ln.i("Camera ISO locked at " + iso + ", shutter automatic");
-        } else {
-            long exposureNs = exposureRange.clamp(manualShutterUs * 1000L);
-            requestBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
-            requestBuilder.set(CaptureRequest.CONTROL_AE_PRIORITY_MODE,
-                    CaptureRequest.CONTROL_AE_PRIORITY_MODE_SENSOR_EXPOSURE_TIME_PRIORITY);
-            requestBuilder.set(CaptureRequest.SENSOR_SENSITIVITY, null);
-            requestBuilder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureNs);
-            requestBuilder.set(CaptureRequest.SENSOR_FRAME_DURATION, null);
-            Ln.i("Camera shutter locked at " + manualShutterUs + " us, ISO automatic");
         }
     }
 
-'''
-s = s[:start] + new_exposure + s[end:]
-
-start = s.index("    private void applyFocus()")
-end = s.index("    private void applyWhiteBalance()", start)
-new_focus = r'''    private void applyFocus() {
-        assertCameraThread();
-        if (cameraCharacteristics == null) {
-            return;
-        }
-
-        int[] modes =
-                cameraCharacteristics.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES);
-        Float minimumFocusDistance =
-                cameraCharacteristics.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE);
-
-        boolean manualSupported = minimumFocusDistance != null
-                && minimumFocusDistance > 0
-                && contains(modes, CaptureRequest.CONTROL_AF_MODE_OFF);
-
-        if (manualFocusDistance > 0 && manualSupported) {
-            float distance = Math.min(manualFocusDistance, minimumFocusDistance);
-            requestBuilder.set(CaptureRequest.CONTROL_AF_MODE,
-                    CaptureRequest.CONTROL_AF_MODE_OFF);
-            requestBuilder.set(CaptureRequest.LENS_FOCUS_DISTANCE, distance);
-        } else {
-            requestBuilder.set(CaptureRequest.LENS_FOCUS_DISTANCE, null);
-            if (contains(modes, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)) {
-                requestBuilder.set(CaptureRequest.CONTROL_AF_MODE,
-                        CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO);
-            } else if (contains(modes, CaptureRequest.CONTROL_AF_MODE_AUTO)) {
-                requestBuilder.set(CaptureRequest.CONTROL_AF_MODE,
-                        CaptureRequest.CONTROL_AF_MODE_AUTO);
-            }
-        }
-    }
-
-'''
-s = s[:start] + new_focus + s[end:]
-
-start = s.index("    private void applyWhiteBalance()")
-end = s.index("    private static RggbChannelVector kelvinToGains", start)
-new_wb = r'''    private void applyWhiteBalance() {
-        assertCameraThread();
-        if (cameraCharacteristics == null) {
-            return;
-        }
-
-        if (whiteBalanceKelvin <= 0) {
-            requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
-                    CaptureRequest.CONTROL_AWB_MODE_AUTO);
-            if (android.os.Build.VERSION.SDK_INT >= 36) {
-                requestBuilder.set(CaptureRequest.COLOR_CORRECTION_MODE,
-                        CaptureRequest.COLOR_CORRECTION_MODE_FAST);
-                requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TEMPERATURE, null);
-                requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TINT, null);
-            }
-            return;
-        }
-
-        if (android.os.Build.VERSION.SDK_INT >= 36) {
-            Range<Integer> cctRange = cameraCharacteristics.get(
-                    CameraCharacteristics.COLOR_CORRECTION_COLOR_TEMPERATURE_RANGE);
-            int[] modes = cameraCharacteristics.get(
-                    CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_MODES);
-            int[] capabilities = cameraCharacteristics.get(
-                    CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
-
-            boolean cctSupported = cctRange != null
-                    && contains(modes, CaptureRequest.COLOR_CORRECTION_MODE_CCT)
-                    && contains(capabilities,
-                            CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING);
-
-            if (cctSupported) {
-                int kelvin = cctRange.clamp(whiteBalanceKelvin);
-                requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
-                        CaptureRequest.CONTROL_AWB_MODE_OFF);
-                requestBuilder.set(CaptureRequest.COLOR_CORRECTION_MODE,
-                        CaptureRequest.COLOR_CORRECTION_MODE_CCT);
-                requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TEMPERATURE, kelvin);
-                requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TINT, 0);
-                Ln.i("Camera white balance CCT: " + kelvin + " K");
+    private void readMessages(Socket socket) throws IOException {
+        DataInputStream in = new DataInputStream(socket.getInputStream());
+        while (!stopped) {
+            int type;
+            try {
+                type = in.readUnsignedByte();
+            } catch (EOFException e) {
                 return;
             }
-        }
 
-        int[] modes = cameraCharacteristics.get(CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES);
-        int[] capabilities =
-                cameraCharacteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
-        int[] colorCorrectionModes =
-                android.os.Build.VERSION.SDK_INT >= 21
-                        ? cameraCharacteristics.get(CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_MODES)
-                        : null;
-        boolean manualSupported = contains(modes, CaptureRequest.CONTROL_AWB_MODE_OFF)
-                && contains(capabilities,
-                        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING)
-                && contains(colorCorrectionModes,
-                        CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX);
+            int size = in.readUnsignedByte();
+            if (type != TYPE_SETTINGS) {
+                throw new IOException("Unknown camera control message type: " + type);
+            }
+            if (size != SETTINGS_SIZE) {
+                throw new IOException("Invalid camera control payload size: " + size);
+            }
 
-        if (manualSupported) {
-            requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_OFF);
-            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_MODE,
-                    CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX);
-            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS,
-                    kelvinToGains(whiteBalanceKelvin));
-            Ln.w("Camera does not expose CCT white balance; using gain approximation");
-        } else {
-            Ln.w("Manual Kelvin white balance is not supported by this camera");
-            requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
-                    CaptureRequest.CONTROL_AWB_MODE_AUTO);
+            float zoom = in.readFloat();
+            boolean torch = in.readUnsignedByte() != 0;
+            int iso = in.readInt();
+            int shutterUs = in.readInt();
+            float focusDistance = in.readFloat();
+            int wbKelvin = in.readInt();
+
+            capture.setCameraSettings(zoom, torch, iso, shutterUs, focusDistance, wbKelvin);
         }
     }
 
-'''
-s = s[:start] + new_wb + s[end:]
+    private static void closeSocket(ServerSocket socket) {
+        if (socket != null) {
+            try {
+                socket.close();
+            } catch (IOException e) {
+                // ignore during shutdown
+            }
+        }
+    }
 
-p.write_text(s, encoding="utf-8")
+    private static void closeSocket(Socket socket) {
+        if (socket != null) {
+            try {
+                socket.close();
+            } catch (IOException e) {
+                // ignore during shutdown
+            }
+        }
+    }
+}
+""", encoding="utf-8")
 
-p = ROOT / "server/src/main/java/com/genymobile/scrcpy/video/CameraControlServer.java"
-p.write_text("package com.genymobile.scrcpy.video;\n\nimport com.genymobile.scrcpy.util.Ln;\n\nimport java.io.DataInputStream;\nimport java.io.EOFException;\nimport java.io.IOException;\nimport java.net.InetAddress;\nimport java.net.ServerSocket;\nimport java.net.Socket;\nimport java.net.SocketException;\n\nfinal class CameraControlServer {\n\n    private static final int TYPE_SETTINGS = 6;\n    private static final int SETTINGS_SIZE = 21;\n\n    private final CameraCapture capture;\n    private final int port;\n\n    private volatile boolean stopped;\n    private ServerSocket serverSocket;\n    private Socket clientSocket;\n    private Thread thread;\n\n    CameraControlServer(CameraCapture capture, int port) {\n        this.capture = capture;\n        this.port = port;\n    }\n\n    void start() throws IOException {\n        serverSocket = new ServerSocket(port, 1, InetAddress.getLoopbackAddress());\n        serverSocket.setReuseAddress(true);\n        thread = new Thread(this::run, \"camera-control\");\n        thread.start();\n        Ln.i(\"Camera control server listening on 127.0.0.1:\" + port);\n    }\n\n    void stop() {\n        stopped = true;\n        closeSocket(clientSocket);\n        closeSocket(serverSocket);\n        clientSocket = null;\n        serverSocket = null;\n        if (thread != null && Thread.currentThread() != thread) {\n            try {\n                thread.join(1000);\n            } catch (InterruptedException e) {\n                Thread.currentThread().interrupt();\n            }\n        }\n        thread = null;\n    }\n\n    private void run() {\n        while (!stopped) {\n            Socket socket = null;\n            try {\n                socket = serverSocket.accept();\n                if (stopped) {\n                    closeSocket(socket);\n                    break;\n                }\n                clientSocket = socket;\n                socket.setTcpNoDelay(true);\n                readMessages(socket);\n            } catch (SocketException e) {\n                if (!stopped) {\n                    Ln.w(\"Camera control socket error: \" + e.getMessage());\n                }\n            } catch (IOException e) {\n                if (!stopped) {\n                    Ln.w(\"Camera control connection error: \" + e.getMessage());\n                }\n            } finally {\n                closeSocket(socket);\n                if (clientSocket == socket) {\n                    clientSocket = null;\n                }\n            }\n        }\n    }\n\n    private void readMessages(Socket socket) throws IOException {\n        DataInputStream in = new DataInputStream(socket.getInputStream());\n        while (!stopped) {\n            int type;\n            try {\n                type = in.readUnsignedByte();\n            } catch (EOFException e) {\n                return;\n            }\n\n            int size = in.readUnsignedByte();\n            if (type != TYPE_SETTINGS) {\n                throw new IOException(\"Unknown camera control message type: \" + type);\n            }\n            requireSize(type, size, SETTINGS_SIZE);\n\n            float zoom = in.readFloat();\n            boolean torch = in.readUnsignedByte() != 0;\n            int iso = in.readInt();\n            int shutterUs = in.readInt();\n            float focusDistance = in.readFloat();\n            int wbKelvin = in.readInt();\n\n            capture.setCameraSettings(zoom, torch, iso, shutterUs, focusDistance, wbKelvin);\n        }\n    }\n\n    private static void requireSize(int type, int actual, int expected) throws IOException {\n        if (actual != expected) {\n            throw new IOException(\"Invalid camera control message \" + type + \" size: \" + actual);\n        }\n    }\n\n    private static void closeSocket(ServerSocket socket) {\n        if (socket != null) {\n            try {\n                socket.close();\n            } catch (IOException e) {\n                // ignore during shutdown\n            }\n        }\n    }\n\n    private static void closeSocket(Socket socket) {\n        if (socket != null) {\n            try {\n                socket.close();\n            } catch (IOException e) {\n                // ignore during shutdown\n            }\n        }\n    }\n}\n", encoding="utf-8")p.write_text("package com.genymobile.scrcpy.video;\n\nimport com.genymobile.scrcpy.util.Ln;\n\nimport java.io.DataInputStream;\nimport java.io.EOFException;\nimport java.io.IOException;\nimport java.net.InetAddress;\nimport java.net.ServerSocket;\nimport java.net.Socket;\nimport java.net.SocketException;\n\nfinal class CameraControlServer {\n\n    private static final int TYPE_ZOOM = 1;\n    private static final int TYPE_TORCH = 2;\n    private static final int TYPE_EXPOSURE = 3;\n    private static final int TYPE_FOCUS = 4;\n    private static final int TYPE_WHITE_BALANCE = 5;\n\n    private final CameraCapture capture;\n    private final int port;\n\n    private volatile boolean stopped;\n    private ServerSocket serverSocket;\n    private Socket clientSocket;\n    private Thread thread;\n\n    CameraControlServer(CameraCapture capture, int port) {\n        this.capture = capture;\n        this.port = port;\n    }\n\n    void start() throws IOException {\n        serverSocket = new ServerSocket(port, 1, InetAddress.getLoopbackAddress());\n        serverSocket.setReuseAddress(true);\n        thread = new Thread(this::run, \"camera-control\");\n        thread.start();\n        Ln.i(\"Camera control server listening on 127.0.0.1:\" + port);\n    }\n\n    void stop() {\n        stopped = true;\n        closeSocket(clientSocket);\n        closeSocket(serverSocket);\n        clientSocket = null;\n        serverSocket = null;\n        if (thread != null && Thread.currentThread() != thread) {\n            try {\n                thread.join(1000);\n            } catch (InterruptedException e) {\n                Thread.currentThread().interrupt();\n            }\n        }\n        thread = null;\n    }\n\n    private void run() {\n        while (!stopped) {\n            Socket socket = null;\n            try {\n                socket = serverSocket.accept();\n                if (stopped) {\n                    closeSocket(socket);\n                    break;\n                }\n                clientSocket = socket;\n                socket.setTcpNoDelay(true);\n                readMessages(socket);\n            } catch (SocketException e) {\n                if (!stopped) {\n                    Ln.w(\"Camera control socket error: \" + e.getMessage());\n                }\n            } catch (IOException e) {\n                if (!stopped) {\n                    Ln.w(\"Camera control connection error: \" + e.getMessage());\n                }\n            } finally {\n                closeSocket(socket);\n                if (clientSocket == socket) {\n                    clientSocket = null;\n                }\n            }\n        }\n    }\n\n    private void readMessages(Socket socket) throws IOException {\n        DataInputStream in = new DataInputStream(socket.getInputStream());\n        while (!stopped) {\n            int type;\n            try {\n                type = in.readUnsignedByte();\n            } catch (EOFException e) {\n                return;\n            }\n\n            int size = in.readUnsignedByte();\n            switch (type) {\n                case TYPE_ZOOM:\n                    requireSize(type, size, 4);\n                    capture.setZoomRatio(in.readFloat());\n                    break;\n                case TYPE_TORCH:\n                    requireSize(type, size, 1);\n                    capture.setTorchEnabled(in.readUnsignedByte() != 0);\n                    break;\n                case TYPE_EXPOSURE:\n                    requireSize(type, size, 8);\n                    capture.setManualExposure(in.readInt(), in.readInt());\n                    break;\n                case TYPE_FOCUS:\n                    requireSize(type, size, 4);\n                    capture.setFocusDistance(in.readFloat());\n                    break;\n                case TYPE_WHITE_BALANCE:\n                    requireSize(type, size, 4);\n                    capture.setWhiteBalanceKelvin(in.readInt());\n                    break;\n                default:\n                    throw new IOException(\"Unknown camera control message type: \" + type);\n            }\n        }\n    }\n\n    private static void requireSize(int type, int actual, int expected) throws IOException {\n        if (actual != expected) {\n            throw new IOException(\"Invalid camera control message \" + type + \" size: \" + actual);\n        }\n    }\n\n    private static void closeSocket(ServerSocket socket) {\n        if (socket != null) {\n            try {\n                socket.close();\n            } catch (IOException e) {\n                // ignore during shutdown\n            }\n        }\n    }\n\n    private static void closeSocket(Socket socket) {\n        if (socket != null) {\n            try {\n                socket.close();\n            } catch (IOException e) {\n                // ignore during shutdown\n            }\n        }\n    }\n}\n", encoding="utf-8")
+print("scrcpy camera patch applied")
