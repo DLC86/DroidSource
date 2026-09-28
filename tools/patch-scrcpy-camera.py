@@ -273,7 +273,18 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
         }
 
         zoom = clampZoom(zoom);
-        requestBuilder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom);
+        Rect activeArray = cameraCharacteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE);
+        if (activeArray != null) {
+            float safeZoom = Math.max(1f, zoom);
+            int cropWidth = Math.max(1, Math.round(activeArray.width() / safeZoom));
+            int cropHeight = Math.max(1, Math.round(activeArray.height() / safeZoom));
+            int left = activeArray.left + (activeArray.width() - cropWidth) / 2;
+            int top = activeArray.top + (activeArray.height() - cropHeight) / 2;
+            requestBuilder.set(CaptureRequest.SCALER_CROP_REGION,
+                    new Rect(left, top, left + cropWidth, top + cropHeight));
+        } else {
+            requestBuilder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom);
+        }
 
         applyExposure();
         applyFocus();
@@ -281,6 +292,13 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
 
         Boolean flashAvailable =
                 cameraCharacteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+        if (Boolean.TRUE.equals(flashAvailable)) {
+            try {
+                ServiceManager.getCameraManager().setTorchMode(cameraId, torchEnabled);
+            } catch (CameraAccessException | IllegalArgumentException e) {
+                Ln.w("CameraManager torch control failed: " + e.getMessage());
+            }
+        }
         requestBuilder.set(CaptureRequest.FLASH_MODE,
                 torchEnabled && Boolean.TRUE.equals(flashAvailable)
                         ? CaptureRequest.FLASH_MODE_TORCH
