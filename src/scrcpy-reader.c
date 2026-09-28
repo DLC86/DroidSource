@@ -221,10 +221,89 @@ static enum AVPixelFormat get_hw_format(AVCodecContext *codec_ctx, const enum AV
 }
 #endif
 
-static enum video_colorspace obs_colorspace_from_av(const AVFrame *frame);
-static enum video_range_type obs_range_from_av(const AVFrame *frame);
-static uint8_t obs_trc_from_av(const AVFrame *frame);
-static bool rotate_frame_90_ccw(struct scrcpy_reader *r, const AVFrame *src);
+static enum video_colorspace obs_colorspace_from_av(const AVFrame *frame)
+{
+	switch ((enum AVColorSpace)frame->colorspace) {
+	case AVCOL_SPC_SMPTE170M:
+	case AVCOL_SPC_BT470BG:
+		return VIDEO_CS_601;
+	case AVCOL_SPC_BT709:
+		return VIDEO_CS_709;
+	case AVCOL_SPC_BT2020_NCL:
+	case AVCOL_SPC_BT2020_CL:
+		if (frame->color_trc == AVCOL_TRC_ARIB_STD_B67)
+			return VIDEO_CS_2100_HLG;
+		return VIDEO_CS_2100_PQ;
+	default:
+		return VIDEO_CS_709;
+	}
+}
+
+static enum video_range_type obs_range_from_av(const AVFrame *frame)
+{
+	return frame->color_range == AVCOL_RANGE_JPEG ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
+}
+
+static uint8_t obs_trc_from_av(const AVFrame *frame)
+{
+	if (frame->color_trc == AVCOL_TRC_ARIB_STD_B67)
+		return VIDEO_TRC_HLG;
+	if (frame->color_trc == AVCOL_TRC_SMPTE2084)
+		return VIDEO_TRC_PQ;
+	return VIDEO_TRC_SRGB;
+}
+
+static void rotate_plane_90_ccw(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize,
+				int src_width, int src_height, int bytes_per_pixel)
+{
+	for (int sy = 0; sy < src_height; ++sy) {
+		for (int sx = 0; sx < src_width; ++sx) {
+			int dx = sy;
+			int dy = src_width - 1 - sx;
+			memcpy(dst + (size_t)dy * dst_linesize + (size_t)dx * bytes_per_pixel,
+			       src + (size_t)sy * src_linesize + (size_t)sx * bytes_per_pixel,
+			       (size_t)bytes_per_pixel);
+		}
+	}
+}
+
+static bool rotate_frame_90_ccw(struct scrcpy_reader *r, const AVFrame *src)
+{
+	enum AVPixelFormat format;
+
+	if (!r || !src || !r->portrait_frame)
+		return false;
+
+	format = (enum AVPixelFormat)src->format;
+	if (format != AV_PIX_FMT_YUV420P && format != AV_PIX_FMT_YUVJ420P && format != AV_PIX_FMT_NV12)
+		return false;
+
+	av_frame_unref(r->portrait_frame);
+	r->portrait_frame->format = src->format;
+	r->portrait_frame->width = src->height;
+	r->portrait_frame->height = src->width;
+	if (av_frame_copy_props(r->portrait_frame, src) < 0)
+		return false;
+	if (av_frame_get_buffer(r->portrait_frame, 32) < 0)
+		return false;
+
+	rotate_plane_90_ccw(r->portrait_frame->data[0], r->portrait_frame->linesize[0],
+			    src->data[0], src->linesize[0], src->width, src->height, 1);
+
+	int src_width = src->width / 2;
+	int src_height = src->height / 2;
+	if (format == AV_PIX_FMT_NV12) {
+		rotate_plane_90_ccw(r->portrait_frame->data[1], r->portrait_frame->linesize[1],
+				    src->data[1], src->linesize[1], src_width, src_height, 2);
+	} else {
+		rotate_plane_90_ccw(r->portrait_frame->data[1], r->portrait_frame->linesize[1],
+				    src->data[1], src->linesize[1], src_width, src_height, 1);
+		rotate_plane_90_ccw(r->portrait_frame->data[2], r->portrait_frame->linesize[2],
+				    src->data[2], src->linesize[2], src_width, src_height, 1);
+	}
+
+	return true;
+}
 
 static bool open_decoder(struct scrcpy_reader *r, uint32_t codec_id, uint32_t width, uint32_t height)
 {
