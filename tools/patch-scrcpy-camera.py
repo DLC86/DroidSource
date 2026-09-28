@@ -34,10 +34,6 @@ patch("server/src/main/java/com/genymobile/scrcpy/Options.java", [
 """,
         """    private boolean cameraTorch;
     private int cameraControlPort;
-    private int cameraIso;
-    private int cameraShutterUs;
-    private float cameraFocusDistance;
-    private int cameraWbKelvin;
     private boolean showTouches;
 """,
     ),
@@ -54,22 +50,6 @@ patch("server/src/main/java/com/genymobile/scrcpy/Options.java", [
 
     public int getCameraControlPort() {
         return cameraControlPort;
-    }
-
-    public int getCameraIso() {
-        return cameraIso;
-    }
-
-    public int getCameraShutterUs() {
-        return cameraShutterUs;
-    }
-
-    public float getCameraFocusDistance() {
-        return cameraFocusDistance;
-    }
-
-    public int getCameraWbKelvin() {
-        return cameraWbKelvin;
     }
 
     public boolean getShowTouches() {
@@ -94,24 +74,6 @@ patch("server/src/main/java/com/genymobile/scrcpy/Options.java", [
                                     throw new IllegalArgumentException("Invalid camera control port: " + port);
                                 }
                                 options.cameraControlPort = port;
-                                codecOptions.remove(j);
-                            } else if ("__scrcpy_obs_camera_zoom".equals(optionKey) && valueObj instanceof Float) {
-                                options.cameraZoom = (Float) valueObj;
-                                codecOptions.remove(j);
-                            } else if ("__scrcpy_obs_camera_torch".equals(optionKey) && valueObj instanceof Integer) {
-                                options.cameraTorch = (Integer) valueObj != 0;
-                                codecOptions.remove(j);
-                            } else if ("__scrcpy_obs_camera_iso".equals(optionKey) && valueObj instanceof Integer) {
-                                options.cameraIso = (Integer) valueObj;
-                                codecOptions.remove(j);
-                            } else if ("__scrcpy_obs_camera_shutter".equals(optionKey) && valueObj instanceof Integer) {
-                                options.cameraShutterUs = (Integer) valueObj;
-                                codecOptions.remove(j);
-                            } else if ("__scrcpy_obs_camera_focus".equals(optionKey) && valueObj instanceof Float) {
-                                options.cameraFocusDistance = (Float) valueObj;
-                                codecOptions.remove(j);
-                            } else if ("__scrcpy_obs_camera_wb".equals(optionKey) && valueObj instanceof Integer) {
-                                options.cameraWbKelvin = (Integer) valueObj;
                                 codecOptions.remove(j);
                             } else {
                                 ++j;
@@ -262,10 +224,6 @@ import android.hardware.camera2.params.StreamConfigurationMap;
         this.cameraControlPort = options.getCameraControlPort();
         this.zoom = options.getCameraZoom();
         this.torchEnabled = initialTorch;
-        this.manualIso = Math.max(0, options.getCameraIso());
-        this.manualShutterUs = Math.max(0, options.getCameraShutterUs());
-        this.manualFocusDistance = Math.max(0, options.getCameraFocusDistance());
-        this.whiteBalanceKelvin = Math.max(0, options.getCameraWbKelvin());
 """,
     ),
     (
@@ -309,9 +267,7 @@ import android.hardware.camera2.params.StreamConfigurationMap;
 
                     CaptureRequest request = requestBuilder.build();
 """,
-        """                    applyCurrentCameraSettings();
-
-                    CaptureRequest request = requestBuilder.build();
+        """                    CaptureRequest request = requestBuilder.build();
 """,
     ),
     (
