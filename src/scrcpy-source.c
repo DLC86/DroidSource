@@ -947,9 +947,6 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 		obs_property_set_enabled(focus_prop, focus_supported);
 		obs_property_float_set_limits(focus_prop, 0.0, focus_supported ? selected_focus_max : 1.0, 0.1);
 		double current_focus = obs_data_get_double(settings, "camera_focus_distance");
-		if (!focus_supported || current_focus > selected_focus_max)
-			obs_data_set_double(settings, "camera_focus_distance",
-					    focus_supported ? selected_focus_max : 0.0);
 	}
 
 	obs_property_t *zoom_prop = obs_properties_get(props, "camera_zoom");
