@@ -1278,7 +1278,23 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_set_visible(color_range, is_camera);
 	obs_property_set_visible(transfer, is_camera);
 
-	populate_camera_fallbacks(camera_id, camera_size, camera_fps);
+	if (ctx->serial && *ctx->serial) {
+		pthread_mutex_lock(&g_camera_capabilities_mutex);
+		bool have_cached_capabilities =
+			g_camera_capabilities_serial && g_camera_capabilities_output &&
+			strcmp(g_camera_capabilities_serial, ctx->serial) == 0;
+		pthread_mutex_unlock(&g_camera_capabilities_mutex);
+
+		if (have_cached_capabilities) {
+			obs_data_t *settings_now = obs_source_get_settings(ctx->source);
+			refresh_camera_capabilities(props, settings_now, false);
+			obs_data_release(settings_now);
+		} else {
+			populate_camera_fallbacks(camera_id, camera_size, camera_fps);
+		}
+	} else {
+		populate_camera_fallbacks(camera_id, camera_size, camera_fps);
+	}
 
 
 	obs_property_t *focus_prop = obs_properties_get(props, "camera_focus_distance");
