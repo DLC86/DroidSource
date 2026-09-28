@@ -577,7 +577,7 @@ static bool parse_selected_camera_sizes(const char *output, const char *selected
 		} else if (in_camera) {
 			if (strstr(line_copy, "High speed capture") != NULL) {
 				high_speed = true;
-			} else {
+			} else if (!high_speed) {
 				const char *dash = strstr(line_copy, "- ");
 				if (dash) {
 					unsigned width = 0;
@@ -589,8 +589,7 @@ static bool parse_selected_camera_sizes(const char *output, const char *selected
 
 						bool duplicate = false;
 						for (size_t i = 0; i < count; ++i) {
-							const char *existing =
-								obs_property_list_item_string(resolution, i);
+							const char *existing = obs_property_list_item_string(resolution, i);
 							if (existing && strcmp(existing, size) == 0) {
 								duplicate = true;
 								break;
@@ -613,17 +612,6 @@ static bool parse_selected_camera_sizes(const char *output, const char *selected
 	}
 
 	return count > 0;
-}
-
-static void add_unique_fps(int *values, size_t *count, int value)
-{
-	if (value <= 0 || value > 1000 || *count >= 64)
-		return;
-	for (size_t i = 0; i < *count; ++i) {
-		if (values[i] == value)
-			return;
-	}
-	values[(*count)++] = value;
 }
 
 static void populate_camera_fallbacks(obs_property_t *camera_id_prop,
@@ -880,9 +868,15 @@ static bool serial_modified(obs_properties_t *props, obs_property_t *p, obs_data
 
 static bool camera_id_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
 {
-	UNUSED_PARAMETER(props);
 	UNUSED_PARAMETER(p);
-	UNUSED_PARAMETER(settings);
+
+	const char *serial = obs_data_get_string(settings, "serial");
+	if (g_camera_capabilities_output && g_camera_capabilities_serial && serial && *serial &&
+	    strcmp(g_camera_capabilities_serial, serial) == 0) {
+		/* Reuse the cached result; this updates resolution/FPS/focus instantly
+		 * without starting another scrcpy process while editing properties. */
+		refresh_camera_capabilities(props, settings, false);
+	}
 	return true;
 }
 
