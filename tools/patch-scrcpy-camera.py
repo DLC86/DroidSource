@@ -148,6 +148,11 @@ patch("server/src/main/java/com/genymobile/scrcpy/util/LogUtils.java", [
                         }
                     }
 
+                    Integer sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
+                    if (sensorOrientation != null) {
+                        builder.append(", sensor-orientation=").append(sensorOrientation);
+                    }
+
                     Float focusMax = characteristics.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE);
                     if (focusMax != null && focusMax > 0) {
                         builder.append(", focus-range=[0, ")
