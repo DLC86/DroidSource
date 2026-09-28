@@ -146,11 +146,35 @@ patch("server/src/main/java/com/genymobile/scrcpy/util/LogUtils.java", [
                             CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_MODES);
                     int[] awbModesForWb = characteristics.get(
                             CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES);
-                    boolean manualWb = contains(capabilitiesForWb,
-                            CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING)
-                            && contains(awbModesForWb, CaptureRequest.CONTROL_AWB_MODE_OFF)
-                            && contains(correctionModesForWb,
-                                    CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX);
+                    boolean manualWb = false;
+                    boolean manualPostProcessing = false;
+                    if (capabilitiesForWb != null) {
+                        for (int capability : capabilitiesForWb) {
+                            if (capability == CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING) {
+                                manualPostProcessing = true;
+                                break;
+                            }
+                        }
+                    }
+                    boolean awbOff = false;
+                    if (awbModesForWb != null) {
+                        for (int mode : awbModesForWb) {
+                            if (mode == android.hardware.camera2.CaptureRequest.CONTROL_AWB_MODE_OFF) {
+                                awbOff = true;
+                                break;
+                            }
+                        }
+                    }
+                    boolean transformMatrix = Build.VERSION.SDK_INT < 36;
+                    if (Build.VERSION.SDK_INT >= 36 && correctionModesForWb != null) {
+                        for (int mode : correctionModesForWb) {
+                            if (mode == android.hardware.camera2.CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX) {
+                                transformMatrix = true;
+                                break;
+                            }
+                        }
+                    }
+                    manualWb = manualPostProcessing && awbOff && transformMatrix;
                     if (manualWb) {
                         builder.append(", wb-manual=true");
                     }
