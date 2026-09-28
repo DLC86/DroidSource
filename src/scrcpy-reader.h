@@ -23,9 +23,7 @@ typedef struct scrcpy_reader scrcpy_reader_t;
 
 scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port,
                                      bool hardware_decoding, bool flip_vertical,
-                                     int video_buffer_ms, const char *pixel_format,
-                                     const char *color_space, const char *color_range,
-                                     const char *transfer);
+                                     int video_buffer_ms, bool portrait_mode);
 
 void scrcpy_reader_destroy(scrcpy_reader_t *r);
 bool scrcpy_reader_is_alive(const scrcpy_reader_t *r);
