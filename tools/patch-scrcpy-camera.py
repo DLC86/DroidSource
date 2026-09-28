@@ -34,6 +34,10 @@ patch("server/src/main/java/com/genymobile/scrcpy/Options.java", [
 """,
         """    private boolean cameraTorch;
     private int cameraControlPort;
+    private int cameraIso;
+    private int cameraShutterUs;
+    private float cameraFocusDistance;
+    private int cameraWbKelvin;
     private boolean showTouches;
 """,
     ),
@@ -52,6 +56,22 @@ patch("server/src/main/java/com/genymobile/scrcpy/Options.java", [
         return cameraControlPort;
     }
 
+    public int getCameraIso() {
+        return cameraIso;
+    }
+
+    public int getCameraShutterUs() {
+        return cameraShutterUs;
+    }
+
+    public float getCameraFocusDistance() {
+        return cameraFocusDistance;
+    }
+
+    public int getCameraWbKelvin() {
+        return cameraWbKelvin;
+    }
+
     public boolean getShowTouches() {
 """,
     ),
@@ -65,13 +85,27 @@ patch("server/src/main/java/com/genymobile/scrcpy/Options.java", [
                     if (codecOptions != null) {
                         for (int j = 0; j < codecOptions.size();) {
                             CodecOption option = codecOptions.get(j);
-                            if (CAMERA_CONTROL_OPTION.equals(option.getKey())
-                                    && option.getValue() instanceof Integer) {
-                                int port = (Integer) option.getValue();
+                            String key = option.getKey();
+                            Object valueObj = option.getValue();
+                            if (CAMERA_CONTROL_OPTION.equals(key)
+                                    && valueObj instanceof Integer) {
+                                int port = (Integer) valueObj;
                                 if (port < 1 || port > 65535) {
                                     throw new IllegalArgumentException("Invalid camera control port: " + port);
                                 }
                                 options.cameraControlPort = port;
+                                codecOptions.remove(j);
+                            } else if ("__scrcpy_obs_camera_iso".equals(key) && valueObj instanceof Integer) {
+                                options.cameraIso = (Integer) valueObj;
+                                codecOptions.remove(j);
+                            } else if ("__scrcpy_obs_camera_shutter".equals(key) && valueObj instanceof Integer) {
+                                options.cameraShutterUs = (Integer) valueObj;
+                                codecOptions.remove(j);
+                            } else if ("__scrcpy_obs_camera_focus".equals(key) && valueObj instanceof Float) {
+                                options.cameraFocusDistance = (Float) valueObj;
+                                codecOptions.remove(j);
+                            } else if ("__scrcpy_obs_camera_wb".equals(key) && valueObj instanceof Integer) {
+                                options.cameraWbKelvin = (Integer) valueObj;
                                 codecOptions.remove(j);
                             } else {
                                 ++j;
@@ -119,6 +153,27 @@ patch("server/src/main/java/com/genymobile/scrcpy/util/LogUtils.java", [
                         builder.append(", focus-range=[0, ")
                                 .append(String.format(java.util.Locale.ROOT, "%.3f", focusMax))
                                 .append(']');
+                    }
+
+                    if (Build.VERSION.SDK_INT >= 36) {
+                        Range<Integer> cctRange =
+                                characteristics.get(CameraCharacteristics.COLOR_CORRECTION_COLOR_TEMPERATURE_RANGE);
+                        int[] correctionModes =
+                                characteristics.get(CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_MODES);
+                        if (cctRange != null && correctionModes != null) {
+                            boolean cct = false;
+                            for (int mode : correctionModes) {
+                                if (mode == android.hardware.camera2.CaptureRequest.COLOR_CORRECTION_MODE_CCT) {
+                                    cct = true;
+                                    break;
+                                }
+                            }
+                            if (cct) {
+                                builder.append(", wb-kelvin-range=[")
+                                        .append(cctRange.getLower()).append(", ")
+                                        .append(cctRange.getUpper()).append(']');
+                            }
+                        }
                     }
 
                     builder.append(')');
@@ -174,6 +229,10 @@ import android.hardware.camera2.params.StreamConfigurationMap;
         this.cameraControlPort = options.getCameraControlPort();
         this.zoom = options.getCameraZoom();
         this.torchEnabled = initialTorch;
+        this.manualIso = Math.max(0, options.getCameraIso());
+        this.manualShutterUs = Math.max(0, options.getCameraShutterUs());
+        this.manualFocusDistance = Math.max(0, options.getCameraFocusDistance());
+        this.whiteBalanceKelvin = Math.max(0, options.getCameraWbKelvin());
 """,
     ),
     (
