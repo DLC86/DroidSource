@@ -1,0 +1,41 @@
+name: One-time format scrcpy reader
+on:
+  push:
+    branches: [master]
+    paths:
+      - src/scrcpy-reader.c
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install clang-format 19
+        shell: bash
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          brew install --quiet obsproject/tools/clang-format@19
+
+      - name: Format reader
+        shell: bash
+        run: |
+          clang-format-19 -style=file -i src/scrcpy-reader.c
+
+      - name: Commit formatting
+        shell: bash
+        run: |
+          if git diff --quiet -- src/scrcpy-reader.c; then
+            echo "Already formatted."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/scrcpy-reader.c
+          git commit -m "Format scrcpy reader [skip ci]"
+          git push
