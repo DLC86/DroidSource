@@ -62,6 +62,14 @@ struct scrcpy_src {
 	int max_size;
 	int bitrate_kbps;
 	char *codec;
+
+	bool hardware_decoding;
+	bool flip_vertical;
+	int video_buffer_ms;
+	char *pixel_format;
+	char *color_space;
+	char *color_range;
+	char *transfer;
 };
 
 static const char *src_get_name(void *unused)
@@ -239,7 +247,10 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 	}
 	bfree(log_path);
 
-	ctx->reader = scrcpy_reader_create(ctx->source, port);
+	ctx->reader = scrcpy_reader_create(ctx->source, port,
+							ctx->hardware_decoding, ctx->flip_vertical,
+							ctx->video_buffer_ms, ctx->pixel_format,
+							ctx->color_space, ctx->color_range, ctx->transfer);
 
 	if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0 &&
 	    control_port != 0 && ctx->serial && *ctx->serial) {
@@ -305,6 +316,18 @@ static void load_settings(struct scrcpy_src *ctx, obs_data_t *settings)
 	ctx->camera_wb_kelvin = (int)obs_data_get_int(settings, "camera_wb_kelvin");
 	ctx->max_size = (int)obs_data_get_int(settings, "max_size");
 	ctx->bitrate_kbps = (int)obs_data_get_int(settings, "bitrate_kbps");
+	ctx->hardware_decoding = obs_data_get_bool(settings, "hardware_decoding");
+	ctx->flip_vertical = obs_data_get_bool(settings, "flip_vertical");
+	ctx->video_buffer_ms = (int)obs_data_get_int(settings, "video_buffer_ms");
+
+	bfree(ctx->pixel_format);
+	bfree(ctx->color_space);
+	bfree(ctx->color_range);
+	bfree(ctx->transfer);
+	ctx->pixel_format = bstrdup(obs_data_get_string(settings, "pixel_format"));
+	ctx->color_space = bstrdup(obs_data_get_string(settings, "color_space"));
+	ctx->color_range = bstrdup(obs_data_get_string(settings, "color_range"));
+	ctx->transfer = bstrdup(obs_data_get_string(settings, "transfer"));
 }
 
 static bool scrcpy_stream_healthy(struct scrcpy_src *ctx)
@@ -403,6 +426,10 @@ static void src_destroy(void *data)
 	bfree(ctx->video_source);
 	bfree(ctx->codec);
 	bfree(ctx->camera_size);
+	bfree(ctx->pixel_format);
+	bfree(ctx->color_space);
+	bfree(ctx->color_range);
+	bfree(ctx->transfer);
 	pthread_mutex_destroy(&ctx->state_mutex);
 	bfree(ctx);
 }
@@ -468,6 +495,13 @@ static void src_get_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "max_size", 0);
 	obs_data_set_default_int(settings, "bitrate_kbps", 8000);
 	obs_data_set_default_string(settings, "codec", "h264");
+	obs_data_set_default_bool(settings, "hardware_decoding", true);
+	obs_data_set_default_bool(settings, "flip_vertical", false);
+	obs_data_set_default_int(settings, "video_buffer_ms", 0);
+	obs_data_set_default_string(settings, "pixel_format", "auto");
+	obs_data_set_default_string(settings, "color_space", "auto");
+	obs_data_set_default_string(settings, "color_range", "auto");
+	obs_data_set_default_string(settings, "transfer", "auto");
 }
 
 static void populate_shutter_list(obs_property_t *prop, int fps);
@@ -1006,6 +1040,49 @@ static bool video_source_modified(obs_properties_t *props, obs_property_t *p, ob
 		if (prop)
 			obs_property_set_visible(prop, is_camera);
 	}
+	obs_property_t *buffering = obs_properties_add_list(
+		props, "video_buffer_ms", obs_module_text("Buffering"),
+		OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(buffering, "Automatic (OBS)", 0);
+	obs_property_list_add_int(buffering, "50 ms", 50);
+	obs_property_list_add_int(buffering, "100 ms", 100);
+	obs_property_list_add_int(buffering, "200 ms", 200);
+
+	obs_properties_add_bool(props, "flip_vertical", obs_module_text("FlipVertical"));
+	obs_properties_add_bool(props, "hardware_decoding", obs_module_text("HardwareDecoding"));
+
+	obs_property_t *pixel_format = obs_properties_add_list(
+		props, "pixel_format", obs_module_text("PixelFormat"),
+		OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+	obs_property_list_add_string(pixel_format, "Automatic", "auto");
+	obs_property_list_add_string(pixel_format, "I420", "i420");
+	obs_property_list_add_string(pixel_format, "NV12", "nv12");
+
+	obs_property_t *color_space = obs_properties_add_list(
+		props, "color_space", obs_module_text("ColorSpace"),
+		OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+	obs_property_list_add_string(color_space, "Automatic", "auto");
+	obs_property_list_add_string(color_space, "Rec. 601", "601");
+	obs_property_list_add_string(color_space, "Rec. 709", "709");
+	obs_property_list_add_string(color_space, "sRGB", "srgb");
+	obs_property_list_add_string(color_space, "Rec. 2100 PQ", "2100pq");
+	obs_property_list_add_string(color_space, "Rec. 2100 HLG", "2100hlg");
+
+	obs_property_t *color_range = obs_properties_add_list(
+		props, "color_range", obs_module_text("ColorRange"),
+		OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+	obs_property_list_add_string(color_range, "Automatic", "auto");
+	obs_property_list_add_string(color_range, "Limited", "limited");
+	obs_property_list_add_string(color_range, "Full", "full");
+
+	obs_property_t *transfer = obs_properties_add_list(
+		props, "transfer", obs_module_text("Transfer"),
+		OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+	obs_property_list_add_string(transfer, "Automatic", "auto");
+	obs_property_list_add_string(transfer, "sRGB / SDR", "srgb");
+	obs_property_list_add_string(transfer, "HLG", "hlg");
+	obs_property_list_add_string(transfer, "PQ", "pq");
+
 	obs_property_t *max_size = obs_properties_get(props, "max_size");
 	if (max_size)
 		obs_property_set_visible(max_size, !is_camera);
@@ -1085,6 +1162,16 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_set_visible(camera_shutter, is_camera);
 	obs_property_set_visible(camera_focus, is_camera);
 	obs_property_set_visible(camera_wb, is_camera);
+
+	obs_property_set_visible(buffering, is_camera);
+	obs_property_set_visible(pixel_format, is_camera);
+	obs_property_set_visible(color_space, is_camera);
+	obs_property_set_visible(color_range, is_camera);
+	obs_property_set_visible(transfer, is_camera);
+	obs_property_t *flip_vertical = obs_properties_get(props, "flip_vertical");
+	obs_property_t *hardware_decoding = obs_properties_get(props, "hardware_decoding");
+	if (flip_vertical) obs_property_set_visible(flip_vertical, is_camera);
+	if (hardware_decoding) obs_property_set_visible(hardware_decoding, is_camera);
 
 	populate_camera_fallbacks(camera_id, camera_size, camera_fps);
 
