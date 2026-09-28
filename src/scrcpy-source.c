@@ -1077,8 +1077,18 @@ static bool camera_fps_modified(obs_properties_t *props, obs_property_t *p, obs_
 {
 	UNUSED_PARAMETER(p);
 	obs_property_t *shutter = obs_properties_get(props, "camera_shutter_us");
-	if (shutter)
+	int saved_shutter = (int)obs_data_get_int(settings, "camera_shutter_us");
+	if (shutter) {
 		populate_shutter_list(shutter, (int)obs_data_get_int(settings, "camera_fps"));
+		if (saved_shutter > 0) {
+			for (size_t i = 0; i < obs_property_list_item_count(shutter); ++i) {
+				if (obs_property_list_item_int(shutter, i) == saved_shutter) {
+					obs_data_set_int(settings, "camera_shutter_us", saved_shutter);
+					break;
+				}
+			}
+		}
+	}
 	return true;
 }
 
@@ -1154,7 +1164,7 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_set_modified_callback(camera_fps, camera_fps_modified);
 
 	obs_property_t *camera_zoom =
-		obs_properties_add_float_slider(props, "camera_zoom", obs_module_text("CameraZoom"), 1.0, 10.0, 0.1);
+		obs_properties_add_float_slider(props, "camera_zoom", obs_module_text("CameraZoom"), 0.6, 10.0, 0.1);
 	obs_property_t *camera_torch = obs_properties_add_bool(props, "camera_torch", obs_module_text("CameraTorch"));
 	obs_property_t *camera_iso =
 		obs_properties_add_int_slider(props, "camera_iso", obs_module_text("CameraIso"), 0, 12800, 50);
