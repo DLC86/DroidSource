@@ -15,6 +15,7 @@
 #include <plugin-support.h>
 #include <util/dstr.h>
 #include <util/threading.h>
+#include <util/platform.h>
 
 #include <ctype.h>
 #include <stdio.h>
