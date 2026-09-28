@@ -539,7 +539,7 @@ static pthread_mutex_t g_camera_capabilities_mutex = PTHREAD_MUTEX_INITIALIZER;
 static void refresh_camera_capabilities_cache(const char *serial, bool force);
 
 static bool parse_camera_id_line(const char *line, char *id, size_t id_size, char *label, size_t label_size, int *fps,
-				 size_t *fps_count, float *focus_max)
+				 size_t *fps_count, float *focus_max, int *wb_min, int *wb_max)
 {
 	const char *p = strstr(line, "--camera-id=");
 	if (!p)
@@ -625,6 +625,20 @@ static bool parse_camera_id_line(const char *line, char *id, size_t id_size, cha
 		}
 	}
 
+	if (wb_min && wb_max) {
+		*wb_min = 0;
+		*wb_max = 0;
+		const char *wb_start = strstr(line, "wb-kelvin-range=[");
+		if (wb_start) {
+			wb_start += strlen("wb-kelvin-range=[");
+			if (sscanf(wb_start, "%d, %d", wb_min, wb_max) != 2 ||
+			    *wb_min <= 0 || *wb_max <= *wb_min) {
+				*wb_min = 0;
+				*wb_max = 0;
+			}
+		}
+	}
+
 	return true;
 }
 
@@ -646,7 +660,7 @@ static bool parse_selected_camera_sizes(const char *output, const char *selected
 		line_copy[line_len] = '\0';
 
 		char camera_id[64];
-		if (parse_camera_id_line(line_copy, camera_id, sizeof(camera_id), NULL, 0, NULL, NULL, NULL)) {
+		if (parse_camera_id_line(line_copy, camera_id, sizeof(camera_id), NULL, 0, NULL, NULL, NULL, NULL, NULL)) {
 			in_camera = strcmp(camera_id, selected_id) == 0;
 			high_speed = false;
 		} else if (in_camera) {
@@ -809,6 +823,8 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 	int selected_fps[64];
 	size_t selected_fps_count = 0;
 	float selected_focus_max = 0.0f;
+	int selected_wb_min = 0;
+	int selected_wb_max = 0;
 	int first_fps[64];
 	size_t first_fps_count = 0;
 	size_t camera_count = 0;
@@ -830,8 +846,10 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 		int fps[32];
 		size_t fps_count = 0;
 		float focus_max = 0.0f;
+		int wb_min = 0;
+		int wb_max = 0;
 		if (parse_camera_id_line(line_copy, id, sizeof(id), label, sizeof(label),
-					 fps, &fps_count, &focus_max)) {
+					 fps, &fps_count, &focus_max, &wb_min, &wb_max)) {
 			in_selected_camera = selected_id[0] && strcmp(selected_id, id) == 0;
 			if (!first_id[0]) {
 				snprintf(first_id, sizeof(first_id), "%s", id);
@@ -846,6 +864,10 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 			}
 			if (in_selected_camera && focus_max > 0.0f)
 				selected_focus_max = focus_max;
+			if (in_selected_camera && wb_min > 0 && wb_max > wb_min) {
+				selected_wb_min = wb_min;
+				selected_wb_max = wb_max;
+			}
 		}
 
 		if (!end)
@@ -901,6 +923,18 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 		if (!focus_supported || current_focus > selected_focus_max)
 			obs_data_set_double(settings, "camera_focus_distance",
 					   focus_supported ? selected_focus_max : 0.0);
+	}
+
+	obs_property_t *wb_prop = obs_properties_get(props, "camera_wb_kelvin");
+	if (wb_prop) {
+		int min_kelvin = selected_wb_min > 0 ? selected_wb_min : 1000;
+		int max_kelvin = selected_wb_max > 0 ? selected_wb_max : 12000;
+		obs_property_int_set_limits(wb_prop, 0, max_kelvin, 100);
+		obs_property_set_enabled(wb_prop, selected_wb_min > 0);
+		int current_wb = (int)obs_data_get_int(settings, "camera_wb_kelvin");
+		if (current_wb > 0 && selected_wb_min > 0 &&
+		    (current_wb < selected_wb_min || current_wb > selected_wb_max))
+			obs_data_set_int(settings, "camera_wb_kelvin", min_kelvin);
 	}
 
 	parse_selected_camera_sizes(camera_output, selected_id, resolution_prop);
