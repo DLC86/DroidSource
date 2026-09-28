@@ -638,30 +638,7 @@ static void populate_camera_fallbacks(obs_property_t *camera_id_prop,
 	}
 
 	if (obs_property_list_item_count(fps_prop) == 0) {
-		static const int fps[] = {24, 25, 30, 50, 60, 90, 120, 240};
-		for (size_t i = 0; i < sizeof(fps) / sizeof(fps[0]); ++i) {
-			char label[32];
-			snprintf(label, sizeof(label), "%d fps", fps[i]);
-			obs_property_list_add_int(fps_prop, label, fps[i]);
-		}
-	}
-}
-
-static void parse_fps_values_from_line(const char *line, int *values, size_t *count)
-{
-	const char *p = strstr(line, "fps=");
-	if (!p)
-		return;
-	p += 4;
-	while (*p && *p != ']' && *p != '}') {
-		if (isdigit((unsigned char)*p)) {
-			char *next;
-			long value = strtol(p, &next, 10);
-			add_unique_fps(values, count, (int)value);
-			p = next;
-		} else {
-			++p;
-		}
+		obs_property_list_add_int(fps_prop, "30 fps", 30);
 	}
 }
 
@@ -752,10 +729,6 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 			}
 			if (in_selected_camera && focus_max > 0.0f)
 				selected_focus_max = focus_max;
-		} else if (in_selected_camera) {
-			/* High-speed FPS values are exposed, but the constrained
-			 * high-speed camera session is never enabled by the plugin. */
-			parse_fps_values_from_line(line_copy, selected_fps, &selected_fps_count);
 		}
 
 		if (!end)
@@ -788,19 +761,29 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 	}
 
 	for (size_t i = 0; i < selected_fps_count; ++i) {
+		for (size_t j = i + 1; j < selected_fps_count; ++j) {
+			if (selected_fps[j] < selected_fps[i]) {
+				int tmp = selected_fps[i];
+				selected_fps[i] = selected_fps[j];
+				selected_fps[j] = tmp;
+			}
+		}
+	}
+	for (size_t i = 0; i < selected_fps_count; ++i) {
 		char label[32];
 		snprintf(label, sizeof(label), "%d fps", selected_fps[i]);
 		obs_property_list_add_int(fps_prop, label, selected_fps[i]);
 	}
 
-	if (selected_focus_max > 0.0f) {
-		obs_property_t *focus_prop = obs_properties_get(props, "camera_focus_distance");
-		if (focus_prop) {
-			obs_property_float_set_limits(focus_prop, 0.0, selected_focus_max, 0.1);
-			double current_focus = obs_data_get_double(settings, "camera_focus_distance");
-			if (current_focus > selected_focus_max)
-				obs_data_set_double(settings, "camera_focus_distance", selected_focus_max);
-		}
+	obs_property_t *focus_prop = obs_properties_get(props, "camera_focus_distance");
+	if (focus_prop) {
+		bool focus_supported = selected_focus_max > 0.0f;
+		obs_property_set_enabled(focus_prop, focus_supported);
+		obs_property_float_set_limits(focus_prop, 0.0, focus_supported ? selected_focus_max : 1.0, 0.1);
+		double current_focus = obs_data_get_double(settings, "camera_focus_distance");
+		if (!focus_supported || current_focus > selected_focus_max)
+			obs_data_set_double(settings, "camera_focus_distance",
+					   focus_supported ? selected_focus_max : 0.0);
 	}
 
 	parse_selected_camera_sizes(camera_output, selected_id, resolution_prop);
@@ -893,9 +876,14 @@ static bool camera_id_modified(obs_properties_t *props, obs_property_t *p, obs_d
 	const char *serial = obs_data_get_string(settings, "serial");
 	if (g_camera_capabilities_output && g_camera_capabilities_serial && serial && *serial &&
 	    strcmp(g_camera_capabilities_serial, serial) == 0) {
-		/* Reuse the cached result; this updates resolution/FPS/focus instantly
-		 * without starting another scrcpy process while editing properties. */
+		/* The full camera inventory is cached per device, so switching IDs is local and fast. */
 		refresh_camera_capabilities(props, settings, false);
+	} else {
+		obs_property_t *resolution = obs_properties_get(props, "camera_size");
+		obs_property_t *fps = obs_properties_get(props, "camera_fps");
+		obs_property_t *camera_id = obs_properties_get(props, "camera_id");
+		if (resolution && fps && camera_id)
+			populate_camera_fallbacks(camera_id, resolution, fps);
 	}
 	return true;
 }
@@ -953,7 +941,10 @@ static obs_properties_t *src_get_properties(void *data)
 
 	obs_property_t *dev_list = obs_properties_add_list(props, "serial", obs_module_text("Device"),
 							   OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
-	fill_device_list(dev_list);
+	if (ctx->serial && *ctx->serial)
+		obs_property_list_add_string(dev_list, ctx->serial, ctx->serial);
+	else
+		obs_property_list_add_string(dev_list, "No device selected", "");
 	obs_property_set_modified_callback(dev_list, serial_modified);
 
 	obs_properties_add_button2(props, "refresh_devices", obs_module_text("RefreshDevices"), refresh_devices_clicked,
@@ -1013,6 +1004,11 @@ static obs_properties_t *src_get_properties(void *data)
 
 	populate_camera_fallbacks(camera_id, camera_size, camera_fps);
 
+	obs_property_t *focus_prop = obs_properties_get(props, "camera_focus_distance");
+	if (focus_prop) {
+		obs_property_set_enabled(focus_prop, true);
+		obs_property_float_set_limits(focus_prop, 0.0, 20.0, 0.1);
+	}
 
 	max_size = obs_properties_add_int(props, "max_size", obs_module_text("MaxSize"), 0, 4096, 16);
 	obs_property_set_visible(max_size, !is_camera);
