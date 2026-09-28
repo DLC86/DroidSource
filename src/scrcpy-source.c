@@ -658,6 +658,18 @@ static void populate_camera_fallbacks(obs_property_t *camera_id_prop,
 	}
 }
 
+
+static void add_unique_fps(int *values, size_t *count, int value)
+{
+	if (!values || !count || value < 1 || value > 240 || *count >= 64)
+		return;
+	for (size_t i = 0; i < *count; ++i) {
+		if (values[i] == value)
+			return;
+	}
+	values[(*count)++] = value;
+}
+
 static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *settings,
 					 bool refresh_ids)
 {
