@@ -353,7 +353,7 @@ static bool scrcpy_stream_healthy(struct scrcpy_src *ctx)
 	/* A USB/ADB disconnect may leave the child alive while its socket
 	 * remains open. Treat a stream with no decoded frame for a few
 	 * seconds as dead so the watchdog can restart it. */
-	return !scrcpy_reader_is_stale(ctx->reader, 3000);
+	return !scrcpy_reader_is_stale(ctx->reader, 1000);
 }
 
 static void *scrcpy_watchdog(void *data)
