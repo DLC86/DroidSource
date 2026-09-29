@@ -190,9 +190,10 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 			snprintf(camera_fps_arg, sizeof(camera_fps_arg), "--camera-fps=%d", ctx->camera_fps);
 		/* Keep startup Camera2 and encoder configuration independent from
 		 * runtime camera controls. */
+		int startup_color_space = ctx->camera_10bit ? CAMERA_COLOR_SPACE_REC2020 : ctx->camera_color_space;
 		snprintf(control_codec_arg, sizeof(control_codec_arg),
-			 "--video-codec-options=__scrcpy_obs_camera_control_port:int=%u%s",
-			 (unsigned)control_port,
+			 "--video-codec-options=__scrcpy_obs_camera_control_port:int=%u,__scrcpy_obs_camera_color_space:int=%d%s",
+			 (unsigned)control_port, startup_color_space,
 			 ctx->camera_10bit ? ",__scrcpy_obs_camera_10bit:int=1" : "");
 	}
 
@@ -449,6 +450,7 @@ static bool camera_restart_required(const struct scrcpy_src *ctx, obs_data_t *se
 	       ctx->flip_vertical != obs_data_get_bool(settings, "flip_vertical") ||
 	       ctx->portrait_mode != obs_data_get_bool(settings, "portrait_mode") ||
 	       ctx->video_buffer_ms != (int)obs_data_get_int(settings, "video_buffer_ms") ||
+	       ctx->camera_color_space != (int)obs_data_get_int(settings, "camera_color_space") ||
 	       ctx->camera_10bit != obs_data_get_bool(settings, "camera_10bit");
 }
 
