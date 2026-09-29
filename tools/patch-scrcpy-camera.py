@@ -453,7 +453,7 @@ import android.hardware.camera2.params.StreamConfigurationMap;
                         if (gains != null) {
                             lastAutoColorCorrectionGains = gains;
                         }
-                        if (whiteBalanceKelvin > 0
+                        if ((whiteBalanceKelvin > 0 || cameraColorSpace != 0)
                                 && cameraCharacteristics != null
                                 && requestBuilder != null) {
                             try {
@@ -762,7 +762,7 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
     private void applyWhiteBalance() {
         assertCameraThread();
 
-        if (whiteBalanceKelvin <= 0) {
+        if (whiteBalanceKelvin <= 0 && cameraColorSpace == 0) {
             requestBuilder.set(CaptureRequest.CONTROL_MODE,
                     CaptureRequest.CONTROL_MODE_AUTO);
             requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
@@ -1514,9 +1514,45 @@ p = ROOT / "server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java"
 s = p.read_text(encoding="utf-8")
 marker = """    private void clearManualExposureKeys() {
 """
-helpers = r'''    private ColorSpaceTransform getTargetColorTransform() {
+helpers = r'''    private static final float[] SRGB_TO_REC2020 = {
+            0.627404f, 0.329283f, 0.043313f,
+            0.069098f, 0.919555f, 0.011348f,
+            0.016391f, 0.088029f, 0.895580f
+    };
+
+    private ColorSpaceTransform getTargetColorTransform() {
         assertCameraThread();
-        return lastAutoColorCorrectionTransform;
+        if (lastAutoColorCorrectionTransform == null || cameraColorSpace != 3) {
+            return lastAutoColorCorrectionTransform;
+        }
+
+        float[] source = new float[9];
+        for (int row = 0; row < 3; ++row) {
+            for (int column = 0; column < 3; ++column) {
+                android.util.Rational value = lastAutoColorCorrectionTransform.getElement(column, row);
+                source[row * 3 + column] =
+                        (float) value.getNumerator() / Math.max(1, value.getDenominator());
+            }
+        }
+
+        float[] target = new float[9];
+        for (int row = 0; row < 3; ++row) {
+            for (int column = 0; column < 3; ++column) {
+                float value = 0;
+                for (int k = 0; k < 3; ++k) {
+                    value += SRGB_TO_REC2020[row * 3 + k] * source[k * 3 + column];
+                }
+                target[row * 3 + column] = value;
+            }
+        }
+
+        int[] elements = new int[18];
+        final int denominator = 1000000;
+        for (int i = 0; i < 9; ++i) {
+            elements[i * 2] = Math.round(target[i] * denominator);
+            elements[i * 2 + 1] = denominator;
+        }
+        return new ColorSpaceTransform(elements);
     }
 
     private boolean hasToneMapMode(int mode) {
