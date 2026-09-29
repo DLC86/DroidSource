@@ -859,7 +859,8 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
             // Reuse the camera's own calibrated sensor-to-sRGB transform
             // reported by an AUTO capture. An identity matrix would bypass
             // the sensor-specific color conversion.
-            if (lastAutoColorCorrectionTransform == null) {
+            if (lastAutoColorCorrectionTransform == null
+                    || lastAutoColorCorrectionGains == null) {
                 // Manual WB may be requested before the first frame is returned.
                 // Let AUTO produce one result; the capture callback will then
                 // re-apply the requested manual WB using the real transform.
