@@ -1672,23 +1672,59 @@ import android.hardware.camera2.params.TonemapCurve;
                     }
                 }
                 java.util.Set<android.graphics.ColorSpace.Named> supportedColorSpaces = null;
+                java.util.Set<android.graphics.ColorSpace.Named> supportedStandardColorSpaces = null;
+                java.util.Set<Long> supportedDynamicRangesForColorSpace = null;
                 boolean colorSpaceSupported = false;
+                boolean standardProfileSupported = false;
                 if (profiles != null && requestedColorSpace != null) {
                     supportedColorSpaces = profiles.getSupportedColorSpaces(
                             android.graphics.ImageFormat.PRIVATE);
                     colorSpaceSupported = supportedColorSpaces.contains(requestedColorSpace);
+
+                    /*
+                     * A color-space profile is a combination of color space,
+                     * image format and dynamic-range profile. Checking only
+                     * getSupportedColorSpaces(PRIVATE) is insufficient: for
+                     * example BT.2020 may be available only together with
+                     * HLG10, while the 8-bit camera path needs STANDARD.
+                     */
+                    if (Build.VERSION.SDK_INT >= AndroidVersions.API_34_ANDROID_14) {
+                        if (cameraTenBit) {
+                            supportedStandardColorSpaces = profiles.getSupportedColorSpacesForDynamicRange(
+                                    android.graphics.ImageFormat.PRIVATE,
+                                    DynamicRangeProfiles.HLG10);
+                            standardProfileSupported = supportedStandardColorSpaces.contains(requestedColorSpace);
+                        } else {
+                            supportedStandardColorSpaces = profiles.getSupportedColorSpacesForDynamicRange(
+                                    android.graphics.ImageFormat.PRIVATE,
+                                    DynamicRangeProfiles.STANDARD);
+                            standardProfileSupported = supportedStandardColorSpaces.contains(requestedColorSpace);
+                        }
+                        supportedDynamicRangesForColorSpace =
+                                profiles.getSupportedDynamicRangeProfiles(
+                                        requestedColorSpace, android.graphics.ImageFormat.PRIVATE);
+                    }
                 }
+
                 Ln.i("Requested camera color space=" + (requestedColorSpace == null
                         ? "DEFAULT" : requestedColorSpace.name())
                         + ", supported=" + colorSpaceSupported
-                        + (supportedColorSpaces == null ? "" : ", supported-spaces=" + supportedColorSpaces));
-                if (requestedColorSpace != null && colorSpaceSupported) {
+                        + ", profile=" + standardProfileSupported
+                        + (supportedColorSpaces == null ? "" : ", supported-spaces=" + supportedColorSpaces)
+                        + (supportedStandardColorSpaces == null
+                                ? "" : ", supported-standard-spaces=" + supportedStandardColorSpaces)
+                        + (supportedDynamicRangesForColorSpace == null
+                                ? "" : ", dynamic-ranges-for-color-space=" + supportedDynamicRangesForColorSpace));
+
+                if (requestedColorSpace != null && colorSpaceSupported && standardProfileSupported) {
                     sessionConfig.setColorSpace(requestedColorSpace);
-                    Ln.i("Camera session color space set to " + requestedColorSpace.name());
+                    Ln.i("Camera session color space set to " + requestedColorSpace.name()
+                            + " with " + (cameraTenBit ? "HLG10" : "STANDARD") + " profile");
                 } else if (cameraTenBit) {
-                    throw new IOException("Camera does not support BT.2020 HLG color space");
+                    throw new IOException("Camera does not support BT.2020 HLG10 color space profile");
                 } else if (requestedColorSpace != null) {
-                    Ln.w("Requested camera color space is not supported: " + requestedColorSpace);
+                    Ln.w("Requested camera color space is not supported for the "
+                            + (cameraTenBit ? "HLG10" : "STANDARD") + " profile: " + requestedColorSpace);
                 }
             } else if (cameraTenBit) {
                 throw new IOException("Camera 10-bit requires Android 14 or newer");
