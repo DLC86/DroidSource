@@ -463,6 +463,8 @@ static void src_update(void *data, obs_data_t *settings)
 		stop_scrcpy(ctx);
 		load_settings(ctx, settings);
 		start_scrcpy(ctx, settings);
+		if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0 && ctx->serial && *ctx->serial)
+			refresh_camera_capabilities_cache(ctx->serial, false);
 	} else {
 		load_settings(ctx, settings);
 		if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0) {
