@@ -194,8 +194,8 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 		 * runtime camera controls. */
 		int startup_color_space = ctx->camera_10bit ? CAMERA_COLOR_SPACE_REC2020 : ctx->camera_color_space;
 		snprintf(control_codec_arg, sizeof(control_codec_arg),
-			 "--video-codec-options=__scrcpy_obs_camera_control_port:int=%u,__scrcpy_obs_camera_color_space:int=%d,__scrcpy_obs_camera_gamma:int=%d%s",
-			 (unsigned)control_port, startup_color_space, ctx->camera_gamma,
+			 "--video-codec-options=__scrcpy_obs_camera_control_port:int=%u,__scrcpy_obs_camera_wb_lock:int=%d,__scrcpy_obs_camera_color_space:int=%d,__scrcpy_obs_camera_gamma:int=%d%s",
+			 (unsigned)control_port, ctx->camera_wb_lock ? 1 : 0, startup_color_space, ctx->camera_gamma,
 			 ctx->camera_10bit ? ",__scrcpy_obs_camera_10bit:int=1" : "");
 	}
 
@@ -1242,15 +1242,40 @@ static bool refresh_cameras_clicked(obs_properties_t *props, obs_property_t *p, 
 	return ok;
 }
 
+static bool camera_wb_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
+{
+	UNUSED_PARAMETER(p);
+	int wb_kelvin = (int)obs_data_get_int(settings, "camera_wb_kelvin");
+	obs_property_t *camera_wb_lock = obs_properties_get(props, "camera_wb_lock");
+	if (wb_kelvin > 0) {
+		obs_data_set_bool(settings, "camera_wb_lock", false);
+		if (camera_wb_lock)
+			obs_property_set_enabled(camera_wb_lock, false);
+	} else if (camera_wb_lock) {
+		obs_property_set_enabled(camera_wb_lock, true);
+	}
+	return true;
+}
+
 static bool camera_wb_lock_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
 {
 	UNUSED_PARAMETER(p);
 	bool locked = obs_data_get_bool(settings, "camera_wb_lock");
+	int wb_kelvin = (int)obs_data_get_int(settings, "camera_wb_kelvin");
 	obs_property_t *camera_wb = obs_properties_get(props, "camera_wb_kelvin");
+	obs_property_t *camera_wb_lock = obs_properties_get(props, "camera_wb_lock");
+
+	if (wb_kelvin > 0) {
+		obs_data_set_bool(settings, "camera_wb_lock", false);
+		if (camera_wb_lock)
+			obs_property_set_enabled(camera_wb_lock, false);
+		if (camera_wb)
+			obs_property_set_enabled(camera_wb, true);
+		return true;
+	}
+
 	if (camera_wb)
 		obs_property_set_enabled(camera_wb, !locked);
-	if (locked)
-		obs_data_set_int(settings, "camera_wb_kelvin", 0);
 	return true;
 }
 
@@ -1349,6 +1374,7 @@ static obs_properties_t *src_get_properties(void *data)
 								       obs_module_text("CameraFocus"), 0.0, 20.0, 0.1);
 	obs_property_t *camera_wb = obs_properties_add_int_slider(props, "camera_wb_kelvin",
 								  obs_module_text("CameraWhiteBalance"), 0, 12000, 100);
+	obs_property_set_modified_callback(camera_wb, camera_wb_modified);
 
 	obs_property_t *camera_wb_lock =
 			obs_properties_add_bool(props, "camera_wb_lock", obs_module_text("CameraWhiteBalanceLock"));
@@ -1406,8 +1432,10 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_data_t *ui_settings = obs_source_get_settings(ctx->source);
 	bool ten_bit_enabled = obs_data_get_bool(ui_settings, "camera_10bit");
 	bool wb_lock_enabled = obs_data_get_bool(ui_settings, "camera_wb_lock");
+	bool wb_manual = obs_data_get_int(ui_settings, "camera_wb_kelvin") > 0;
 	obs_data_release(ui_settings);
-	obs_property_set_enabled(camera_wb, !wb_lock_enabled);
+	obs_property_set_enabled(camera_wb, !wb_lock_enabled || wb_manual);
+	obs_property_set_enabled(camera_wb_lock, !wb_manual);
 	obs_property_set_enabled(camera_color_space, !ten_bit_enabled);
 	obs_property_set_enabled(camera_gamma, !ten_bit_enabled);
 	obs_property_set_visible(camera_10bit, is_camera);
