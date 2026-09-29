@@ -1800,4 +1800,41 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/video/CameraControlS
     ),
 ])
 
+# Apply the real Camera2 AWB lock. The UI only enables it in Auto mode.
+patch_generated("server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java", [
+    (
+        """            requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
+                    CaptureRequest.CONTROL_AWB_MODE_AUTO);
+            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS, null);
+""",
+        """            requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
+                    CaptureRequest.CONTROL_AWB_MODE_AUTO);
+            requestBuilder.set(CaptureRequest.CONTROL_AWB_LOCK, cameraWbLock);
+            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS, null);
+""",
+    ),
+    (
+        """                requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
+                        CaptureRequest.CONTROL_AWB_MODE_OFF);
+                requestBuilder.set(CaptureRequest.COLOR_CORRECTION_MODE,
+""",
+        """                requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
+                        CaptureRequest.CONTROL_AWB_MODE_OFF);
+                requestBuilder.set(CaptureRequest.CONTROL_AWB_LOCK, false);
+                requestBuilder.set(CaptureRequest.COLOR_CORRECTION_MODE,
+""",
+    ),
+    (
+        """            requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
+                    CaptureRequest.CONTROL_AWB_MODE_OFF);
+            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM,
+""",
+        """            requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
+                    CaptureRequest.CONTROL_AWB_MODE_OFF);
+            requestBuilder.set(CaptureRequest.CONTROL_AWB_LOCK, false);
+            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM,
+""",
+    ),
+])
+
 print("scrcpy camera patch applied")
