@@ -1214,9 +1214,9 @@ static bool camera_10bit_supported(const struct scrcpy_src *ctx)
 
 	pthread_mutex_lock(&g_camera_capabilities_mutex);
 	bool supported = g_camera_capabilities_output && g_camera_capabilities_serial &&
-				 strcmp(g_camera_capabilities_serial, ctx->serial) == 0 &&
-				 strstr(g_camera_capabilities_output, "dynamic-range-10bit=true") != NULL &&
-				 strstr(g_camera_capabilities_output, "HLG10") != NULL;
+				  strcmp(g_camera_capabilities_serial, ctx->serial) == 0 &&
+				  strstr(g_camera_capabilities_output, "dynamic-range-10bit=true") != NULL &&
+				  strstr(g_camera_capabilities_output, "HLG10") != NULL;
 	pthread_mutex_unlock(&g_camera_capabilities_mutex);
 	return supported;
 }
@@ -1262,10 +1262,11 @@ static bool video_source_modified(obs_properties_t *props, obs_property_t *p, ob
 	UNUSED_PARAMETER(p);
 	const char *source = obs_data_get_string(settings, "video_source");
 	bool is_camera = source && strcmp(source, "camera") == 0;
-	const char *keys[] = {"camera_id",        "camera_size",    "camera_fps",        "camera_zoom",
-			      "camera_torch",     "camera_iso",     "camera_shutter_us", "camera_focus_distance",
-			      "camera_wb_kelvin", "camera_color_space", "camera_gamma", "camera_10bit", "portrait_mode",  "flip_vertical",     "hardware_decoding",
-			      "refresh_cameras",  "video_buffer_ms"};
+	const char *keys[] = {"camera_id",          "camera_size",       "camera_fps",       "camera_zoom",
+			      "camera_torch",       "camera_iso",        "camera_shutter_us", "camera_focus_distance",
+			      "camera_wb_kelvin",   "camera_color_space", "camera_gamma",      "camera_10bit",
+			      "portrait_mode",      "flip_vertical",     "hardware_decoding", "refresh_cameras",
+			      "video_buffer_ms"};
 
 	for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
 		obs_property_t *property = obs_properties_get(props, keys[i]);
