@@ -66,6 +66,7 @@ struct scrcpy_src {
 	int camera_shutter_us;
 	float camera_focus_distance;
 	int camera_wb_kelvin;
+	bool camera_wb_lock;
 	int camera_color_space;
 	int camera_gamma;
 	bool camera_10bit;
@@ -261,7 +262,7 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 		if (ctx->camera_control &&
 		    !scrcpy_camera_control_apply(ctx->camera_control, ctx->camera_zoom, ctx->camera_torch,
 						 ctx->camera_iso, ctx->camera_shutter_us, ctx->camera_focus_distance,
-						 ctx->camera_wb_kelvin, ctx->camera_color_space, ctx->camera_gamma,
+						 ctx->camera_wb_kelvin, ctx->camera_wb_lock, ctx->camera_color_space, ctx->camera_gamma,
 						 ctx->camera_10bit)) {
 			obs_log(LOG_WARNING, "scrcpy-source: camera control connection not ready");
 		}
@@ -318,6 +319,7 @@ static void load_settings(struct scrcpy_src *ctx, obs_data_t *settings)
 	ctx->camera_shutter_us = (int)obs_data_get_int(settings, "camera_shutter_us");
 	ctx->camera_focus_distance = (float)obs_data_get_double(settings, "camera_focus_distance");
 	ctx->camera_wb_kelvin = (int)obs_data_get_int(settings, "camera_wb_kelvin");
+	ctx->camera_wb_lock = obs_data_get_bool(settings, "camera_wb_lock");
 	ctx->camera_color_space = (int)obs_data_get_int(settings, "camera_color_space");
 	ctx->camera_gamma = (int)obs_data_get_int(settings, "camera_gamma");
 	ctx->camera_10bit = obs_data_get_bool(settings, "camera_10bit");
@@ -480,7 +482,7 @@ static void src_update(void *data, obs_data_t *settings)
 	if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0 && ctx->camera_control)
 		(void)scrcpy_camera_control_apply(ctx->camera_control, ctx->camera_zoom, ctx->camera_torch,
 						  ctx->camera_iso, ctx->camera_shutter_us, ctx->camera_focus_distance,
-						  ctx->camera_wb_kelvin, ctx->camera_color_space, ctx->camera_gamma,
+						  ctx->camera_wb_kelvin, ctx->camera_wb_lock, ctx->camera_color_space, ctx->camera_gamma,
 						  ctx->camera_10bit);
 
 	os_atomic_set_bool(&ctx->updating, false);
@@ -499,6 +501,7 @@ static void src_get_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "camera_shutter_us", 0);
 	obs_data_set_default_double(settings, "camera_focus_distance", 0.0);
 	obs_data_set_default_int(settings, "camera_wb_kelvin", 0);
+	obs_data_set_default_bool(settings, "camera_wb_lock", false);
 	obs_data_set_default_int(settings, "camera_color_space", CAMERA_COLOR_SPACE_AUTO);
 	obs_data_set_default_int(settings, "camera_gamma", CAMERA_GAMMA_AUTO);
 	obs_data_set_default_bool(settings, "camera_10bit", false);
@@ -1239,6 +1242,18 @@ static bool refresh_cameras_clicked(obs_properties_t *props, obs_property_t *p, 
 	return ok;
 }
 
+static bool camera_wb_lock_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
+{
+	UNUSED_PARAMETER(p);
+	bool locked = obs_data_get_bool(settings, "camera_wb_lock");
+	obs_property_t *camera_wb = obs_properties_get(props, "camera_wb_kelvin");
+	if (camera_wb)
+		obs_property_set_enabled(camera_wb, !locked);
+	if (locked)
+		obs_data_set_int(settings, "camera_wb_kelvin", 0);
+	return true;
+}
+
 static bool camera_10bit_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
 {
 	UNUSED_PARAMETER(p);
@@ -1267,7 +1282,8 @@ static bool video_source_modified(obs_properties_t *props, obs_property_t *p, ob
 	bool is_camera = source && strcmp(source, "camera") == 0;
 	const char *keys[] = {"camera_id",          "camera_size",        "camera_fps",       "camera_zoom",
 			      "camera_torch",       "camera_iso",         "camera_shutter_us", "camera_focus_distance",
-			      "camera_wb_kelvin",   "camera_color_space", "camera_gamma",      "camera_10bit",
+			      "camera_wb_kelvin",   "camera_wb_lock",     "camera_color_space", "camera_gamma",
+			      "camera_10bit",
 			      "portrait_mode",      "flip_vertical",      "hardware_decoding", "refresh_cameras",
 			      "video_buffer_ms"};
 
@@ -1334,6 +1350,10 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_t *camera_wb = obs_properties_add_int_slider(props, "camera_wb_kelvin",
 								  obs_module_text("CameraWhiteBalance"), 0, 12000, 100);
 
+	obs_property_t *camera_wb_lock =
+			obs_properties_add_bool(props, "camera_wb_lock", obs_module_text("CameraWhiteBalanceLock"));
+	obs_property_set_modified_callback(camera_wb_lock, camera_wb_lock_modified);
+
 	obs_property_t *camera_color_space = obs_properties_add_list(props, "camera_color_space",
 								     obs_module_text("CameraColorSpace"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(camera_color_space, "Camera default", CAMERA_COLOR_SPACE_AUTO);
@@ -1380,11 +1400,14 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_set_visible(camera_shutter, is_camera);
 	obs_property_set_visible(camera_focus, is_camera);
 	obs_property_set_visible(camera_wb, is_camera);
+	obs_property_set_visible(camera_wb_lock, is_camera);
 	obs_property_set_visible(camera_color_space, is_camera);
 	obs_property_set_visible(camera_gamma, is_camera);
 	obs_data_t *ui_settings = obs_source_get_settings(ctx->source);
 	bool ten_bit_enabled = obs_data_get_bool(ui_settings, "camera_10bit");
+	bool wb_lock_enabled = obs_data_get_bool(ui_settings, "camera_wb_lock");
 	obs_data_release(ui_settings);
+	obs_property_set_enabled(camera_wb, !wb_lock_enabled);
 	obs_property_set_enabled(camera_color_space, !ten_bit_enabled);
 	obs_property_set_enabled(camera_gamma, !ten_bit_enabled);
 	obs_property_set_visible(camera_10bit, is_camera);
