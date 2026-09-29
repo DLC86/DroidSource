@@ -255,8 +255,8 @@ static enum video_range_type obs_range_from_av(const AVFrame *frame)
 	return frame->color_range == AVCOL_RANGE_JPEG ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
 }
 
-static bool obs_bt2020_sdr_matrix(enum video_format format, enum video_range_type range,
-					  float matrix[16], float min_range[3], float max_range[3])
+static bool obs_bt2020_sdr_matrix(enum video_format format, enum video_range_type range, float matrix[16],
+				  float min_range[3], float max_range[3])
 {
 	/*
 	 * Match libobs 32.2.x video-matrices.c, but use BT.2020-NCL
@@ -366,21 +366,20 @@ static void log_frame_color_info(struct scrcpy_reader *r, const AVFrame *frame, 
 	obs_log(LOG_INFO,
 		"scrcpy-reader: decoded color metadata: path=%s format=%d "
 		"colorspace=%d primaries=%d transfer=%d range=%d",
-		hardware_path ? "D3D11VA" : "software", frame->format, frame->colorspace,
-		frame->color_primaries, frame->color_trc, frame->color_range);
+		hardware_path ? "D3D11VA" : "software", frame->format, frame->colorspace, frame->color_primaries,
+		frame->color_trc, frame->color_range);
 	r->logged_color_info = true;
 }
 
-static void rotate_plane_90_ccw(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize,
-				int src_width, int src_height, int bytes_per_pixel)
+static void rotate_plane_90_ccw(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize, int src_width,
+				int src_height, int bytes_per_pixel)
 {
 	for (int sy = 0; sy < src_height; ++sy) {
 		for (int sx = 0; sx < src_width; ++sx) {
 			int dx = sy;
 			int dy = src_width - 1 - sx;
 			memcpy(dst + (size_t)dy * dst_linesize + (size_t)dx * bytes_per_pixel,
-			       src + (size_t)sy * src_linesize + (size_t)sx * bytes_per_pixel,
-			       (size_t)bytes_per_pixel);
+			       src + (size_t)sy * src_linesize + (size_t)sx * bytes_per_pixel, (size_t)bytes_per_pixel);
 		}
 	}
 }
@@ -408,20 +407,19 @@ static bool rotate_frame_90_ccw(struct scrcpy_reader *r, const AVFrame *src)
 		return false;
 
 	int bytes_per_luma = high_bit_depth ? 2 : 1;
-	rotate_plane_90_ccw(r->portrait_frame->data[0], r->portrait_frame->linesize[0],
-			    src->data[0], src->linesize[0], src->width, src->height, bytes_per_luma);
+	rotate_plane_90_ccw(r->portrait_frame->data[0], r->portrait_frame->linesize[0], src->data[0], src->linesize[0],
+			    src->width, src->height, bytes_per_luma);
 
 	int src_width = src->width / 2;
 	int src_height = src->height / 2;
 	if (format == AV_PIX_FMT_NV12 || format == AV_PIX_FMT_P010LE) {
-		rotate_plane_90_ccw(r->portrait_frame->data[1], r->portrait_frame->linesize[1],
-				    src->data[1], src->linesize[1], src_width, src_height,
-				    format == AV_PIX_FMT_P010LE ? 4 : 2);
+		rotate_plane_90_ccw(r->portrait_frame->data[1], r->portrait_frame->linesize[1], src->data[1],
+				    src->linesize[1], src_width, src_height, format == AV_PIX_FMT_P010LE ? 4 : 2);
 	} else {
-		rotate_plane_90_ccw(r->portrait_frame->data[1], r->portrait_frame->linesize[1],
-				    src->data[1], src->linesize[1], src_width, src_height, bytes_per_luma);
-		rotate_plane_90_ccw(r->portrait_frame->data[2], r->portrait_frame->linesize[2],
-				    src->data[2], src->linesize[2], src_width, src_height, bytes_per_luma);
+		rotate_plane_90_ccw(r->portrait_frame->data[1], r->portrait_frame->linesize[1], src->data[1],
+				    src->linesize[1], src_width, src_height, bytes_per_luma);
+		rotate_plane_90_ccw(r->portrait_frame->data[2], r->portrait_frame->linesize[2], src->data[2],
+				    src->linesize[2], src_width, src_height, bytes_per_luma);
 	}
 
 	return true;
@@ -561,18 +559,17 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	enum video_colorspace cs = obs_colorspace_from_av(out);
 	enum video_range_type range = obs_range_from_av(out);
 	bool matrix_ok;
-	const bool bt2020_sdr = ((enum AVColorSpace)out->colorspace == AVCOL_SPC_BT2020_NCL
-				 || (enum AVColorSpace)out->colorspace == AVCOL_SPC_BT2020_CL)
-				&& out->color_trc != AVCOL_TRC_ARIB_STD_B67
-				&& out->color_trc != AVCOL_TRC_SMPTE2084;
+	const bool bt2020_sdr = ((enum AVColorSpace)out->colorspace == AVCOL_SPC_BT2020_NCL ||
+				 (enum AVColorSpace)out->colorspace == AVCOL_SPC_BT2020_CL) &&
+				out->color_trc != AVCOL_TRC_ARIB_STD_B67 && out->color_trc != AVCOL_TRC_SMPTE2084;
 
 	if (bt2020_sdr) {
-		matrix_ok = obs_bt2020_sdr_matrix(fmt, range, obs_frame.color_matrix,
-						   obs_frame.color_range_min, obs_frame.color_range_max);
+		matrix_ok = obs_bt2020_sdr_matrix(fmt, range, obs_frame.color_matrix, obs_frame.color_range_min,
+						  obs_frame.color_range_max);
 		obs_log(LOG_DEBUG, "scrcpy-reader: using explicit BT.2020-SDR YUV matrix");
 	} else {
-		matrix_ok = video_format_get_parameters_for_format(cs, range, fmt, obs_frame.color_matrix,
-								   obs_frame.color_range_min, obs_frame.color_range_max);
+		matrix_ok = video_format_get_parameters_for_format(
+			cs, range, fmt, obs_frame.color_matrix, obs_frame.color_range_min, obs_frame.color_range_max);
 	}
 
 	if (!matrix_ok) {
