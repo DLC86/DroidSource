@@ -29,7 +29,7 @@ typedef int camera_socket_t;
 #endif
 
 #define CAMERA_CTL_SETTINGS 6
-#define CAMERA_CTL_SETTINGS_SIZE 21
+#define CAMERA_CTL_SETTINGS_SIZE 24
 
 struct scrcpy_camera_control {
 	char *serial;
@@ -50,6 +50,9 @@ struct scrcpy_camera_control {
 	int shutter_us;
 	float focus_distance;
 	int wb_kelvin;
+	int color_space;
+	int gamma;
+	bool ten_bit;
 };
 
 static void shutdown_control_socket(camera_socket_t socket)
@@ -128,7 +131,7 @@ static bool connect_control(struct scrcpy_camera_control *control)
 }
 
 static bool send_snapshot(struct scrcpy_camera_control *control, float zoom, bool torch, int iso, int shutter_us,
-			  float focus_distance, int wb_kelvin)
+			  float focus_distance, int wb_kelvin, int color_space, int gamma, bool ten_bit)
 {
 	if (!connect_control(control))
 		return false;
@@ -142,6 +145,9 @@ static bool send_snapshot(struct scrcpy_camera_control *control, float zoom, boo
 	write_u32be(packet + 11, (uint32_t)(shutter_us > 0 ? shutter_us : 0));
 	write_u32be(packet + 15, float_bits(focus_distance));
 	write_u32be(packet + 19, (uint32_t)(wb_kelvin > 0 ? wb_kelvin : 0));
+	packet[23] = (uint8_t)color_space;
+	packet[24] = (uint8_t)gamma;
+	packet[25] = ten_bit ? 1 : 0;
 
 	if (send_all(control->socket, packet, sizeof(packet)))
 		return true;
@@ -171,10 +177,14 @@ static void *camera_control_worker(void *data)
 		int shutter_us = control->shutter_us;
 		float focus_distance = control->focus_distance;
 		int wb_kelvin = control->wb_kelvin;
+		int color_space = control->color_space;
+		int gamma = control->gamma;
+		bool ten_bit = control->ten_bit;
 		uint64_t generation = control->generation;
 		pthread_mutex_unlock(&control->mutex);
 
-		bool ok = send_snapshot(control, zoom, torch, iso, shutter_us, focus_distance, wb_kelvin);
+		bool ok = send_snapshot(control, zoom, torch, iso, shutter_us, focus_distance, wb_kelvin,
+						 color_space, gamma, ten_bit);
 
 		pthread_mutex_lock(&control->mutex);
 		if (ok && generation == control->generation)
@@ -240,7 +250,7 @@ void scrcpy_camera_control_destroy(scrcpy_camera_control_t *control)
 }
 
 bool scrcpy_camera_control_apply(scrcpy_camera_control_t *control, float zoom, bool torch, int iso, int shutter_us,
-					 float focus_distance, int wb_kelvin)
+					 float focus_distance, int wb_kelvin, int color_space, int gamma, bool ten_bit)
 {
 	if (!control)
 		return false;
@@ -252,6 +262,9 @@ bool scrcpy_camera_control_apply(scrcpy_camera_control_t *control, float zoom, b
 	control->shutter_us = shutter_us;
 	control->focus_distance = focus_distance;
 	control->wb_kelvin = wb_kelvin;
+	control->color_space = color_space;
+	control->gamma = gamma;
+	control->ten_bit = ten_bit;
 	control->generation++;
 	pthread_cond_signal(&control->cond);
 	pthread_mutex_unlock(&control->mutex);
