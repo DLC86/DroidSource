@@ -949,10 +949,10 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 			long long line_exposure_max_ns = 0;
 			int line_post_raw_boost_min = 100;
 			int line_post_raw_boost_max = 100;
-			parse_camera_sensor_ranges(line_copy, &line_iso_min, &line_iso_max,
-						   &line_exposure_min_ns, &line_exposure_max_ns);
-			parse_camera_post_raw_boost_range(line_copy,
-						   &line_post_raw_boost_min, &line_post_raw_boost_max);
+			parse_camera_sensor_ranges(line_copy, &line_iso_min, &line_iso_max, &line_exposure_min_ns,
+						   &line_exposure_max_ns);
+			parse_camera_post_raw_boost_range(line_copy, &line_post_raw_boost_min,
+						   &line_post_raw_boost_max);
 
 			if (!first_id[0]) {
 				snprintf(first_id, sizeof(first_id), "%s", id);
