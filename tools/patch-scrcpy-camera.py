@@ -1447,7 +1447,7 @@ import android.hardware.camera2.params.TonemapCurve;
     ),
     (
         """        this.cameraControlPort = options.getCameraControlPort();
-        this.cameraWbLock = options.getCameraWbLock();
+        this.cameraWbLock = options.getCameraWbLock() && options.getCameraInitialWbKelvin() <= 0;
         this.manualIso = Math.max(0, options.getCameraInitialIso());
         this.manualShutterUs = Math.max(0, options.getCameraInitialShutterUs());
         this.manualFocusDistance = Math.max(0, options.getCameraInitialFocusDistance());
@@ -1455,7 +1455,7 @@ import android.hardware.camera2.params.TonemapCurve;
         this.zoom = options.getCameraZoom();
 """,
         """        this.cameraControlPort = options.getCameraControlPort();
-        this.cameraWbLock = options.getCameraWbLock();
+        this.cameraWbLock = options.getCameraWbLock() && options.getCameraInitialWbKelvin() <= 0;
         this.cameraColorSpace = options.getCameraColorSpace();
         this.cameraGamma = options.getCameraGamma();
         this.cameraTenBit = options.getCamera10Bit();
