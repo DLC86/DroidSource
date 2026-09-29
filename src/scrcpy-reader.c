@@ -174,6 +174,10 @@ static enum video_format av_to_obs_format(enum AVPixelFormat pix)
 		return VIDEO_FORMAT_I444;
 	case AV_PIX_FMT_NV12:
 		return VIDEO_FORMAT_NV12;
+	case AV_PIX_FMT_YUV420P10LE:
+		return VIDEO_FORMAT_I010;
+	case AV_PIX_FMT_P010LE:
+		return VIDEO_FORMAT_P010;
 	case AV_PIX_FMT_YUVJ420P:
 		return VIDEO_FORMAT_I420;
 	default:
@@ -275,7 +279,9 @@ static bool rotate_frame_90_ccw(struct scrcpy_reader *r, const AVFrame *src)
 		return false;
 
 	format = (enum AVPixelFormat)src->format;
-	if (format != AV_PIX_FMT_YUV420P && format != AV_PIX_FMT_YUVJ420P && format != AV_PIX_FMT_NV12)
+	bool high_bit_depth = format == AV_PIX_FMT_YUV420P10LE || format == AV_PIX_FMT_P010LE;
+	if (format != AV_PIX_FMT_YUV420P && format != AV_PIX_FMT_YUVJ420P && format != AV_PIX_FMT_NV12 &&
+	    !high_bit_depth)
 		return false;
 
 	av_frame_unref(r->portrait_frame);
@@ -287,19 +293,21 @@ static bool rotate_frame_90_ccw(struct scrcpy_reader *r, const AVFrame *src)
 	if (av_frame_get_buffer(r->portrait_frame, 32) < 0)
 		return false;
 
+	int bytes_per_luma = high_bit_depth ? 2 : 1;
 	rotate_plane_90_ccw(r->portrait_frame->data[0], r->portrait_frame->linesize[0],
-			    src->data[0], src->linesize[0], src->width, src->height, 1);
+			    src->data[0], src->linesize[0], src->width, src->height, bytes_per_luma);
 
 	int src_width = src->width / 2;
 	int src_height = src->height / 2;
-	if (format == AV_PIX_FMT_NV12) {
+	if (format == AV_PIX_FMT_NV12 || format == AV_PIX_FMT_P010LE) {
 		rotate_plane_90_ccw(r->portrait_frame->data[1], r->portrait_frame->linesize[1],
-				    src->data[1], src->linesize[1], src_width, src_height, 2);
+				    src->data[1], src->linesize[1], src_width, src_height,
+				    format == AV_PIX_FMT_P010LE ? 4 : 2);
 	} else {
 		rotate_plane_90_ccw(r->portrait_frame->data[1], r->portrait_frame->linesize[1],
-				    src->data[1], src->linesize[1], src_width, src_height, 1);
+				    src->data[1], src->linesize[1], src_width, src_height, bytes_per_luma);
 		rotate_plane_90_ccw(r->portrait_frame->data[2], r->portrait_frame->linesize[2],
-				    src->data[2], src->linesize[2], src_width, src_height, 1);
+				    src->data[2], src->linesize[2], src_width, src_height, bytes_per_luma);
 	}
 
 	return true;
@@ -357,7 +365,7 @@ static bool open_decoder(struct scrcpy_reader *r, uint32_t codec_id, uint32_t wi
 	r->codec_ctx->thread_count = 0;
 	r->codec_ctx->width = (int)width;
 	r->codec_ctx->height = (int)height;
-	r->codec_ctx->pix_fmt = AV_PIX_FMT_YUV420P;
+	/* Let FFmpeg choose the native decoded pixel format, including 10-bit formats. */
 
 	if (avcodec_open2(r->codec_ctx, codec, NULL) < 0) {
 		obs_log(LOG_ERROR, "scrcpy-reader: avcodec_open2 failed");
