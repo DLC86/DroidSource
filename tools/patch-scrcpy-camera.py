@@ -337,6 +337,7 @@ import android.hardware.camera2.params.SessionConfiguration;
 import android.hardware.camera2.params.StreamConfigurationMap;
 """,
         """import android.hardware.camera2.TotalCaptureResult;
+import android.os.Build;
 import android.hardware.camera2.params.ColorSpaceTransform;
 import android.hardware.camera2.params.OutputConfiguration;
 import android.hardware.camera2.params.RggbChannelVector;
