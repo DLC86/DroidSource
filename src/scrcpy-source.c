@@ -444,6 +444,8 @@ static bool setting_string_changed(const char *old_value, const char *new_value)
 
 static bool camera_restart_required(const struct scrcpy_src *ctx, obs_data_t *settings)
 {
+	bool gamma_changed = ctx->camera_gamma != (int)obs_data_get_int(settings, "camera_gamma");
+
 	return setting_string_changed(ctx->serial, obs_data_get_string(settings, "serial")) ||
 	       setting_string_changed(ctx->video_source, obs_data_get_string(settings, "video_source")) ||
 	       setting_string_changed(ctx->camera_id, obs_data_get_string(settings, "camera_id")) ||
@@ -457,7 +459,7 @@ static bool camera_restart_required(const struct scrcpy_src *ctx, obs_data_t *se
 	       ctx->portrait_mode != obs_data_get_bool(settings, "portrait_mode") ||
 	       ctx->video_buffer_ms != (int)obs_data_get_int(settings, "video_buffer_ms") ||
 	       ctx->camera_color_space != (int)obs_data_get_int(settings, "camera_color_space") ||
-	       ctx->camera_gamma != (int)obs_data_get_int(settings, "camera_gamma") ||
+	       gamma_changed ||
 	       ctx->camera_10bit != obs_data_get_bool(settings, "camera_10bit");
 }
 
