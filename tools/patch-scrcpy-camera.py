@@ -798,8 +798,7 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
     private void applyWhiteBalance() {
         assertCameraThread();
 
-        if (whiteBalanceKelvin <= 0
-                && cameraColorSpace != 3) {
+        if (whiteBalanceKelvin <= 0) {
             requestBuilder.set(CaptureRequest.CONTROL_MODE,
                     CaptureRequest.CONTROL_MODE_AUTO);
             requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
@@ -1535,7 +1534,7 @@ import android.hardware.camera2.params.TonemapCurve;
         """        if (manualPostProcessing && awbOff && transformMatrix) {
 """,
         """        if (manualPostProcessing && awbOff && transformMatrix
-                && (whiteBalanceKelvin > 0 || cameraColorSpace == 3)) {
+                && whiteBalanceKelvin > 0) {
 """,
     ),
     (
@@ -1561,7 +1560,7 @@ import android.hardware.camera2.params.TonemapCurve;
                                 && cameraCharacteristics != null
                                 && requestBuilder != null) {
 """,
-        """            if ((whiteBalanceKelvin > 0 || cameraColorSpace == 3)
+        """            if (whiteBalanceKelvin > 0
                                 && canApplyManualColorCorrection()
                                 && isAutoColorResultReady(result)
                                 && cameraCharacteristics != null
