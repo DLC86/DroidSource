@@ -247,12 +247,12 @@ patch("server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java", [
 import android.hardware.camera2.params.SessionConfiguration;
 import android.hardware.camera2.params.StreamConfigurationMap;
 """,
-        """import android.hardware.camera2.params.ColorSpaceTransform;
+        """import android.hardware.camera2.TotalCaptureResult;
+import android.hardware.camera2.params.ColorSpaceTransform;
 import android.hardware.camera2.params.OutputConfiguration;
 import android.hardware.camera2.params.RggbChannelVector;
 import android.hardware.camera2.params.SessionConfiguration;
 import android.hardware.camera2.params.StreamConfigurationMap;
-import android.util.Rational;
 """,
     ),
     (
@@ -278,6 +278,7 @@ import android.util.Rational;
 """,
         """    private Range<Float> zoomRange;
     private CameraCharacteristics cameraCharacteristics;
+    private ColorSpaceTransform lastAutoColorCorrectionTransform;
 
     private AffineMatrix transform;
 """,
@@ -341,6 +342,41 @@ import android.util.Rational;
 
                     CaptureRequest request = requestBuilder.build();
 """,
+    ),
+    (
+        """            @Override
+            public void onCaptureFailed(CameraCaptureSession session, CaptureRequest request, CaptureFailure failure) {
+                Ln.w("Camera capture failed: frame " + failure.getFrameNumber());
+            }""",
+        """            @Override
+            public void onCaptureCompleted(CameraCaptureSession session, CaptureRequest request,
+                                           TotalCaptureResult result) {
+                Integer awbMode = request.get(CaptureRequest.CONTROL_AWB_MODE);
+                if (awbMode != null && awbMode != CaptureRequest.CONTROL_AWB_MODE_OFF) {
+                    ColorSpaceTransform transform =
+                            result.get(TotalCaptureResult.COLOR_CORRECTION_TRANSFORM);
+                    if (transform != null) {
+                        lastAutoColorCorrectionTransform = transform;
+                        if (whiteBalanceKelvin > 0
+                                && cameraCharacteristics != null
+                                && requestBuilder != null) {
+                            try {
+                                applyWhiteBalance();
+                                CaptureRequest updatedRequest = requestBuilder.build();
+                                setRepeatingRequest(session, updatedRequest);
+                            } catch (CameraAccessException | IllegalArgumentException | IllegalStateException e) {
+                                Ln.w("Camera error while applying deferred white balance: "
+                                        + e.getMessage());
+                            }
+                        }
+                    }
+                }
+            }
+
+            @Override
+            public void onCaptureFailed(CameraCaptureSession session, CaptureRequest request, CaptureFailure failure) {
+                Ln.w("Camera capture failed: frame " + failure.getFrameNumber());
+            }""",
     ),
     (
         """    @Override
@@ -687,6 +723,29 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
                 || contains(correctionModes, CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX);
 
         if (manualPostProcessing && awbOff && transformMatrix) {
+            // Reuse the camera's own calibrated sensor-to-sRGB transform
+            // reported by an AUTO capture. An identity matrix would bypass
+            // the sensor-specific color conversion.
+            if (lastAutoColorCorrectionTransform == null) {
+                // Manual WB may be requested before the first frame is returned.
+                // Let AUTO produce one result; the capture callback will then
+                // re-apply the requested manual WB using the real transform.
+                requestBuilder.set(CaptureRequest.CONTROL_MODE,
+                        CaptureRequest.CONTROL_MODE_AUTO);
+                requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
+                        CaptureRequest.CONTROL_AWB_MODE_AUTO);
+                requestBuilder.set(CaptureRequest.COLOR_CORRECTION_MODE,
+                        CaptureRequest.COLOR_CORRECTION_MODE_FAST);
+                requestBuilder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, null);
+                requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS, null);
+                if (android.os.Build.VERSION.SDK_INT >= 36) {
+                    requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TEMPERATURE, null);
+                    requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TINT, null);
+                }
+                Ln.i("Camera white balance: waiting for AUTO color transform");
+                return;
+            }
+
             requestBuilder.set(CaptureRequest.CONTROL_MODE,
                     CaptureRequest.CONTROL_MODE_AUTO);
             requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
@@ -694,18 +753,15 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
             requestBuilder.set(CaptureRequest.COLOR_CORRECTION_MODE,
                     CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX);
             requestBuilder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM,
-                    new ColorSpaceTransform(new Rational[] {
-                            new Rational(1, 1), new Rational(0, 1), new Rational(0, 1),
-                            new Rational(0, 1), new Rational(1, 1), new Rational(0, 1),
-                            new Rational(0, 1), new Rational(0, 1), new Rational(1, 1)
-                    }));
+                    lastAutoColorCorrectionTransform);
             RggbChannelVector gains = kelvinToGains(whiteBalanceKelvin);
             requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS, gains);
             if (android.os.Build.VERSION.SDK_INT >= 36) {
                 requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TEMPERATURE, null);
                 requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TINT, null);
             }
-            Ln.i("Camera white balance: manual gains " + whiteBalanceKelvin + " K -> " + gains);
+            Ln.i("Camera white balance: manual gains "
+                    + whiteBalanceKelvin + " K with camera transform -> " + gains);
             return;
         }
 
