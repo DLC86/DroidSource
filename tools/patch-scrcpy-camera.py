@@ -1338,26 +1338,6 @@ import android.hardware.camera2.params.TonemapCurve;
     ),
     (
         """        OutputConfiguration outputConfig = new OutputConfiguration(captureSurface);
-        if (cameraTenBit) {
-            if (Build.VERSION.SDK_INT < AndroidVersions.API_33_ANDROID_13) {
-                throw new IOException("Camera 10-bit requires Android 13 or newer");
-            }
-            if (highSpeed) {
-                throw new IOException("Camera 10-bit is not supported for high-speed capture");
-            }
-            CameraCharacteristics characteristics = ServiceManager.getCameraManager().getCameraCharacteristics(cameraId);
-            int[] capabilities = characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
-            DynamicRangeProfiles profiles =
-                    characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES);
-            boolean tenBitSupported = contains(
-                    capabilities, CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_DYNAMIC_RANGE_TEN_BIT);
-            boolean hlg10Supported = profiles != null
-                    && profiles.getSupportedProfiles().contains(DynamicRangeProfiles.HLG10);
-            if (!tenBitSupported || !hlg10Supported) {
-                throw new IOException("Camera does not support HLG10 10-bit output");
-            }
-            outputConfig.setDynamicRangeProfile(DynamicRangeProfiles.HLG10);
-        }
         List<OutputConfiguration> outputs = Collections.singletonList(outputConfig);
 """,
         """        OutputConfiguration outputConfig = new OutputConfiguration(captureSurface);
