@@ -1294,7 +1294,8 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.
 import android.hardware.camera2.params.OutputConfiguration;
 import android.hardware.camera2.params.RggbChannelVector;
 """,
-        """import android.hardware.camera2.params.ColorSpaceTransform;
+        """import android.hardware.camera2.params.ColorSpaceProfiles;
+import android.hardware.camera2.params.ColorSpaceTransform;
 import android.hardware.camera2.params.DynamicRangeProfiles;
 import android.hardware.camera2.params.OutputConfiguration;
 import android.hardware.camera2.params.RggbChannelVector;
@@ -1326,6 +1327,32 @@ import android.hardware.camera2.params.TonemapCurve;
     (
         """        OutputConfiguration outputConfig = new OutputConfiguration(captureSurface);
         List<OutputConfiguration> outputs = Collections.singletonList(outputConfig);
+        if (!cameraTenBit && cameraColorSpace != 0
+                && Build.VERSION.SDK_INT >= AndroidVersions.API_34_ANDROID_14) {
+            CameraCharacteristics characteristics =
+                    ServiceManager.getCameraManager().getCameraCharacteristics(cameraId);
+            ColorSpaceProfiles profiles =
+                    characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_COLOR_SPACE_PROFILES);
+            android.graphics.ColorSpace.Named requestedColorSpace = null;
+            switch (cameraColorSpace) {
+                case 1:
+                    requestedColorSpace = android.graphics.ColorSpace.Named.SRGB;
+                    break;
+                case 2:
+                    requestedColorSpace = android.graphics.ColorSpace.Named.BT709;
+                    break;
+                case 3:
+                    requestedColorSpace = android.graphics.ColorSpace.Named.BT2020;
+                    break;
+                default:
+                    break;
+            }
+            if (requestedColorSpace != null && profiles != null
+                    && profiles.getSupportedColorSpaces(android.graphics.ImageFormat.UNKNOWN)
+                            .contains(requestedColorSpace)) {
+                sessionConfig.setColorSpace(requestedColorSpace);
+            }
+        }
 """,
         """        OutputConfiguration outputConfig = new OutputConfiguration(captureSurface);
         if (cameraTenBit) {
@@ -1441,50 +1468,7 @@ marker = """    private void clearManualExposureKeys() {
 """
 helpers = r'''    private ColorSpaceTransform getTargetColorTransform() {
         assertCameraThread();
-
-        if (lastAutoColorCorrectionTransform == null) {
-            return null;
-        }
-
-        if (cameraColorSpace != 3) {
-            return lastAutoColorCorrectionTransform;
-        }
-
-        int[] values = new int[18];
-        lastAutoColorCorrectionTransform.copyElements(values, 0);
-        float[] sensorToSrgb = new float[9];
-        int denominator = 100000;
-        for (int i = 0; i < 9; ++i) {
-            int num = values[i * 2];
-            int den = values[i * 2 + 1];
-            sensorToSrgb[i] = den != 0 ? (float) num / den : 0.0f;
-        }
-
-        final float[] srgbToBt2020 = {
-                0.6274039f, 0.3292830f, 0.0433131f,
-                0.0690973f, 0.9195404f, 0.0113623f,
-                0.0163914f, 0.0880133f, 0.8955953f
-        };
-        float[] combined = multiply3x3(srgbToBt2020, sensorToSrgb);
-        for (int i = 0; i < 9; ++i) {
-            values[i * 2] = Math.round(combined[i] * denominator);
-            values[i * 2 + 1] = denominator;
-        }
-        return new ColorSpaceTransform(values);
-    }
-
-    private static float[] multiply3x3(float[] a, float[] b) {
-        float[] result = new float[9];
-        for (int row = 0; row < 3; ++row) {
-            for (int col = 0; col < 3; ++col) {
-                float value = 0.0f;
-                for (int k = 0; k < 3; ++k) {
-                    value += a[row * 3 + k] * b[k * 3 + col];
-                }
-                result[row * 3 + col] = value;
-            }
-        }
-        return result;
+        return lastAutoColorCorrectionTransform;
     }
 
     private boolean hasToneMapMode(int mode) {
