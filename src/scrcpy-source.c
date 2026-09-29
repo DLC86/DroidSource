@@ -457,6 +457,7 @@ static bool camera_restart_required(const struct scrcpy_src *ctx, obs_data_t *se
 	       ctx->portrait_mode != obs_data_get_bool(settings, "portrait_mode") ||
 	       ctx->video_buffer_ms != (int)obs_data_get_int(settings, "video_buffer_ms") ||
 	       ctx->camera_color_space != (int)obs_data_get_int(settings, "camera_color_space") ||
+	       ctx->camera_gamma != (int)obs_data_get_int(settings, "camera_gamma") ||
 	       ctx->camera_10bit != obs_data_get_bool(settings, "camera_10bit");
 }
 
