@@ -342,7 +342,6 @@ import android.hardware.camera2.params.StreamConfigurationMap;
 """,
         """import android.hardware.camera2.TotalCaptureResult;
 import android.os.Build;
-import android.hardware.camera2.params.ColorSpaceTransform;
 import android.hardware.camera2.params.OutputConfiguration;
 import android.hardware.camera2.params.RggbChannelVector;
 import android.hardware.camera2.params.SessionConfiguration;
@@ -886,18 +885,16 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
             requestBuilder.set(CaptureRequest.COLOR_CORRECTION_MODE,
                     CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX);
             requestBuilder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM,
-                    makeManualWhiteBalanceTransform(whiteBalanceKelvin));
-            // Keep the camera's own AUTO gains. Applying the Kelvin offset in the
-            // output color transform avoids changing the sensor-domain channel
-            // gains, which can otherwise alter saturation and clipping.
-            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS,
-                    lastAutoColorCorrectionGains);
+                    lastAutoColorCorrectionTransform);
+
+            RggbChannelVector gains = makeManualGainsFromAuto(whiteBalanceKelvin);
+            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS, gains);
             if (android.os.Build.VERSION.SDK_INT >= 36) {
                 requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TEMPERATURE, null);
                 requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TINT, null);
             }
-            Ln.i("Camera white balance: manual output transform "
-                    + whiteBalanceKelvin + " K relative to AUTO");
+            Ln.i("Camera white balance: manual gains "
+                    + whiteBalanceKelvin + " K relative to AUTO -> " + gains);
             return;
         }
 
@@ -922,69 +919,36 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
         }
     }
 
-    private ColorSpaceTransform makeManualWhiteBalanceTransform(int requestedKelvin) {
+    private RggbChannelVector makeManualGainsFromAuto(int requestedKelvin) {
         assertCameraThread();
 
-        ColorSpaceTransform baseTransform = getTargetColorTransform();
-        if (baseTransform == null || lastAutoColorCorrectionGains == null) {
-            return baseTransform;
+        if (lastAutoColorCorrectionGains == null) {
+            return kelvinToGains(requestedKelvin);
         }
 
         double autoR = Math.max(1e-6, lastAutoColorCorrectionGains.getRed());
-        double autoG = Math.max(1e-6,
-                (lastAutoColorCorrectionGains.getGreenEven()
-                        + lastAutoColorCorrectionGains.getGreenOdd()) * 0.5);
+        double autoGe = Math.max(1e-6, lastAutoColorCorrectionGains.getGreenEven());
+        double autoGo = Math.max(1e-6, lastAutoColorCorrectionGains.getGreenOdd());
         double autoB = Math.max(1e-6, lastAutoColorCorrectionGains.getBlue());
 
-        double autoKelvin = estimateKelvinFromGains(autoR, autoG, autoB);
+        double autoKelvin = estimateKelvinFromGains(autoR, (autoGe + autoGo) * 0.5, autoB);
         RggbChannelVector target = kelvinToGains(requestedKelvin);
         RggbChannelVector reference = kelvinToGains((int) Math.round(autoKelvin));
 
-        // Apply only the requested Kelvin offset to the already color-corrected
-        // linear output, using AUTO as the camera-specific baseline.
-        double rScale = target.getRed() / Math.max(1e-6, reference.getRed());
-        double gScale = target.getGreenEven() / Math.max(1e-6, reference.getGreenEven());
-        double bScale = target.getBlue() / Math.max(1e-6, reference.getBlue());
+        // Apply only the chromatic change from AUTO to the requested Kelvin.
+        // The AUTO green gain is retained, which keeps luminance close to the
+        // camera's own exposure at the reference white point.
+        double targetR = target.getRed() / Math.max(1e-6, reference.getRed());
+        double targetG = target.getGreenEven() / Math.max(1e-6, reference.getGreenEven());
+        double targetB = target.getBlue() / Math.max(1e-6, reference.getBlue());
 
-        // Remove the overall gain component so the white-balance adjustment
-        // changes chromaticity without behaving like an exposure change.
-        double normalization = Math.cbrt(Math.max(1e-6, rScale * gScale * bScale));
-        rScale /= normalization;
-        gScale /= normalization;
-        bScale /= normalization;
+        float r = clampGain((float) (autoR * targetR / targetG));
+        float ge = clampGain((float) (autoGe));
+        float go = clampGain((float) (autoGo));
+        float b = clampGain((float) (autoB * targetB / targetG));
 
-        double[] base = new double[9];
-        for (int row = 0; row < 3; ++row) {
-            for (int column = 0; column < 3; ++column) {
-                android.util.Rational value = baseTransform.getElement(column, row);
-                base[row * 3 + column] =
-                        (double) value.getNumerator()
-                        / Math.max(1, value.getDenominator());
-            }
-        }
-
-        // Left-multiply by a diagonal WB matrix. This keeps the sensor-domain
-        // gains from AUTO intact and applies the manual chromatic offset only
-        // after the camera's native color correction.
-        base[0] *= rScale;
-        base[1] *= rScale;
-        base[2] *= rScale;
-        base[3] *= gScale;
-        base[4] *= gScale;
-        base[5] *= gScale;
-        base[6] *= bScale;
-        base[7] *= bScale;
-        base[8] *= bScale;
-
-        int[] elements = new int[18];
-        final int denominator = 1000000;
-        for (int i = 0; i < 9; ++i) {
-            elements[i * 2] = Math.round((float) (base[i] * denominator));
-            elements[i * 2 + 1] = denominator;
-        }
-        return new ColorSpaceTransform(elements);
+        return new RggbChannelVector(r, ge, go, b);
     }
-
     private static float clampGain(float value) {
         return (float) Math.max(1.0, Math.min(3.0, value));
     }
@@ -1035,15 +999,9 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
         green = Math.max(1.0, Math.min(255.0, green));
         blue = Math.max(1.0, Math.min(255.0, blue));
 
-        // Normalize to the weakest channel so all Camera2 gains stay at or
-        // above the API-mandated minimum of 1. This preserves temperature
-        // changes on both sides of the neutral range instead of pinning red
-        // to 1 throughout the warm half of the slider.
-        double maxChannel = Math.max(red, Math.max(green, blue));
-        float redGain = (float)Math.max(1.0, Math.min(8.0, maxChannel / red));
-        float greenGain = (float)Math.max(1.0, Math.min(8.0, maxChannel / green));
-        float blueGain = (float)Math.max(1.0, Math.min(8.0, maxChannel / blue));
-        return new RggbChannelVector(redGain, greenGain, greenGain, blueGain);
+        float redGain = (float)Math.max(1.0, Math.min(8.0, green / red));
+        float blueGain = (float)Math.max(1.0, Math.min(8.0, green / blue));
+        return new RggbChannelVector(redGain, 1.0f, 1.0f, blueGain);
     }
 
     private static int chooseAwbMode(int kelvin, int[] awbModes) {
@@ -1632,48 +1590,7 @@ p = ROOT / "server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java"
 s = p.read_text(encoding="utf-8")
 marker = """    private void clearManualExposureKeys() {
 """
-helpers = r'''    private static final float[] SRGB_TO_REC2020 = {
-            0.627404f, 0.329283f, 0.043313f,
-            0.069098f, 0.919555f, 0.011348f,
-            0.016391f, 0.088029f, 0.895580f
-    };
-
-    private ColorSpaceTransform getTargetColorTransform() {
-        assertCameraThread();
-        if (lastAutoColorCorrectionTransform == null || cameraColorSpace != 3) {
-            return lastAutoColorCorrectionTransform;
-        }
-
-        float[] source = new float[9];
-        for (int row = 0; row < 3; ++row) {
-            for (int column = 0; column < 3; ++column) {
-                android.util.Rational value = lastAutoColorCorrectionTransform.getElement(column, row);
-                source[row * 3 + column] =
-                        (float) value.getNumerator() / Math.max(1, value.getDenominator());
-            }
-        }
-
-        float[] target = new float[9];
-        for (int row = 0; row < 3; ++row) {
-            for (int column = 0; column < 3; ++column) {
-                float value = 0;
-                for (int k = 0; k < 3; ++k) {
-                    value += SRGB_TO_REC2020[row * 3 + k] * source[k * 3 + column];
-                }
-                target[row * 3 + column] = value;
-            }
-        }
-
-        int[] elements = new int[18];
-        final int denominator = 1000000;
-        for (int i = 0; i < 9; ++i) {
-            elements[i * 2] = Math.round(target[i] * denominator);
-            elements[i * 2 + 1] = denominator;
-        }
-        return new ColorSpaceTransform(elements);
-    }
-
-    private static String getActivePhysicalCameraId(TotalCaptureResult result) {
+helpers = r'''    private static String getActivePhysicalCameraId(TotalCaptureResult result) {
         if (Build.VERSION.SDK_INT < 29) {
             return null;
         }
