@@ -443,6 +443,32 @@ import android.hardware.camera2.params.StreamConfigurationMap;
             public void onCaptureCompleted(CameraCaptureSession session, CaptureRequest request,
                                            TotalCaptureResult result) {
                 Integer awbMode = request.get(CaptureRequest.CONTROL_AWB_MODE);
+                String activePhysicalId = getActivePhysicalCameraId(result);
+                if (awbMode != null
+                        && awbMode == CaptureRequest.CONTROL_AWB_MODE_OFF
+                        && cameraColorSpace == 3
+                        && lockedPhysicalCameraId != null
+                        && activePhysicalId != null
+                        && !lockedPhysicalCameraId.equals(activePhysicalId)
+                        && requestBuilder != null) {
+                    Ln.i("Camera physical lens changed from " + lockedPhysicalCameraId
+                            + " to " + activePhysicalId + "; refreshing color transform");
+                    lockedPhysicalCameraId = null;
+                    lastAutoColorCorrectionTransform = null;
+                    lastAutoColorCorrectionGains = null;
+                    requestBuilder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO);
+                    requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO);
+                    requestBuilder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_FAST);
+                    requestBuilder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, null);
+                    requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS, null);
+                    try {
+                        CaptureRequest updatedRequest = requestBuilder.build();
+                        setRepeatingRequest(session, updatedRequest);
+                    } catch (CameraAccessException | IllegalArgumentException | IllegalStateException e) {
+                        Ln.w("Camera error while refreshing physical-lens color transform: " + e.getMessage());
+                    }
+                    return;
+                }
                 if (awbMode != null && awbMode != CaptureRequest.CONTROL_AWB_MODE_OFF) {
                     ColorSpaceTransform transform =
                             result.get(TotalCaptureResult.COLOR_CORRECTION_TRANSFORM);
@@ -458,6 +484,9 @@ import android.hardware.camera2.params.StreamConfigurationMap;
                                 && requestBuilder != null) {
                             try {
                                 applyWhiteBalance();
+                                if (activePhysicalId != null) {
+                                    lockedPhysicalCameraId = activePhysicalId;
+                                }
                                 CaptureRequest updatedRequest = requestBuilder.build();
                                 setRepeatingRequest(session, updatedRequest);
                             } catch (CameraAccessException | IllegalArgumentException | IllegalStateException e) {
@@ -1339,6 +1368,7 @@ import android.hardware.camera2.params.TonemapCurve;
     private int cameraColorSpace;
     private int cameraGamma;
     private boolean cameraTenBit;
+    private String lockedPhysicalCameraId;
     private float zoom;
 """,
     ),
@@ -1350,6 +1380,7 @@ import android.hardware.camera2.params.TonemapCurve;
         this.cameraColorSpace = options.getCameraColorSpace();
         this.cameraGamma = options.getCameraGamma();
         this.cameraTenBit = options.getCamera10Bit();
+        this.lockedPhysicalCameraId = null;
         this.zoom = options.getCameraZoom();
 """,
     ),
@@ -1572,6 +1603,13 @@ helpers = r'''    private static final float[] SRGB_TO_REC2020 = {
             elements[i * 2 + 1] = denominator;
         }
         return new ColorSpaceTransform(elements);
+    }
+
+    private static String getActivePhysicalCameraId(TotalCaptureResult result) {
+        if (Build.VERSION.SDK_INT < 29) {
+            return null;
+        }
+        return result.get(TotalCaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID);
     }
 
     private boolean canApplyManualColorCorrection() {
