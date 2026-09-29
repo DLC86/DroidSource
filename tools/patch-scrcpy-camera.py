@@ -1549,20 +1549,16 @@ import android.hardware.camera2.params.TonemapCurve;
     ),
     (
         """            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM,
-                    makeManualWhiteBalanceTransform(whiteBalanceKelvin));
-            // Keep the camera's own AUTO gains. Applying the Kelvin offset in the
-            // output color transform avoids changing the sensor-domain channel
-            // gains, which can otherwise alter saturation and clipping.
-            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS,
-                    lastAutoColorCorrectionGains);
+                    lastAutoColorCorrectionTransform);
+
+            RggbChannelVector gains = makeManualGainsFromAuto(whiteBalanceKelvin);
+            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS, gains);
 """,
         """            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM,
-                    makeManualWhiteBalanceTransform(whiteBalanceKelvin));
-            // Keep the camera's own AUTO gains. Applying the Kelvin offset in the
-            // output color transform avoids changing the sensor-domain channel
-            // gains, which can otherwise alter saturation and clipping.
-            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS,
-                    lastAutoColorCorrectionGains);
+                    lastAutoColorCorrectionTransform);
+
+            RggbChannelVector gains = makeManualGainsFromAuto(whiteBalanceKelvin);
+            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS, gains);
 """,
     ),
     (
