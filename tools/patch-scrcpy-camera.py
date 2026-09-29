@@ -1326,33 +1326,27 @@ import android.hardware.camera2.params.TonemapCurve;
     ),
     (
         """        OutputConfiguration outputConfig = new OutputConfiguration(captureSurface);
-        List<OutputConfiguration> outputs = Collections.singletonList(outputConfig);
-        if (!cameraTenBit && cameraColorSpace != 0
-                && Build.VERSION.SDK_INT >= AndroidVersions.API_34_ANDROID_14) {
-            CameraCharacteristics characteristics =
-                    ServiceManager.getCameraManager().getCameraCharacteristics(cameraId);
-            ColorSpaceProfiles profiles =
-                    characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_COLOR_SPACE_PROFILES);
-            android.graphics.ColorSpace.Named requestedColorSpace = null;
-            switch (cameraColorSpace) {
-                case 1:
-                    requestedColorSpace = android.graphics.ColorSpace.Named.SRGB;
-                    break;
-                case 2:
-                    requestedColorSpace = android.graphics.ColorSpace.Named.BT709;
-                    break;
-                case 3:
-                    requestedColorSpace = android.graphics.ColorSpace.Named.BT2020;
-                    break;
-                default:
-                    break;
+        if (cameraTenBit) {
+            if (Build.VERSION.SDK_INT < AndroidVersions.API_33_ANDROID_13) {
+                throw new IOException("Camera 10-bit requires Android 13 or newer");
             }
-            if (requestedColorSpace != null && profiles != null
-                    && profiles.getSupportedColorSpaces(android.graphics.ImageFormat.UNKNOWN)
-                            .contains(requestedColorSpace)) {
-                sessionConfig.setColorSpace(requestedColorSpace);
+            if (highSpeed) {
+                throw new IOException("Camera 10-bit is not supported for high-speed capture");
             }
+            CameraCharacteristics characteristics = ServiceManager.getCameraManager().getCameraCharacteristics(cameraId);
+            int[] capabilities = characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
+            DynamicRangeProfiles profiles =
+                    characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES);
+            boolean tenBitSupported = contains(
+                    capabilities, CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_DYNAMIC_RANGE_TEN_BIT);
+            boolean hlg10Supported = profiles != null
+                    && profiles.getSupportedProfiles().contains(DynamicRangeProfiles.HLG10);
+            if (!tenBitSupported || !hlg10Supported) {
+                throw new IOException("Camera does not support HLG10 10-bit output");
+            }
+            outputConfig.setDynamicRangeProfile(DynamicRangeProfiles.HLG10);
         }
+        List<OutputConfiguration> outputs = Collections.singletonList(outputConfig);
 """,
         """        OutputConfiguration outputConfig = new OutputConfiguration(captureSurface);
         if (cameraTenBit) {
@@ -1456,6 +1450,56 @@ import android.hardware.camera2.params.TonemapCurve;
         """            if ((whiteBalanceKelvin > 0 || cameraColorSpace != 0)
                                 && cameraCharacteristics != null
                                 && requestBuilder != null) {
+""",
+    ),
+    (
+        """        });
+
+        try {
+            cameraDevice.createCaptureSession(sessionConfig);
+""",
+        """        });
+
+        if (cameraTenBit || (cameraColorSpace != 0 && Build.VERSION.SDK_INT >= AndroidVersions.API_34_ANDROID_14)) {
+            if (Build.VERSION.SDK_INT >= AndroidVersions.API_34_ANDROID_14) {
+                CameraCharacteristics characteristics =
+                        ServiceManager.getCameraManager().getCameraCharacteristics(cameraId);
+                ColorSpaceProfiles profiles =
+                        characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_COLOR_SPACE_PROFILES);
+                android.graphics.ColorSpace.Named requestedColorSpace = null;
+                if (cameraTenBit) {
+                    requestedColorSpace = android.graphics.ColorSpace.Named.BT2020_HLG;
+                } else {
+                    switch (cameraColorSpace) {
+                        case 1:
+                            requestedColorSpace = android.graphics.ColorSpace.Named.SRGB;
+                            break;
+                        case 2:
+                            requestedColorSpace = android.graphics.ColorSpace.Named.BT709;
+                            break;
+                        case 3:
+                            requestedColorSpace = android.graphics.ColorSpace.Named.BT2020;
+                            break;
+                        default:
+                            break;
+                    }
+                }
+                if (requestedColorSpace != null && profiles != null
+                        && profiles.getSupportedColorSpaces(android.graphics.ImageFormat.UNKNOWN)
+                                .contains(requestedColorSpace)) {
+                    sessionConfig.setColorSpace(requestedColorSpace);
+                } else if (cameraTenBit) {
+                    throw new IOException("Camera does not support BT.2020 HLG color space");
+                } else if (requestedColorSpace != null) {
+                    Ln.w("Requested camera color space is not supported: " + requestedColorSpace);
+                }
+            } else if (cameraTenBit) {
+                throw new IOException("Camera 10-bit requires Android 14 or newer");
+            }
+        }
+
+        try {
+            cameraDevice.createCaptureSession(sessionConfig);
 """,
     ),
 ])
