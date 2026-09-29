@@ -1331,8 +1331,8 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_t *camera_wb = obs_properties_add_int_slider(props, "camera_wb_kelvin",
 								  obs_module_text("CameraWhiteBalance"), 0, 12000, 100);
 
-	obs_property_t *camera_color_space = obs_properties_add_list(
-		props, "camera_color_space", obs_module_text("CameraColorSpace"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_t *camera_color_space = obs_properties_add_list(props, "camera_color_space",
+								     obs_module_text("CameraColorSpace"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(camera_color_space, "Camera default", CAMERA_COLOR_SPACE_AUTO);
 	obs_property_list_add_int(camera_color_space, "sRGB", CAMERA_COLOR_SPACE_SRGB);
 	obs_property_list_add_int(camera_color_space, "Rec.709", CAMERA_COLOR_SPACE_REC709);
@@ -1379,8 +1379,6 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_set_visible(camera_wb, is_camera);
 	obs_property_set_visible(camera_color_space, is_camera);
 	obs_property_set_visible(camera_gamma, is_camera);
-	obs_property_set_visible(camera_10bit, is_camera);
-
 	obs_data_t *ui_settings = obs_source_get_settings(ctx->source);
 	bool ten_bit_enabled = obs_data_get_bool(ui_settings, "camera_10bit");
 	obs_data_release(ui_settings);
