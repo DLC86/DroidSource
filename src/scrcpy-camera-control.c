@@ -148,8 +148,8 @@ static bool send_snapshot(struct scrcpy_camera_control *control, float zoom, boo
 	write_u32be(packet + 19, (uint32_t)(wb_kelvin > 0 ? wb_kelvin : 0));
 	packet[23] = wb_lock ? 1 : 0;
 	packet[24] = (uint8_t)color_space;
-	packet[24] = (uint8_t)gamma;
-	packet[25] = ten_bit ? 1 : 0;
+	packet[25] = (uint8_t)gamma;
+	packet[26] = ten_bit ? 1 : 0;
 
 	if (send_all(control->socket, packet, sizeof(packet)))
 		return true;
