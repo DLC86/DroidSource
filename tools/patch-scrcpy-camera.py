@@ -1519,6 +1519,13 @@ helpers = r'''    private ColorSpaceTransform getTargetColorTransform() {
         return 1.099f * (float) Math.pow(x, 0.45) - 0.099f;
     }
 
+    private static float rec709SceneOetf(float x) {
+        if (x < 0.018f) {
+            return 4.5f * x;
+        }
+        return 1.099f * (float) Math.pow(x, 0.45) - 0.099f;
+    }
+
     private static float rec709A(float x) {
         return (float) Math.pow(x, 1.0 / 1.961);
     }
@@ -1533,16 +1540,18 @@ helpers = r'''    private ColorSpaceTransform getTargetColorTransform() {
         return (float) (a * Math.log(12.0 * x - b) + c);
     }
 
-    private static float[] makeToneMapCurve(int maxPoints, float type) {
+    private static float[] makeToneMapCurve(int maxPoints, int type) {
         int points = Math.max(2, Math.min(64, maxPoints));
         float[] curve = new float[points * 2];
         for (int i = 0; i < points; ++i) {
             float x = (float) i / (points - 1);
             float y;
-            if (type == 1.0f) {
+            if (type == 1) {
                 y = rec709A(x);
-            } else {
+            } else if (type == 2) {
                 y = hlgOetf(x);
+            } else {
+                y = rec709SceneOetf(x);
             }
             curve[i * 2] = x;
             curve[i * 2 + 1] = y;
@@ -1577,24 +1586,8 @@ helpers = r'''    private ColorSpaceTransform getTargetColorTransform() {
             return;
         }
 
-        if (cameraGamma == 3) {
-            if (hasToneMapMode(CaptureRequest.TONEMAP_MODE_PRESET_CURVE)) {
-                requestBuilder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_PRESET_CURVE);
-                requestBuilder.set(CaptureRequest.TONEMAP_PRESET_CURVE, CaptureRequest.TONEMAP_PRESET_CURVE_REC709);
-                requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, null);
-                requestBuilder.set(CaptureRequest.TONEMAP_CURVE, null);
-                return;
-            }
-            if (hasToneMapMode(CaptureRequest.TONEMAP_MODE_GAMMA_VALUE)) {
-                requestBuilder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_GAMMA_VALUE);
-                requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, 2.2f);
-                requestBuilder.set(CaptureRequest.TONEMAP_CURVE, null);
-                return;
-            }
-            throw new IllegalArgumentException("Camera does not support Rec.709 tone mapping");
-        }
-
-        int[] capabilities = cameraCharacteristics.get(
+        if (cameraGamma == 3 || cameraGamma == 4 || cameraGamma == 5) {
+            int[] capabilities = cameraCharacteristics.get(
                 CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
         boolean manualPostProcessing = contains(capabilities,
                 CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING);
@@ -1608,7 +1601,8 @@ helpers = r'''    private ColorSpaceTransform getTargetColorTransform() {
             maxPoints = advertised;
         }
 
-        float[] curve = makeToneMapCurve(maxPoints, cameraGamma == 4 ? 1.0f : 0.0f);
+        float[] curve = makeToneMapCurve(maxPoints,
+                cameraGamma == 4 ? 1 : cameraGamma == 5 ? 2 : 0);
         TonemapCurve tonemap = new TonemapCurve(curve, curve, curve);
         requestBuilder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE);
         requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, null);
