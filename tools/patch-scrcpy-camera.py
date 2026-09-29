@@ -944,7 +944,15 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
         // Apply only the requested Kelvin offset to the already color-corrected
         // linear output, using AUTO as the camera-specific baseline.
         double rScale = target.getRed() / Math.max(1e-6, reference.getRed());
+        double gScale = target.getGreenEven() / Math.max(1e-6, reference.getGreenEven());
         double bScale = target.getBlue() / Math.max(1e-6, reference.getBlue());
+
+        // Remove the overall gain component so the white-balance adjustment
+        // changes chromaticity without behaving like an exposure change.
+        double normalization = Math.cbrt(Math.max(1e-6, rScale * gScale * bScale));
+        rScale /= normalization;
+        gScale /= normalization;
+        bScale /= normalization;
 
         double[] base = new double[9];
         for (int row = 0; row < 3; ++row) {
@@ -962,6 +970,9 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
         base[0] *= rScale;
         base[1] *= rScale;
         base[2] *= rScale;
+        base[3] *= gScale;
+        base[4] *= gScale;
+        base[5] *= gScale;
         base[6] *= bScale;
         base[7] *= bScale;
         base[8] *= bScale;
@@ -1025,9 +1036,15 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
         green = Math.max(1.0, Math.min(255.0, green));
         blue = Math.max(1.0, Math.min(255.0, blue));
 
-        float redGain = (float)Math.max(1.0, Math.min(8.0, green / red));
-        float blueGain = (float)Math.max(1.0, Math.min(8.0, green / blue));
-        return new RggbChannelVector(redGain, 1.0f, 1.0f, blueGain);
+        // Normalize to the weakest channel so all Camera2 gains stay at or
+        // above the API-mandated minimum of 1. This preserves temperature
+        // changes on both sides of the neutral range instead of pinning red
+        // to 1 throughout the warm half of the slider.
+        double maxChannel = Math.max(red, Math.max(green, blue));
+        float redGain = (float)Math.max(1.0, Math.min(8.0, maxChannel / red));
+        float greenGain = (float)Math.max(1.0, Math.min(8.0, maxChannel / green));
+        float blueGain = (float)Math.max(1.0, Math.min(8.0, maxChannel / blue));
+        return new RggbChannelVector(redGain, greenGain, greenGain, blueGain);
     }
 
     private static int chooseAwbMode(int kelvin, int[] awbModes) {
