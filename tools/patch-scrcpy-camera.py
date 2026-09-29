@@ -306,7 +306,7 @@ patch("server/src/main/java/com/genymobile/scrcpy/util/LogUtils.java", [
                         if (colorSpaceProfiles != null) {
                             try {
                                 java.util.Set<android.graphics.ColorSpace.Named> colorSpaces =
-                                        colorSpaceProfiles.getSupportedColorSpaces(android.media.ImageFormat.UNKNOWN);
+                                        colorSpaceProfiles.getSupportedColorSpaces(android.graphics.ImageFormat.UNKNOWN);
                                 builder.append(", color-spaces=[");
                                 boolean firstColorSpace = true;
                                 for (android.graphics.ColorSpace.Named colorSpace : colorSpaces) {
@@ -368,6 +368,7 @@ import android.hardware.camera2.params.StreamConfigurationMap;
         """    private Range<Float> zoomRange;
     private CameraCharacteristics cameraCharacteristics;
     private ColorSpaceTransform lastAutoColorCorrectionTransform;
+    private RggbChannelVector lastAutoColorCorrectionGains;
 
     private AffineMatrix transform;
 """,
@@ -444,8 +445,13 @@ import android.hardware.camera2.params.StreamConfigurationMap;
                 if (awbMode != null && awbMode != CaptureRequest.CONTROL_AWB_MODE_OFF) {
                     ColorSpaceTransform transform =
                             result.get(TotalCaptureResult.COLOR_CORRECTION_TRANSFORM);
+                    RggbChannelVector gains =
+                            result.get(TotalCaptureResult.COLOR_CORRECTION_GAINS);
                     if (transform != null) {
                         lastAutoColorCorrectionTransform = transform;
+                        if (gains != null) {
+                            lastAutoColorCorrectionGains = gains;
+                        }
                         if (whiteBalanceKelvin > 0
                                 && cameraCharacteristics != null
                                 && requestBuilder != null) {
@@ -843,14 +849,15 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
                     CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX);
             requestBuilder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM,
                     lastAutoColorCorrectionTransform);
-            RggbChannelVector gains = kelvinToGains(whiteBalanceKelvin);
+
+            RggbChannelVector gains = makeManualGainsFromAuto(whiteBalanceKelvin);
             requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS, gains);
             if (android.os.Build.VERSION.SDK_INT >= 36) {
                 requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TEMPERATURE, null);
                 requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TINT, null);
             }
             Ln.i("Camera white balance: manual gains "
-                    + whiteBalanceKelvin + " K with camera transform -> " + gains);
+                    + whiteBalanceKelvin + " K relative to AUTO -> " + gains);
             return;
         }
 
@@ -873,6 +880,61 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
                     CaptureRequest.CONTROL_AWB_MODE_AUTO);
             Ln.w("Camera does not advertise manual white balance control");
         }
+    }
+
+    private RggbChannelVector makeManualGainsFromAuto(int requestedKelvin) {
+        assertCameraThread();
+
+        if (lastAutoColorCorrectionGains == null) {
+            return kelvinToGains(requestedKelvin);
+        }
+
+        double autoR = Math.max(1e-6, lastAutoColorCorrectionGains.getRed());
+        double autoGe = Math.max(1e-6, lastAutoColorCorrectionGains.getGreenEven());
+        double autoGo = Math.max(1e-6, lastAutoColorCorrectionGains.getGreenOdd());
+        double autoB = Math.max(1e-6, lastAutoColorCorrectionGains.getBlue());
+
+        double autoKelvin = estimateKelvinFromGains(autoR, (autoGe + autoGo) * 0.5, autoB);
+        RggbChannelVector target = kelvinToGains(requestedKelvin);
+        RggbChannelVector reference = kelvinToGains((int) Math.round(autoKelvin));
+
+        // Apply only the chromatic change from AUTO to the requested Kelvin.
+        // The AUTO green gain is retained, which keeps luminance close to the
+        // camera's own exposure at the reference white point.
+        double targetR = target.getRed() / Math.max(1e-6, reference.getRed());
+        double targetG = target.getGreenEven() / Math.max(1e-6, reference.getGreenEven());
+        double targetB = target.getBlue() / Math.max(1e-6, reference.getBlue());
+
+        float r = clampGain((float) (autoR * targetR / targetG));
+        float ge = clampGain((float) (autoGe));
+        float go = clampGain((float) (autoGo));
+        float b = clampGain((float) (autoB * targetB / targetG));
+
+        return new RggbChannelVector(r, ge, go, b);
+    }
+
+    private static float clampGain(float value) {
+        return (float) Math.max(1.0, Math.min(3.0, value));
+    }
+
+    private static double estimateKelvinFromGains(double red, double green, double blue) {
+        double bestKelvin = 5500.0;
+        double bestError = Double.POSITIVE_INFINITY;
+
+        for (int kelvin = 1500; kelvin <= 12000; kelvin += 50) {
+            RggbChannelVector candidate = kelvinToGains(kelvin);
+            double candidateR = Math.max(1e-6, candidate.getRed());
+            double candidateB = Math.max(1e-6, candidate.getBlue());
+            double errorR = Math.log(red / green) - Math.log(candidateR / candidate.getGreenEven());
+            double errorB = Math.log(blue / green) - Math.log(candidateB / candidate.getGreenEven());
+            double error = errorR * errorR + errorB * errorB;
+            if (error < bestError) {
+                bestError = error;
+                bestKelvin = kelvin;
+            }
+        }
+
+        return bestKelvin;
     }
 
     private static RggbChannelVector kelvinToGains(int kelvin) {
