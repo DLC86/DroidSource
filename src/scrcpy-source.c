@@ -193,8 +193,8 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 		 * runtime camera controls. */
 		int startup_color_space = ctx->camera_10bit ? CAMERA_COLOR_SPACE_REC2020 : ctx->camera_color_space;
 		snprintf(control_codec_arg, sizeof(control_codec_arg),
-			 "--video-codec-options=__scrcpy_obs_camera_control_port:int=%u,__scrcpy_obs_camera_color_space:int=%d%s",
-			 (unsigned)control_port, startup_color_space,
+			 "--video-codec-options=__scrcpy_obs_camera_control_port:int=%u,__scrcpy_obs_camera_color_space:int=%d,__scrcpy_obs_camera_gamma:int=%d%s",
+			 (unsigned)control_port, startup_color_space, ctx->camera_gamma,
 			 ctx->camera_10bit ? ",__scrcpy_obs_camera_10bit:int=1" : "");
 	}
 
