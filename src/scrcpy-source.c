@@ -1247,35 +1247,26 @@ static bool camera_wb_modified(obs_properties_t *props, obs_property_t *p, obs_d
 	UNUSED_PARAMETER(p);
 	int wb_kelvin = (int)obs_data_get_int(settings, "camera_wb_kelvin");
 	obs_property_t *camera_wb_lock = obs_properties_get(props, "camera_wb_lock");
-	if (wb_kelvin > 0) {
-		obs_data_set_bool(settings, "camera_wb_lock", false);
-		if (camera_wb_lock)
-			obs_property_set_enabled(camera_wb_lock, false);
-	} else if (camera_wb_lock) {
-		obs_property_set_enabled(camera_wb_lock, true);
-	}
+
+	/* Moving away from Auto must release the AWB lock. The Kelvin slider
+	 * remains enabled so it can always be used to leave the locked state. */
+	obs_data_set_bool(settings, "camera_wb_lock", false);
+	if (camera_wb_lock)
+		obs_property_set_enabled(camera_wb_lock, wb_kelvin <= 0);
+
 	return true;
 }
 
 static bool camera_wb_lock_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
 {
 	UNUSED_PARAMETER(p);
-	bool locked = obs_data_get_bool(settings, "camera_wb_lock");
-	int wb_kelvin = (int)obs_data_get_int(settings, "camera_wb_kelvin");
+	UNUSED_PARAMETER(settings);
+
+	/* The lock is an Auto-WB option only; never disable the Kelvin slider. */
 	obs_property_t *camera_wb = obs_properties_get(props, "camera_wb_kelvin");
-	obs_property_t *camera_wb_lock = obs_properties_get(props, "camera_wb_lock");
-
-	if (wb_kelvin > 0) {
-		obs_data_set_bool(settings, "camera_wb_lock", false);
-		if (camera_wb_lock)
-			obs_property_set_enabled(camera_wb_lock, false);
-		if (camera_wb)
-			obs_property_set_enabled(camera_wb, true);
-		return true;
-	}
-
 	if (camera_wb)
-		obs_property_set_enabled(camera_wb, !locked);
+		obs_property_set_enabled(camera_wb, true);
+
 	return true;
 }
 
@@ -1354,6 +1345,9 @@ static obs_properties_t *src_get_properties(void *data)
 							    OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
 	obs_property_set_modified_callback(camera_id, camera_id_modified);
 
+	obs_property_t *refresh_cameras = obs_properties_add_button2(
+		props, "refresh_cameras", obs_module_text("RefreshCameras"), refresh_cameras_clicked, ctx);
+
 	obs_property_t *camera_size = obs_properties_add_list(props, "camera_size", obs_module_text("CameraResolution"),
 							      OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
 
@@ -1408,9 +1402,6 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_t *hardware_decoding =
 		obs_properties_add_bool(props, "hardware_decoding", obs_module_text("HardwareDecoding"));
 
-	obs_property_t *refresh_cameras = obs_properties_add_button2(
-		props, "refresh_cameras", obs_module_text("RefreshCameras"), refresh_cameras_clicked, ctx);
-
 	const char *camera_visible = ctx->video_source && strcmp(ctx->video_source, "camera") == 0 ? "camera"
 												   : "display";
 	bool is_camera = strcmp(camera_visible, "camera") == 0;
@@ -1431,10 +1422,9 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_set_visible(camera_gamma, is_camera);
 	obs_data_t *ui_settings = obs_source_get_settings(ctx->source);
 	bool ten_bit_enabled = obs_data_get_bool(ui_settings, "camera_10bit");
-	bool wb_lock_enabled = obs_data_get_bool(ui_settings, "camera_wb_lock");
 	bool wb_manual = obs_data_get_int(ui_settings, "camera_wb_kelvin") > 0;
 	obs_data_release(ui_settings);
-	obs_property_set_enabled(camera_wb, !wb_lock_enabled || wb_manual);
+	obs_property_set_enabled(camera_wb, true);
 	obs_property_set_enabled(camera_wb_lock, !wb_manual);
 	obs_property_set_enabled(camera_color_space, !ten_bit_enabled);
 	obs_property_set_enabled(camera_gamma, !ten_bit_enabled);
