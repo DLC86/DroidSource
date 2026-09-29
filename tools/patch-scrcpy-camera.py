@@ -19,6 +19,9 @@ patch("server/src/main/java/com/genymobile/scrcpy/Options.java", [
     (
         """public class Options {
 
+    private static final String CAMERA_CONTROL_OPTION = "__scrcpy_obs_camera_control_port";
+    private static final String CAMERA_WB_LOCK_OPTION = "__scrcpy_obs_camera_wb_lock";
+
     private Ln.Level logLevel = Ln.Level.DEBUG;
 """,
         """public class Options {
@@ -30,6 +33,8 @@ patch("server/src/main/java/com/genymobile/scrcpy/Options.java", [
     ),
     (
         """    private boolean cameraTorch;
+    private int cameraControlPort;
+    private boolean cameraWbLock;
     private boolean showTouches;
 """,
         """    private boolean cameraTorch;
@@ -40,6 +45,14 @@ patch("server/src/main/java/com/genymobile/scrcpy/Options.java", [
     (
         """    public boolean getCameraTorch() {
         return cameraTorch;
+    }
+
+    public int getCameraControlPort() {
+        return cameraControlPort;
+    }
+
+    public boolean getCameraWbLock() {
+        return cameraWbLock;
     }
 
     public boolean getShowTouches() {
@@ -74,6 +87,10 @@ patch("server/src/main/java/com/genymobile/scrcpy/Options.java", [
                                     throw new IllegalArgumentException("Invalid camera control port: " + port);
                                 }
                                 options.cameraControlPort = port;
+                                codecOptions.remove(j);
+                            } else if (CAMERA_WB_LOCK_OPTION.equals(optionKey)
+                                    && valueObj instanceof Integer) {
+                                options.cameraWbLock = (Integer) valueObj != 0;
                                 codecOptions.remove(j);
                             } else {
                                 ++j;
