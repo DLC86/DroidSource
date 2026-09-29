@@ -1270,6 +1270,7 @@ static bool camera_wb_lock_modified(obs_properties_t *props, obs_property_t *p, 
 	return true;
 }
 
+
 static bool camera_10bit_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
 {
 	UNUSED_PARAMETER(p);
