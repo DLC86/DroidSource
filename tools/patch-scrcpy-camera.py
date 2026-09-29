@@ -1400,12 +1400,14 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/video/SurfaceEncoder
                 }
                 format.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.HEVCProfileMain10);
                 format.setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT2020);
+                format.setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED);
                 format.setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_HLG);
             } else if (cameraColorSpace == 1 || cameraColorSpace == 2 || cameraColorSpace == 3) {
                 int standard = cameraColorSpace == 3
                         ? MediaFormat.COLOR_STANDARD_BT2020
                         : MediaFormat.COLOR_STANDARD_BT709;
                 format.setInteger(MediaFormat.KEY_COLOR_STANDARD, standard);
+                format.setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED);
 
                 int transfer = 0;
                 if (cameraGamma == 1) {
@@ -1669,12 +1671,20 @@ import android.hardware.camera2.params.TonemapCurve;
                             break;
                     }
                 }
-                boolean colorSpaceSupported = profiles != null
-                        && requestedColorSpace != null
-                        && profiles.getSupportedColorSpaces(
-                                android.graphics.ImageFormat.PRIVATE).contains(requestedColorSpace);
+                java.util.Set<android.graphics.ColorSpace.Named> supportedColorSpaces = null;
+                boolean colorSpaceSupported = false;
+                if (profiles != null && requestedColorSpace != null) {
+                    supportedColorSpaces = profiles.getSupportedColorSpaces(
+                            android.graphics.ImageFormat.PRIVATE);
+                    colorSpaceSupported = supportedColorSpaces.contains(requestedColorSpace);
+                }
+                Ln.i("Requested camera color space=" + (requestedColorSpace == null
+                        ? "DEFAULT" : requestedColorSpace.name())
+                        + ", supported=" + colorSpaceSupported
+                        + (supportedColorSpaces == null ? "" : ", supported-spaces=" + supportedColorSpaces));
                 if (requestedColorSpace != null && colorSpaceSupported) {
                     sessionConfig.setColorSpace(requestedColorSpace);
+                    Ln.i("Camera session color space set to " + requestedColorSpace.name());
                 } else if (cameraTenBit) {
                     throw new IOException("Camera does not support BT.2020 HLG color space");
                 } else if (requestedColorSpace != null) {
