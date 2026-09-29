@@ -355,6 +355,7 @@ import android.hardware.camera2.params.StreamConfigurationMap;
 """,
         """    private final boolean initialTorch;
     private final int cameraControlPort;
+    private boolean cameraWbLock;
     private float zoom;
     private boolean torchEnabled;
     private int manualIso;
@@ -384,6 +385,7 @@ import android.hardware.camera2.params.StreamConfigurationMap;
 """,
         """        this.initialTorch = options.getCameraTorch();
         this.cameraControlPort = options.getCameraControlPort();
+        this.cameraWbLock = options.getCameraWbLock();
         this.zoom = options.getCameraZoom();
         this.torchEnabled = initialTorch;
 """,
