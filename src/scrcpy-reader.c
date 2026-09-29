@@ -77,6 +77,7 @@ struct scrcpy_reader {
 	bool flip_vertical;
 	int video_buffer_ms;
 	bool portrait_mode;
+	bool logged_color_info;
 
 	AVBufferRef *hw_device_ctx;
 	enum AVPixelFormat hw_pix_fmt;
@@ -237,7 +238,15 @@ static enum video_colorspace obs_colorspace_from_av(const AVFrame *frame)
 	case AVCOL_SPC_BT2020_CL:
 		if (frame->color_trc == AVCOL_TRC_ARIB_STD_B67)
 			return VIDEO_CS_2100_HLG;
-		return VIDEO_CS_2100_PQ;
+		if (frame->color_trc == AVCOL_TRC_SMPTE2084)
+			return VIDEO_CS_2100_PQ;
+		/*
+		 * OBS media-io has no standalone BT.2020-SDR enum. Do not
+		 * mislabel BT.2020 SDR as PQ because that changes the displayed
+		 * transfer function. Keep the pixels untouched and fall back to
+		 * the SDR matrix representation.
+		 */
+		return VIDEO_CS_709;
 	default:
 		return VIDEO_CS_709;
 	}
@@ -255,6 +264,19 @@ static uint8_t obs_trc_from_av(const AVFrame *frame)
 	if (frame->color_trc == AVCOL_TRC_SMPTE2084)
 		return VIDEO_TRC_PQ;
 	return VIDEO_TRC_SRGB;
+}
+
+static void log_frame_color_info(struct scrcpy_reader *r, const AVFrame *frame, bool hardware_path)
+{
+	if (r->logged_color_info || !frame)
+		return;
+
+	obs_log(LOG_INFO,
+		"scrcpy-reader: decoded color metadata: path=%s format=%d "
+		"colorspace=%d primaries=%d transfer=%d range=%d",
+		hardware_path ? "D3D11VA" : "software", frame->format, frame->colorspace,
+		frame->color_primaries, frame->color_trc, frame->color_range);
+	r->logged_color_info = true;
 }
 
 static void rotate_plane_90_ccw(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize,
@@ -387,15 +409,28 @@ static bool open_decoder(struct scrcpy_reader *r, uint32_t codec_id, uint32_t wi
 static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 {
 	AVFrame *out = f;
+	bool hardware_path = false;
 
 	if (r->hw_pix_fmt != AV_PIX_FMT_NONE && f->format == r->hw_pix_fmt) {
+		hardware_path = true;
 		av_frame_unref(r->transfer_frame);
 		if (av_hwframe_transfer_data(r->transfer_frame, f, 0) < 0) {
 			obs_log(LOG_WARNING, "scrcpy-reader: hardware frame transfer failed");
 			return;
 		}
+		/*
+		 * The generic hardware->software transfer copies the pixel data but
+		 * does not guarantee AVFrame color properties are preserved. Restore
+		 * the exact decoder metadata before passing the frame to OBS.
+		 */
+		if (av_frame_copy_props(r->transfer_frame, f) < 0) {
+			obs_log(LOG_WARNING, "scrcpy-reader: could not preserve hardware frame color metadata");
+			return;
+		}
 		out = r->transfer_frame;
 	}
+
+	log_frame_color_info(r, out, hardware_path);
 
 	if (r->portrait_mode) {
 		if (!rotate_frame_90_ccw(r, out)) {
