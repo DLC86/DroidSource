@@ -172,8 +172,9 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 	if (ctx->max_size > 0)
 		snprintf(max_size_arg, sizeof(max_size_arg), "--max-size=%d", ctx->max_size);
 	char codec_arg[64] = {0};
-	if (ctx->codec && *ctx->codec)
-		snprintf(codec_arg, sizeof(codec_arg), "--video-codec=%s", ctx->codec);
+	const char *effective_codec = ctx->camera_10bit ? "h265" : ctx->codec;
+	if (effective_codec && *effective_codec)
+		snprintf(codec_arg, sizeof(codec_arg), "--video-codec=%s", effective_codec);
 	char source_arg[64] = {0};
 	if (ctx->video_source && *ctx->video_source)
 		snprintf(source_arg, sizeof(source_arg), "--video-source=%s", ctx->video_source);
