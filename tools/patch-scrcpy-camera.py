@@ -1462,6 +1462,8 @@ import android.hardware.camera2.params.TonemapCurve;
                                 && requestBuilder != null) {
 """,
         """            if ((whiteBalanceKelvin > 0 || cameraColorSpace == 3)
+                                && canApplyManualColorCorrection()
+                                && isAutoColorResultReady(result)
                                 && cameraCharacteristics != null
                                 && requestBuilder != null) {
 """,
@@ -1568,6 +1570,32 @@ helpers = r'''    private static final float[] SRGB_TO_REC2020 = {
             elements[i * 2 + 1] = denominator;
         }
         return new ColorSpaceTransform(elements);
+    }
+
+    private boolean canApplyManualColorCorrection() {
+        assertCameraThread();
+
+        int[] capabilities = cameraCharacteristics.get(
+                CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
+        int[] awbModes = cameraCharacteristics.get(
+                CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES);
+        int[] correctionModes = cameraCharacteristics.get(
+                CameraCharacteristics.COLOR_CORRECTION_AVAILABLE_MODES);
+
+        boolean manualPostProcessing = contains(capabilities,
+                CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING);
+        boolean awbOff = contains(awbModes, CaptureRequest.CONTROL_AWB_MODE_OFF);
+        boolean transformMatrix = Build.VERSION.SDK_INT < 36
+                || contains(correctionModes, CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX);
+
+        return manualPostProcessing && awbOff && transformMatrix;
+    }
+
+    private static boolean isAutoColorResultReady(TotalCaptureResult result) {
+        Integer awbState = result.get(TotalCaptureResult.CONTROL_AWB_STATE);
+        return awbState == null
+                || awbState == CaptureResult.CONTROL_AWB_STATE_CONVERGED
+                || awbState == CaptureResult.CONTROL_AWB_STATE_LOCKED;
     }
 
     private boolean hasToneMapMode(int mode) {
