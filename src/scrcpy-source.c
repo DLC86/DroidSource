@@ -259,7 +259,8 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 		if (ctx->camera_control &&
 		    !scrcpy_camera_control_apply(ctx->camera_control, ctx->camera_zoom, ctx->camera_torch,
 						 ctx->camera_iso, ctx->camera_shutter_us, ctx->camera_focus_distance,
-						 ctx->camera_wb_kelvin)) {
+						 ctx->camera_wb_kelvin, ctx->camera_color_space, ctx->camera_gamma,
+						 ctx->camera_10bit)) {
 			obs_log(LOG_WARNING, "scrcpy-source: camera control connection not ready");
 		}
 	}
