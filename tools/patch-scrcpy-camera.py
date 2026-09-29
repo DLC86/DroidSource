@@ -1257,7 +1257,8 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/video/SurfaceEncoder
         """    private static MediaFormat createFormat(String videoMimeType, int bitRate, float maxFps, List<CodecOption> codecOptions) {
 """,
         """    private static MediaFormat createFormat(String videoMimeType, int bitRate, float maxFps,
-                                             List<CodecOption> codecOptions, boolean tenBit) {
+                                             List<CodecOption> codecOptions, boolean tenBit)
+            throws ConfigurationException {
 """,
     ),
     (
