@@ -1269,20 +1269,14 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/video/SurfaceEncoder
 patch_generated("server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java", [
     (
         """import android.hardware.camera2.params.ColorSpaceTransform;
-        import android.hardware.camera2.params.OutputConfiguration;
+import android.hardware.camera2.params.OutputConfiguration;
+import android.hardware.camera2.params.RggbChannelVector;
 """,
         """import android.hardware.camera2.params.ColorSpaceTransform;
 import android.hardware.camera2.params.DynamicRangeProfiles;
 import android.hardware.camera2.params.OutputConfiguration;
-""",
-    ),
-    (
-        """import android.media.MediaCodec;
-        import android.os.Handler;
-""",
-        """import android.media.MediaCodec;
+import android.hardware.camera2.params.RggbChannelVector;
 import android.hardware.camera2.params.TonemapCurve;
-import android.os.Handler;
 """,
     ),
     (
