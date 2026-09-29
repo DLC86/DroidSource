@@ -1821,11 +1821,15 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.
     (
         """            requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
                     CaptureRequest.CONTROL_AWB_MODE_OFF);
+            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_MODE,
+                    CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX);
             requestBuilder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM,
 """,
         """            requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
                     CaptureRequest.CONTROL_AWB_MODE_OFF);
             requestBuilder.set(CaptureRequest.CONTROL_AWB_LOCK, false);
+            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_MODE,
+                    CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX);
             requestBuilder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM,
 """,
     ),
