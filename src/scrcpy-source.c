@@ -1214,9 +1214,9 @@ static bool camera_10bit_supported(const struct scrcpy_src *ctx)
 
 	pthread_mutex_lock(&g_camera_capabilities_mutex);
 	bool supported = g_camera_capabilities_output && g_camera_capabilities_serial &&
-				  strcmp(g_camera_capabilities_serial, ctx->serial) == 0 &&
-				  strstr(g_camera_capabilities_output, "dynamic-range-10bit=true") != NULL &&
-				  strstr(g_camera_capabilities_output, "HLG10") != NULL;
+				strcmp(g_camera_capabilities_serial, ctx->serial) == 0 &&
+				strstr(g_camera_capabilities_output, "dynamic-range-10bit=true") != NULL &&
+				strstr(g_camera_capabilities_output, "HLG10") != NULL;
 	pthread_mutex_unlock(&g_camera_capabilities_mutex);
 	return supported;
 }
@@ -1262,10 +1262,10 @@ static bool video_source_modified(obs_properties_t *props, obs_property_t *p, ob
 	UNUSED_PARAMETER(p);
 	const char *source = obs_data_get_string(settings, "video_source");
 	bool is_camera = source && strcmp(source, "camera") == 0;
-	const char *keys[] = {"camera_id",          "camera_size",       "camera_fps",       "camera_zoom",
-			      "camera_torch",       "camera_iso",        "camera_shutter_us", "camera_focus_distance",
+	const char *keys[] = {"camera_id",          "camera_size",        "camera_fps",       "camera_zoom",
+			      "camera_torch",       "camera_iso",         "camera_shutter_us", "camera_focus_distance",
 			      "camera_wb_kelvin",   "camera_color_space", "camera_gamma",      "camera_10bit",
-			      "portrait_mode",      "flip_vertical",     "hardware_decoding", "refresh_cameras",
+			      "portrait_mode",      "flip_vertical",      "hardware_decoding", "refresh_cameras",
 			      "video_buffer_ms"};
 
 	for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
@@ -1331,8 +1331,8 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_t *camera_wb = obs_properties_add_int_slider(props, "camera_wb_kelvin",
 								  obs_module_text("CameraWhiteBalance"), 0, 12000, 100);
 
-	obs_property_t *camera_color_space = obs_properties_add_list(props, "camera_color_space",
-								     obs_module_text("CameraColorSpace"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_t *camera_color_space = obs_properties_add_list(
+		props, "camera_color_space", obs_module_text("CameraColorSpace"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(camera_color_space, "Camera default", CAMERA_COLOR_SPACE_AUTO);
 	obs_property_list_add_int(camera_color_space, "sRGB", CAMERA_COLOR_SPACE_SRGB);
 	obs_property_list_add_int(camera_color_space, "Rec.709", CAMERA_COLOR_SPACE_REC709);
