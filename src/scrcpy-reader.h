@@ -21,8 +21,16 @@ extern "C" {
  */
 typedef struct scrcpy_reader scrcpy_reader_t;
 
+enum scrcpy_color_range_override {
+	SCRCPY_COLOR_RANGE_AUTO = 0,
+	SCRCPY_COLOR_RANGE_FULL = 1,
+	SCRCPY_COLOR_RANGE_LIMITED = 2,
+};
+
 scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port, bool hardware_decoding, bool flip_vertical,
-				      int video_buffer_ms, bool portrait_mode);
+				      int video_buffer_ms, bool portrait_mode, int color_range_override);
+
+void scrcpy_reader_set_color_range(scrcpy_reader_t *r, int color_range_override);
 
 void scrcpy_reader_destroy(scrcpy_reader_t *r);
 bool scrcpy_reader_is_alive(const scrcpy_reader_t *r);

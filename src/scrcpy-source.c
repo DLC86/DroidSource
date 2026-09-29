@@ -69,6 +69,7 @@ struct scrcpy_src {
 	bool camera_wb_lock;
 	int camera_color_space;
 	int camera_gamma;
+	int camera_color_range;
 	bool camera_10bit;
 	bool portrait_mode;
 
@@ -257,7 +258,7 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 	bfree(log_path);
 
 	ctx->reader = scrcpy_reader_create(ctx->source, port, ctx->hardware_decoding, ctx->flip_vertical,
-					   ctx->video_buffer_ms, ctx->portrait_mode);
+					   ctx->video_buffer_ms, ctx->portrait_mode, ctx->camera_color_range);
 
 	if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0 && control_port != 0 && ctx->serial &&
 	    *ctx->serial) {
@@ -325,6 +326,7 @@ static void load_settings(struct scrcpy_src *ctx, obs_data_t *settings)
 	ctx->camera_wb_lock = obs_data_get_bool(settings, "camera_wb_lock");
 	ctx->camera_color_space = (int)obs_data_get_int(settings, "camera_color_space");
 	ctx->camera_gamma = (int)obs_data_get_int(settings, "camera_gamma");
+	ctx->camera_color_range = (int)obs_data_get_int(settings, "camera_color_range");
 	ctx->camera_10bit = obs_data_get_bool(settings, "camera_10bit");
 	ctx->portrait_mode = obs_data_get_bool(settings, "portrait_mode");
 	ctx->max_size = (int)obs_data_get_int(settings, "max_size");
@@ -485,6 +487,9 @@ static void src_update(void *data, obs_data_t *settings)
 		}
 	}
 
+	if (ctx->reader)
+		scrcpy_reader_set_color_range(ctx->reader, ctx->camera_color_range);
+
 	if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0 && ctx->camera_control)
 		(void)scrcpy_camera_control_apply(ctx->camera_control, ctx->camera_zoom, ctx->camera_torch,
 						  ctx->camera_iso, ctx->camera_shutter_us, ctx->camera_focus_distance,
@@ -510,6 +515,7 @@ static void src_get_defaults(obs_data_t *settings)
 	obs_data_set_default_bool(settings, "camera_wb_lock", false);
 	obs_data_set_default_int(settings, "camera_color_space", CAMERA_COLOR_SPACE_AUTO);
 	obs_data_set_default_int(settings, "camera_gamma", CAMERA_GAMMA_AUTO);
+	obs_data_set_default_int(settings, "camera_color_range", SCRCPY_COLOR_RANGE_AUTO);
 	obs_data_set_default_bool(settings, "camera_10bit", false);
 	obs_data_set_default_bool(settings, "portrait_mode", false);
 	obs_data_set_default_int(settings, "max_size", 0);
@@ -1301,7 +1307,7 @@ static bool video_source_modified(obs_properties_t *props, obs_property_t *p, ob
 	const char *keys[] = {"camera_id",        "camera_size",    "camera_fps",         "camera_zoom",
 			      "camera_torch",     "camera_iso",     "camera_shutter_us",  "camera_focus_distance",
 			      "camera_wb_kelvin", "camera_wb_lock", "camera_color_space", "camera_gamma",
-			      "camera_10bit",     "portrait_mode",  "flip_vertical",      "hardware_decoding",
+			      "camera_color_range", "camera_10bit", "portrait_mode", "flip_vertical", "hardware_decoding",
 			      "refresh_cameras",  "video_buffer_ms"};
 
 	for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
@@ -1392,6 +1398,13 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_list_add_int(camera_gamma, "Rec.709-A", CAMERA_GAMMA_REC709_A);
 	obs_property_list_add_int(camera_gamma, "HLG", CAMERA_GAMMA_HLG);
 
+	obs_property_t *camera_color_range = obs_properties_add_list(props, "camera_color_range",
+								     obs_module_text("CameraColorRange"),
+								     OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(camera_color_range, "Auto (from stream)", SCRCPY_COLOR_RANGE_AUTO);
+	obs_property_list_add_int(camera_color_range, "Full range", SCRCPY_COLOR_RANGE_FULL);
+	obs_property_list_add_int(camera_color_range, "Limited range", SCRCPY_COLOR_RANGE_LIMITED);
+
 	obs_property_t *camera_10bit = obs_properties_add_bool(props, "camera_10bit", obs_module_text("Camera10Bit"));
 	obs_property_set_modified_callback(camera_10bit, camera_10bit_modified);
 
@@ -1421,6 +1434,7 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_set_visible(camera_wb_lock, is_camera);
 	obs_property_set_visible(camera_color_space, is_camera);
 	obs_property_set_visible(camera_gamma, is_camera);
+	obs_property_set_visible(camera_color_range, is_camera);
 	obs_data_t *ui_settings = obs_source_get_settings(ctx->source);
 	bool ten_bit_enabled = obs_data_get_bool(ui_settings, "camera_10bit");
 	bool wb_manual = obs_data_get_int(ui_settings, "camera_wb_kelvin") > 0;

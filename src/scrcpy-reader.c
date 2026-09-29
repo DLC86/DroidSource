@@ -77,6 +77,7 @@ struct scrcpy_reader {
 	bool flip_vertical;
 	int video_buffer_ms;
 	bool portrait_mode;
+	int color_range_override;
 	bool logged_color_info;
 
 	AVBufferRef *hw_device_ctx;
@@ -253,6 +254,17 @@ static enum video_colorspace obs_colorspace_from_av(const AVFrame *frame)
 static enum video_range_type obs_range_from_av(const AVFrame *frame)
 {
 	return frame->color_range == AVCOL_RANGE_JPEG ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
+}
+
+static enum video_range_type resolve_color_range(const AVFrame *frame, int override)
+{
+	enum video_range_type range = obs_range_from_av(frame);
+
+	if (override == SCRCPY_COLOR_RANGE_FULL)
+		return VIDEO_RANGE_FULL;
+	if (override == SCRCPY_COLOR_RANGE_LIMITED)
+		return VIDEO_RANGE_PARTIAL;
+	return range;
 }
 
 static bool obs_bt2020_sdr_matrix(enum video_format format, enum video_range_type range, float matrix[16],
@@ -554,10 +566,11 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 
 	pthread_mutex_lock(&r->state_mutex);
 	r->last_frame_ns = os_gettime_ns();
+	int color_range_override = r->color_range_override;
 	pthread_mutex_unlock(&r->state_mutex);
 
 	enum video_colorspace cs = obs_colorspace_from_av(out);
-	enum video_range_type range = obs_range_from_av(out);
+	enum video_range_type range = resolve_color_range(out, color_range_override);
 	bool matrix_ok;
 	const bool bt2020_sdr = ((enum AVColorSpace)out->colorspace == AVCOL_SPC_BT2020_NCL ||
 				 (enum AVColorSpace)out->colorspace == AVCOL_SPC_BT2020_CL) &&
@@ -717,7 +730,7 @@ done:
 }
 
 scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port, bool hardware_decoding, bool flip_vertical,
-				      int video_buffer_ms, bool portrait_mode)
+				      int video_buffer_ms, bool portrait_mode, int color_range_override)
 {
 	struct scrcpy_reader *r = bzalloc(sizeof(*r));
 	r->source = source;
@@ -727,6 +740,7 @@ scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port, bool 
 	r->flip_vertical = flip_vertical;
 	r->video_buffer_ms = video_buffer_ms > 0 ? video_buffer_ms : 0;
 	r->portrait_mode = portrait_mode;
+	r->color_range_override = color_range_override;
 	r->hw_pix_fmt = AV_PIX_FMT_NONE;
 	r->stop = false;
 	r->running = false;
@@ -741,6 +755,21 @@ scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port, bool 
 	}
 	r->thread_started = true;
 	return r;
+}
+
+void scrcpy_reader_set_color_range(scrcpy_reader_t *r, int color_range_override)
+{
+	if (!r)
+		return;
+
+	if (color_range_override != SCRCPY_COLOR_RANGE_AUTO &&
+	    color_range_override != SCRCPY_COLOR_RANGE_FULL &&
+	    color_range_override != SCRCPY_COLOR_RANGE_LIMITED)
+		color_range_override = SCRCPY_COLOR_RANGE_AUTO;
+
+	pthread_mutex_lock(&r->state_mutex);
+	r->color_range_override = color_range_override;
+	pthread_mutex_unlock(&r->state_mutex);
 }
 
 bool scrcpy_reader_is_alive(const scrcpy_reader_t *r)
