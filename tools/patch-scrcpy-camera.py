@@ -1461,7 +1461,7 @@ import android.hardware.camera2.params.TonemapCurve;
                                 && cameraCharacteristics != null
                                 && requestBuilder != null) {
 """,
-        """            if (whiteBalanceKelvin > 0
+        """            if ((whiteBalanceKelvin > 0 || cameraColorSpace == 3)
                                 && cameraCharacteristics != null
                                 && requestBuilder != null) {
 """,
