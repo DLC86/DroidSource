@@ -234,6 +234,95 @@ patch("server/src/main/java/com/genymobile/scrcpy/util/LogUtils.java", [
                         builder.append(", wb-presets=true");
                     }
 
+                    if (Build.VERSION.SDK_INT >= 36) {
+                        int[] aePriorityModes =
+                                characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_PRIORITY_MODES);
+                        if (aePriorityModes != null) {
+                            builder.append(", ae-priority-modes=[");
+                            for (int i = 0; i < aePriorityModes.length; ++i) {
+                                if (i > 0) {
+                                    builder.append(", ");
+                                }
+                                switch (aePriorityModes[i]) {
+                                    case android.hardware.camera2.CaptureRequest.CONTROL_AE_PRIORITY_MODE_OFF:
+                                        builder.append("OFF");
+                                        break;
+                                    case android.hardware.camera2.CaptureRequest.CONTROL_AE_PRIORITY_MODE_SENSOR_SENSITIVITY_PRIORITY:
+                                        builder.append("ISO");
+                                        break;
+                                    case android.hardware.camera2.CaptureRequest.CONTROL_AE_PRIORITY_MODE_SENSOR_EXPOSURE_TIME_PRIORITY:
+                                        builder.append("SHUTTER");
+                                        break;
+                                    default:
+                                        builder.append(aePriorityModes[i]);
+                                        break;
+                                }
+                            }
+                            builder.append(']');
+                        }
+                    }
+
+                    if (Build.VERSION.SDK_INT >= 33) {
+                        int[] capabilitiesForHdr =
+                                characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
+                        boolean tenBit = false;
+                        if (capabilitiesForHdr != null) {
+                            for (int capability : capabilitiesForHdr) {
+                                if (capability == CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_DYNAMIC_RANGE_TEN_BIT) {
+                                    tenBit = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (tenBit) {
+                            builder.append(", dynamic-range-10bit=true");
+                        }
+
+                        android.hardware.camera2.params.DynamicRangeProfiles dynamicRangeProfiles =
+                                characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES);
+                        if (dynamicRangeProfiles != null) {
+                            builder.append(", dynamic-range-profiles=[");
+                            boolean firstProfile = true;
+                            for (Long profile : dynamicRangeProfiles.getSupportedProfiles()) {
+                                if (!firstProfile) {
+                                    builder.append(", ");
+                                }
+                                firstProfile = false;
+                                if (profile == android.hardware.camera2.params.DynamicRangeProfiles.STANDARD) {
+                                    builder.append("STANDARD");
+                                } else if (profile == android.hardware.camera2.params.DynamicRangeProfiles.HLG10) {
+                                    builder.append("HLG10");
+                                } else {
+                                    builder.append(profile);
+                                }
+                            }
+                            builder.append(']');
+                        }
+                    }
+
+                    if (Build.VERSION.SDK_INT >= 34) {
+                        android.hardware.camera2.params.ColorSpaceProfiles colorSpaceProfiles =
+                                characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_COLOR_SPACE_PROFILES);
+                        if (colorSpaceProfiles != null) {
+                            try {
+                                java.util.Set<android.graphics.ColorSpace.Named> colorSpaces =
+                                        colorSpaceProfiles.getSupportedColorSpaces(android.media.ImageFormat.UNKNOWN);
+                                builder.append(", color-spaces=[");
+                                boolean firstColorSpace = true;
+                                for (android.graphics.ColorSpace.Named colorSpace : colorSpaces) {
+                                    if (!firstColorSpace) {
+                                        builder.append(", ");
+                                    }
+                                    firstColorSpace = false;
+                                    builder.append(colorSpace.name());
+                                }
+                                builder.append(']');
+                            } catch (IllegalArgumentException e) {
+                                Ln.w("Could not get supported camera color spaces for " + id, e);
+                            }
+                        }
+                    }
+
 
                     builder.append(')');
 """,
