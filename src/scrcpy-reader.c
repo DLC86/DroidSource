@@ -762,8 +762,7 @@ void scrcpy_reader_set_color_range(scrcpy_reader_t *r, int color_range_override)
 	if (!r)
 		return;
 
-	if (color_range_override != SCRCPY_COLOR_RANGE_AUTO &&
-	    color_range_override != SCRCPY_COLOR_RANGE_FULL &&
+	if (color_range_override != SCRCPY_COLOR_RANGE_AUTO && color_range_override != SCRCPY_COLOR_RANGE_FULL &&
 	    color_range_override != SCRCPY_COLOR_RANGE_LIMITED)
 		color_range_override = SCRCPY_COLOR_RANGE_AUTO;
 
