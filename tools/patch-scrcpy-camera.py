@@ -1152,4 +1152,478 @@ final class CameraControlServer {
 }
 """, encoding="utf-8")
 
+
+# Additional color-management and 10-bit patches.
+def patch_generated(path, replacements):
+    p = ROOT / path
+    s = p.read_text(encoding="utf-8")
+    for old, new in replacements:
+        if old not in s:
+            raise SystemExit(f"Generated patch pattern not found in {path}: {old[:200]!r}")
+        s = s.replace(old, new, 1)
+    p.write_text(s, encoding="utf-8")
+
+
+patch_generated("server/src/main/java/com/genymobile/scrcpy/Options.java", [
+    (
+        '    private static final String CAMERA_CONTROL_OPTION = "__scrcpy_obs_camera_control_port";\n',
+        '    private static final String CAMERA_CONTROL_OPTION = "__scrcpy_obs_camera_control_port";\n'
+        '    private static final String CAMERA_10BIT_OPTION = "__scrcpy_obs_camera_10bit";\n',
+    ),
+    (
+        "    private int cameraControlPort;\n    private boolean showTouches;\n",
+        "    private int cameraControlPort;\n    private boolean camera10Bit;\n    private boolean showTouches;\n",
+    ),
+    (
+        """    public int getCameraControlPort() {
+        return cameraControlPort;
+    }
+
+    public boolean getShowTouches() {
+""",
+        """    public int getCameraControlPort() {
+        return cameraControlPort;
+    }
+
+    public boolean getCamera10Bit() {
+        return camera10Bit;
+    }
+
+    public boolean getShowTouches() {
+""",
+    ),
+    (
+        """                            if (CAMERA_CONTROL_OPTION.equals(optionKey)
+                                    && valueObj instanceof Integer) {
+                                int port = (Integer) valueObj;
+                                if (port < 1 || port > 65535) {
+                                    throw new IllegalArgumentException("Invalid camera control port: " + port);
+                                }
+                                options.cameraControlPort = port;
+                                codecOptions.remove(j);
+                            } else {
+                                ++j;
+                            }
+""",
+        """                            if (CAMERA_CONTROL_OPTION.equals(optionKey)
+                                    && valueObj instanceof Integer) {
+                                int port = (Integer) valueObj;
+                                if (port < 1 || port > 65535) {
+                                    throw new IllegalArgumentException("Invalid camera control port: " + port);
+                                }
+                                options.cameraControlPort = port;
+                                codecOptions.remove(j);
+                            } else if (CAMERA_10BIT_OPTION.equals(optionKey)
+                                    && valueObj instanceof Integer) {
+                                options.camera10Bit = (Integer) valueObj != 0;
+                                codecOptions.remove(j);
+                            } else {
+                                ++j;
+                            }
+""",
+    ),
+])
+
+
+patch_generated("server/src/main/java/com/genymobile/scrcpy/video/SurfaceEncoder.java", [
+    (
+        """        Codec codec = streamer.getCodec();
+        MediaCodec mediaCodec = createMediaCodec(codec, encoderName);
+        MediaFormat format = createFormat(codec.getMimeType(), videoBitRate, maxFps, codecOptions);
+""",
+        """        Codec codec = streamer.getCodec();
+        MediaCodec mediaCodec = createMediaCodec(codec, encoderName);
+        boolean camera10Bit = options.getVideoSource() == VideoSource.CAMERA && options.getCamera10Bit();
+        if (camera10Bit && !MediaFormat.MIMETYPE_VIDEO_HEVC.equals(codec.getMimeType())) {
+            throw new ConfigurationException("Camera 10-bit requires HEVC");
+        }
+        MediaFormat format = createFormat(codec.getMimeType(), videoBitRate, maxFps, codecOptions, camera10Bit);
+""",
+    ),
+    (
+        """    private static MediaFormat createFormat(String videoMimeType, int bitRate, float maxFps, List<CodecOption> codecOptions) {
+""",
+        """    private static MediaFormat createFormat(String videoMimeType, int bitRate, float maxFps,
+                                             List<CodecOption> codecOptions, boolean tenBit) {
+""",
+    ),
+    (
+        """        format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
+        if (Build.VERSION.SDK_INT >= AndroidVersions.API_24_ANDROID_7_0) {
+""",
+        """        format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
+        if (tenBit) {
+            if (Build.VERSION.SDK_INT < AndroidVersions.API_33_ANDROID_13) {
+                throw new ConfigurationException("Camera 10-bit requires Android 13 or newer");
+            }
+            format.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.HEVCProfileMain10);
+            format.setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT2020);
+            format.setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_HLG);
+        }
+        if (Build.VERSION.SDK_INT >= AndroidVersions.API_24_ANDROID_7_0) {
+""",
+    ),
+])
+
+
+patch_generated("server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java", [
+    (
+        """import android.hardware.camera2.params.ColorSpaceTransform;
+        import android.hardware.camera2.params.OutputConfiguration;
+""",
+        """import android.hardware.camera2.params.ColorSpaceTransform;
+import android.hardware.camera2.params.DynamicRangeProfiles;
+import android.hardware.camera2.params.OutputConfiguration;
+""",
+    ),
+    (
+        """import android.media.MediaCodec;
+        import android.os.Handler;
+""",
+        """import android.media.MediaCodec;
+import android.hardware.camera2.params.TonemapCurve;
+import android.os.Handler;
+""",
+    ),
+    (
+        """    private final int cameraControlPort;
+    private float zoom;
+""",
+        """    private final int cameraControlPort;
+    private int cameraColorSpace;
+    private int cameraGamma;
+    private boolean cameraTenBit;
+    private float zoom;
+""",
+    ),
+    (
+        """        this.cameraControlPort = options.getCameraControlPort();
+        this.zoom = options.getCameraZoom();
+""",
+        """        this.cameraControlPort = options.getCameraControlPort();
+        this.cameraColorSpace = 0;
+        this.cameraGamma = 0;
+        this.cameraTenBit = options.getCamera10Bit();
+        this.zoom = options.getCameraZoom();
+""",
+    ),
+    (
+        """        OutputConfiguration outputConfig = new OutputConfiguration(captureSurface);
+        List<OutputConfiguration> outputs = Collections.singletonList(outputConfig);
+""",
+        """        OutputConfiguration outputConfig = new OutputConfiguration(captureSurface);
+        if (cameraTenBit) {
+            if (Build.VERSION.SDK_INT < AndroidVersions.API_33_ANDROID_13) {
+                throw new IOException("Camera 10-bit requires Android 13 or newer");
+            }
+            if (highSpeed) {
+                throw new IOException("Camera 10-bit is not supported for high-speed capture");
+            }
+            CameraCharacteristics characteristics = ServiceManager.getCameraManager().getCameraCharacteristics(cameraId);
+            int[] capabilities = characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
+            DynamicRangeProfiles profiles =
+                    characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES);
+            boolean tenBitSupported = contains(
+                    capabilities, CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_DYNAMIC_RANGE_TEN_BIT);
+            boolean hlg10Supported = profiles != null
+                    && profiles.getSupportedProfiles().contains(DynamicRangeProfiles.HLG10);
+            if (!tenBitSupported || !hlg10Supported) {
+                throw new IOException("Camera does not support HLG10 10-bit output");
+            }
+            outputConfig.setDynamicRangeProfile(DynamicRangeProfiles.HLG10);
+        }
+        List<OutputConfiguration> outputs = Collections.singletonList(outputConfig);
+""",
+    ),
+    (
+        """    public void setCameraSettings(float zoomValue, boolean torch, int iso, int shutterUs,
+                                  float focusDistance, int wbKelvin) {
+""",
+        """    public void setCameraSettings(float zoomValue, boolean torch, int iso, int shutterUs,
+                                  float focusDistance, int wbKelvin, int colorSpace, int gamma,
+                                  boolean tenBit) {
+""",
+    ),
+    (
+        """            manualFocusDistance = Math.max(0, focusDistance);
+            whiteBalanceKelvin = Math.max(0, wbKelvin);
+
+            if (currentSession != null && requestBuilder != null) {
+""",
+        """            manualFocusDistance = Math.max(0, focusDistance);
+            whiteBalanceKelvin = Math.max(0, wbKelvin);
+            cameraColorSpace = Math.max(0, Math.min(3, colorSpace));
+            cameraGamma = Math.max(0, Math.min(5, gamma));
+            cameraTenBit = tenBit;
+
+            if (currentSession != null && requestBuilder != null) {
+""",
+    ),
+    (
+        """        try {
+            applyWhiteBalance();
+        } catch (RuntimeException e) {
+            Ln.w("Could not apply camera white balance: " + e.getMessage());
+""",
+        """        try {
+            applyWhiteBalance();
+        } catch (RuntimeException e) {
+            Ln.w("Could not apply camera white balance: " + e.getMessage());
+""",
+    ),
+    (
+        """            requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
+                    CaptureRequest.CONTROL_AWB_MODE_AUTO);
+        }
+
+        Boolean flashAvailable =
+""",
+        """            requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
+                    CaptureRequest.CONTROL_AWB_MODE_AUTO);
+        }
+
+        try {
+            applyGamma();
+        } catch (RuntimeException e) {
+            Ln.w("Could not apply camera gamma: " + e.getMessage());
+            requestBuilder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_FAST);
+            requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, null);
+            requestBuilder.set(CaptureRequest.TONEMAP_CURVE, null);
+        }
+
+        Boolean flashAvailable =
+""",
+    ),
+    (
+        """        if (android.os.Build.VERSION.SDK_INT >= 36) {
+            Range<Integer> cctRange = cameraCharacteristics.get(
+""",
+        """        if (android.os.Build.VERSION.SDK_INT >= 36 && cameraColorSpace == 0) {
+            Range<Integer> cctRange = cameraCharacteristics.get(
+""",
+    ),
+    (
+        """        if (manualPostProcessing && awbOff && transformMatrix) {
+""",
+        """        if (manualPostProcessing && awbOff && transformMatrix
+                && (whiteBalanceKelvin > 0 || cameraColorSpace != 0)) {
+""",
+    ),
+    (
+        """            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM,
+                    lastAutoColorCorrectionTransform);
+
+            RggbChannelVector gains = makeManualGainsFromAuto(whiteBalanceKelvin);
+            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS, gains);
+""",
+        """            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM,
+                    getTargetColorTransform());
+
+            RggbChannelVector gains = whiteBalanceKelvin > 0
+                    ? makeManualGainsFromAuto(whiteBalanceKelvin)
+                    : lastAutoColorCorrectionGains;
+            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS, gains);
+""",
+    ),
+    (
+        """            if (whiteBalanceKelvin > 0
+                                && cameraCharacteristics != null
+                                && requestBuilder != null) {
+""",
+        """            if ((whiteBalanceKelvin > 0 || cameraColorSpace != 0)
+                                && cameraCharacteristics != null
+                                && requestBuilder != null) {
+""",
+    ),
+])
+
+
+# Insert matrix/tonemap helpers into CameraCapture.
+p = ROOT / "server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java"
+s = p.read_text(encoding="utf-8")
+marker = """    private void clearManualExposureKeys() {
+"""
+helpers = r'''    private ColorSpaceTransform getTargetColorTransform() {
+        assertCameraThread();
+
+        if (lastAutoColorCorrectionTransform == null) {
+            return null;
+        }
+
+        if (cameraColorSpace != 3) {
+            return lastAutoColorCorrectionTransform;
+        }
+
+        int[] values = new int[18];
+        lastAutoColorCorrectionTransform.copyElements(values, 0);
+        float[] sensorToSrgb = new float[9];
+        int denominator = 100000;
+        for (int i = 0; i < 9; ++i) {
+            int num = values[i * 2];
+            int den = values[i * 2 + 1];
+            sensorToSrgb[i] = den != 0 ? (float) num / den : 0.0f;
+        }
+
+        final float[] srgbToBt2020 = {
+                0.6274039f, 0.3292830f, 0.0433131f,
+                0.0690973f, 0.9195404f, 0.0113623f,
+                0.0163914f, 0.0880133f, 0.8955953f
+        };
+        float[] combined = multiply3x3(srgbToBt2020, sensorToSrgb);
+        for (int i = 0; i < 9; ++i) {
+            values[i * 2] = Math.round(combined[i] * denominator);
+            values[i * 2 + 1] = denominator;
+        }
+        return new ColorSpaceTransform(values);
+    }
+
+    private static float[] multiply3x3(float[] a, float[] b) {
+        float[] result = new float[9];
+        for (int row = 0; row < 3; ++row) {
+            for (int col = 0; col < 3; ++col) {
+                float value = 0.0f;
+                for (int k = 0; k < 3; ++k) {
+                    value += a[row * 3 + k] * b[k * 3 + col];
+                }
+                result[row * 3 + col] = value;
+            }
+        }
+        return result;
+    }
+
+    private boolean hasToneMapMode(int mode) {
+        int[] modes = cameraCharacteristics.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES);
+        return contains(modes, mode);
+    }
+
+    private static float rec709Scene(float x) {
+        if (x < 0.018f) {
+            return 4.5f * x;
+        }
+        return 1.099f * (float) Math.pow(x, 0.45) - 0.099f;
+    }
+
+    private static float rec709A(float x) {
+        return (float) Math.pow(x, 1.0 / 1.961);
+    }
+
+    private static float hlgOetf(float x) {
+        if (x <= 1.0f / 12.0f) {
+            return (float) Math.sqrt(3.0 * x);
+        }
+        final double a = 0.17883277;
+        final double b = 0.28466892;
+        final double c = 0.55991073;
+        return (float) (a * Math.log(12.0 * x - b) + c);
+    }
+
+    private static float[] makeToneMapCurve(int maxPoints, float type) {
+        int points = Math.max(2, Math.min(64, maxPoints));
+        float[] curve = new float[points * 2];
+        for (int i = 0; i < points; ++i) {
+            float x = (float) i / (points - 1);
+            float y;
+            if (type == 1.0f) {
+                y = rec709A(x);
+            } else {
+                y = hlgOetf(x);
+            }
+            curve[i * 2] = x;
+            curve[i * 2 + 1] = y;
+        }
+        return curve;
+    }
+
+    private void applyGamma() {
+        assertCameraThread();
+
+        if (cameraGamma == 0) {
+            requestBuilder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_FAST);
+            requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, null);
+            requestBuilder.set(CaptureRequest.TONEMAP_CURVE, null);
+            return;
+        }
+
+        if (cameraTenBit && cameraGamma == 5) {
+            requestBuilder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_FAST);
+            requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, null);
+            requestBuilder.set(CaptureRequest.TONEMAP_CURVE, null);
+            return;
+        }
+
+        if (cameraGamma == 1 || cameraGamma == 2) {
+            if (!hasToneMapMode(CaptureRequest.TONEMAP_MODE_GAMMA_VALUE)) {
+                throw new IllegalArgumentException("Camera does not support gamma-value tone mapping");
+            }
+            requestBuilder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_GAMMA_VALUE);
+            requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, cameraGamma == 1 ? 2.2f : 2.4f);
+            requestBuilder.set(CaptureRequest.TONEMAP_CURVE, null);
+            return;
+        }
+
+        if (cameraGamma == 3) {
+            if (hasToneMapMode(CaptureRequest.TONEMAP_MODE_PRESET_CURVE)) {
+                requestBuilder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_PRESET_CURVE);
+                requestBuilder.set(CaptureRequest.TONEMAP_PRESET_CURVE, CaptureRequest.TONEMAP_PRESET_CURVE_REC709);
+                requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, null);
+                requestBuilder.set(CaptureRequest.TONEMAP_CURVE, null);
+                return;
+            }
+            if (hasToneMapMode(CaptureRequest.TONEMAP_MODE_GAMMA_VALUE)) {
+                requestBuilder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_GAMMA_VALUE);
+                requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, 2.2f);
+                requestBuilder.set(CaptureRequest.TONEMAP_CURVE, null);
+                return;
+            }
+            throw new IllegalArgumentException("Camera does not support Rec.709 tone mapping");
+        }
+
+        int[] capabilities = cameraCharacteristics.get(
+                CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
+        boolean manualPostProcessing = contains(capabilities,
+                CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING);
+        if (!manualPostProcessing || !hasToneMapMode(CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)) {
+            throw new IllegalArgumentException("Camera does not support custom tone mapping");
+        }
+
+        int maxPoints = 16;
+        Integer advertised = cameraCharacteristics.get(CameraCharacteristics.TONEMAP_MAX_CURVE_POINTS);
+        if (advertised != null) {
+            maxPoints = advertised;
+        }
+
+        float[] curve = makeToneMapCurve(maxPoints, cameraGamma == 4 ? 1.0f : 0.0f);
+        TonemapCurve tonemap = new TonemapCurve(curve, curve, curve);
+        requestBuilder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE);
+        requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, null);
+        requestBuilder.set(CaptureRequest.TONEMAP_CURVE, tonemap);
+    }
+
+'''
+if marker not in s:
+    raise SystemExit("CameraCapture helper marker missing")
+s=s.replace(marker,helpers+marker,1)
+p.write_text(s,encoding="utf-8")
+
+
+patch_generated("server/src/main/java/com/genymobile/scrcpy/video/CameraControlServer.java", [
+    ("private static final int SETTINGS_SIZE = 21;", "private static final int SETTINGS_SIZE = 24;"),
+    (
+        """            int wbKelvin = in.readInt();
+
+            capture.setCameraSettings(zoom, torch, iso, shutterUs, focusDistance, wbKelvin);
+""",
+        """            int wbKelvin = in.readInt();
+            int colorSpace = in.readUnsignedByte();
+            int gamma = in.readUnsignedByte();
+            boolean tenBit = in.readUnsignedByte() != 0;
+
+            capture.setCameraSettings(zoom, torch, iso, shutterUs, focusDistance, wbKelvin,
+                    colorSpace, gamma, tenBit);
+""",
+    ),
+])
+
+print("scrcpy camera patch applied")
+
 print("scrcpy camera patch applied")
