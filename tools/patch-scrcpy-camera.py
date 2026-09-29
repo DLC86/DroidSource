@@ -1217,13 +1217,14 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/Options.java", [
     (
         '    private static final String CAMERA_CONTROL_OPTION = "__scrcpy_obs_camera_control_port";\n',
         '    private static final String CAMERA_CONTROL_OPTION = "__scrcpy_obs_camera_control_port";\n'
+        '    private static final String CAMERA_WB_LOCK_OPTION = "__scrcpy_obs_camera_wb_lock";\n'
         '    private static final String CAMERA_COLOR_SPACE_OPTION = "__scrcpy_obs_camera_color_space";\n'
         '    private static final String CAMERA_GAMMA_OPTION = "__scrcpy_obs_camera_gamma";\n'
         '    private static final String CAMERA_10BIT_OPTION = "__scrcpy_obs_camera_10bit";\n',
     ),
     (
         "    private int cameraControlPort;\n    private boolean showTouches;\n",
-        "    private int cameraControlPort;\n    private int cameraColorSpace;\n    private int cameraGamma;\n    private boolean camera10Bit;\n    private boolean showTouches;\n",
+        "    private int cameraControlPort;\n    private boolean cameraWbLock;\n    private int cameraColorSpace;\n    private int cameraGamma;\n    private boolean camera10Bit;\n    private boolean showTouches;\n",
     ),
     (
         """    public int getCameraControlPort() {
@@ -1234,6 +1235,10 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/Options.java", [
 """,
         """    public int getCameraControlPort() {
         return cameraControlPort;
+    }
+
+    public boolean getCameraWbLock() {
+        return cameraWbLock;
     }
 
     public int getCameraColorSpace() {
@@ -1271,6 +1276,10 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/Options.java", [
                                     throw new IllegalArgumentException("Invalid camera control port: " + port);
                                 }
                                 options.cameraControlPort = port;
+                                codecOptions.remove(j);
+                            } else if (CAMERA_WB_LOCK_OPTION.equals(optionKey)
+                                    && valueObj instanceof Integer) {
+                                options.cameraWbLock = (Integer) valueObj != 0;
                                 codecOptions.remove(j);
                             } else if (CAMERA_COLOR_SPACE_OPTION.equals(optionKey)
                                     && valueObj instanceof Integer) {
@@ -1384,6 +1393,7 @@ import android.hardware.camera2.params.TonemapCurve;
     private float zoom;
 """,
         """    private final int cameraControlPort;
+    private boolean cameraWbLock;
     private int cameraColorSpace;
     private int cameraGamma;
     private boolean cameraTenBit;
@@ -1397,6 +1407,7 @@ import android.hardware.camera2.params.TonemapCurve;
         this.zoom = options.getCameraZoom();
 """,
         """        this.cameraControlPort = options.getCameraControlPort();
+        this.cameraWbLock = options.getCameraWbLock();
         this.cameraColorSpace = options.getCameraColorSpace();
         this.cameraGamma = options.getCameraGamma();
         this.cameraTenBit = options.getCamera10Bit();
@@ -1442,8 +1453,8 @@ import android.hardware.camera2.params.TonemapCurve;
                                   float focusDistance, int wbKelvin) {
 """,
         """    public void setCameraSettings(float zoomValue, boolean torch, int iso, int shutterUs,
-                                  float focusDistance, int wbKelvin, int colorSpace, int gamma,
-                                  boolean tenBit) {
+                                  float focusDistance, int wbKelvin, boolean wbLock,
+                                  int colorSpace, int gamma, boolean tenBit) {
 """,
     ),
     (
@@ -1454,6 +1465,7 @@ import android.hardware.camera2.params.TonemapCurve;
 """,
         """            manualFocusDistance = Math.max(0, focusDistance);
             whiteBalanceKelvin = Math.max(0, wbKelvin);
+            cameraWbLock = wbLock && whiteBalanceKelvin <= 0;
             cameraColorSpace = Math.max(0, Math.min(3, colorSpace));
             cameraGamma = Math.max(0, Math.min(5, gamma));
             cameraTenBit = tenBit;
@@ -1770,18 +1782,19 @@ p.write_text(s,encoding="utf-8")
 
 
 patch_generated("server/src/main/java/com/genymobile/scrcpy/video/CameraControlServer.java", [
-    ("private static final int SETTINGS_SIZE = 21;", "private static final int SETTINGS_SIZE = 24;"),
+    ("private static final int SETTINGS_SIZE = 21;", "private static final int SETTINGS_SIZE = 25;"),
     (
         """            int wbKelvin = in.readInt();
 
             capture.setCameraSettings(zoom, torch, iso, shutterUs, focusDistance, wbKelvin);
 """,
         """            int wbKelvin = in.readInt();
+            boolean wbLock = in.readUnsignedByte() != 0;
             int colorSpace = in.readUnsignedByte();
             int gamma = in.readUnsignedByte();
             boolean tenBit = in.readUnsignedByte() != 0;
 
-            capture.setCameraSettings(zoom, torch, iso, shutterUs, focusDistance, wbKelvin,
+            capture.setCameraSettings(zoom, torch, iso, shutterUs, focusDistance, wbKelvin, wbLock,
                     colorSpace, gamma, tenBit);
 """,
     ),
