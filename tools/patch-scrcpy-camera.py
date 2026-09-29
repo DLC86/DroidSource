@@ -762,7 +762,8 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
     private void applyWhiteBalance() {
         assertCameraThread();
 
-        if (whiteBalanceKelvin <= 0 && cameraColorSpace == 0) {
+        if (whiteBalanceKelvin <= 0
+                && cameraColorSpace != 3) {
             requestBuilder.set(CaptureRequest.CONTROL_MODE,
                     CaptureRequest.CONTROL_MODE_AUTO);
             requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
@@ -1169,11 +1170,13 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/Options.java", [
     (
         '    private static final String CAMERA_CONTROL_OPTION = "__scrcpy_obs_camera_control_port";\n',
         '    private static final String CAMERA_CONTROL_OPTION = "__scrcpy_obs_camera_control_port";\n'
-        '    private static final String CAMERA_COLOR_SPACE_OPTION = "__scrcpy_obs_camera_color_space";\n'        '    private static final String CAMERA_10BIT_OPTION = "__scrcpy_obs_camera_10bit";\n',
+        '    private static final String CAMERA_COLOR_SPACE_OPTION = "__scrcpy_obs_camera_color_space";\n'
+        '    private static final String CAMERA_GAMMA_OPTION = "__scrcpy_obs_camera_gamma";\n'
+        '    private static final String CAMERA_10BIT_OPTION = "__scrcpy_obs_camera_10bit";\n',
     ),
     (
         "    private int cameraControlPort;\n    private boolean showTouches;\n",
-        "    private int cameraControlPort;\n    private int cameraColorSpace;\n    private boolean camera10Bit;\n    private boolean showTouches;\n",
+        "    private int cameraControlPort;\n    private int cameraColorSpace;\n    private int cameraGamma;\n    private boolean camera10Bit;\n    private boolean showTouches;\n",
     ),
     (
         """    public int getCameraControlPort() {
@@ -1188,6 +1191,10 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/Options.java", [
 
     public int getCameraColorSpace() {
         return cameraColorSpace;
+    }
+
+    public int getCameraGamma() {
+        return cameraGamma;
     }
 
     public boolean getCamera10Bit() {
@@ -1225,6 +1232,14 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/Options.java", [
                                     throw new IllegalArgumentException("Invalid camera color space: " + colorSpace);
                                 }
                                 options.cameraColorSpace = colorSpace;
+                                codecOptions.remove(j);
+                            } else if (CAMERA_GAMMA_OPTION.equals(optionKey)
+                                    && valueObj instanceof Integer) {
+                                int gamma = (Integer) valueObj;
+                                if (gamma < 0 || gamma > 5) {
+                                    throw new IllegalArgumentException("Invalid camera gamma: " + gamma);
+                                }
+                                options.cameraGamma = gamma;
                                 codecOptions.remove(j);
                             } else if (CAMERA_10BIT_OPTION.equals(optionKey)
                                     && valueObj instanceof Integer) {
@@ -1333,7 +1348,7 @@ import android.hardware.camera2.params.TonemapCurve;
 """,
         """        this.cameraControlPort = options.getCameraControlPort();
         this.cameraColorSpace = options.getCameraColorSpace();
-        this.cameraGamma = 0;
+        this.cameraGamma = options.getCameraGamma();
         this.cameraTenBit = options.getCamera10Bit();
         this.zoom = options.getCameraZoom();
 """,
@@ -1422,7 +1437,7 @@ import android.hardware.camera2.params.TonemapCurve;
         """        if (manualPostProcessing && awbOff && transformMatrix) {
 """,
         """        if (manualPostProcessing && awbOff && transformMatrix
-                && (whiteBalanceKelvin > 0 || cameraColorSpace != 0)) {
+                && (whiteBalanceKelvin > 0 || cameraColorSpace == 3)) {
 """,
     ),
     (
@@ -1446,7 +1461,7 @@ import android.hardware.camera2.params.TonemapCurve;
                                 && cameraCharacteristics != null
                                 && requestBuilder != null) {
 """,
-        """            if ((whiteBalanceKelvin > 0 || cameraColorSpace != 0)
+        """            if (whiteBalanceKelvin > 0
                                 && cameraCharacteristics != null
                                 && requestBuilder != null) {
 """,
