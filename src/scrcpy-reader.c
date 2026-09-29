@@ -241,10 +241,8 @@ static enum video_colorspace obs_colorspace_from_av(const AVFrame *frame)
 		if (frame->color_trc == AVCOL_TRC_SMPTE2084)
 			return VIDEO_CS_2100_PQ;
 		/*
-		 * OBS media-io has no standalone BT.2020-SDR enum. Do not
-		 * mislabel BT.2020 SDR as PQ because that changes the displayed
-		 * transfer function. Keep the pixels untouched and fall back to
-		 * the SDR matrix representation.
+		 * OBS 32.2.x has no standalone BT.2020-SDR enum. The caller
+		 * therefore applies the BT.2020 matrix explicitly below.
 		 */
 		return VIDEO_CS_709;
 	default:
@@ -255,6 +253,100 @@ static enum video_colorspace obs_colorspace_from_av(const AVFrame *frame)
 static enum video_range_type obs_range_from_av(const AVFrame *frame)
 {
 	return frame->color_range == AVCOL_RANGE_JPEG ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
+}
+
+static bool obs_bt2020_sdr_matrix(enum video_format format, enum video_range_type range,
+					  float matrix[16], float min_range[3], float max_range[3])
+{
+	/*
+	 * Match libobs 32.2.x video-matrices.c, but use BT.2020-NCL
+	 * coefficients (Kb=0.0593, Kr=0.2627) for BT.2020 SDR.
+	 */
+	const float kb = 0.0593f;
+	const float kr = 0.2627f;
+	const float kg = 1.0f - kb - kr;
+	uint32_t bpc = 8;
+
+	switch (format) {
+	case VIDEO_FORMAT_I010:
+	case VIDEO_FORMAT_P010:
+	case VIDEO_FORMAT_I210:
+	case VIDEO_FORMAT_V210:
+	case VIDEO_FORMAT_R10L:
+		bpc = 10;
+		break;
+	case VIDEO_FORMAT_I412:
+	case VIDEO_FORMAT_YA2L:
+		bpc = 12;
+		break;
+	case VIDEO_FORMAT_P216:
+	case VIDEO_FORMAT_P416:
+		bpc = 16;
+		break;
+	default:
+		break;
+	}
+
+	const float bit_max = (float)((UINT32_C(1) << bpc) - 1U);
+	const float scale = (float)(UINT32_C(1) << (bpc - 8));
+	const bool full_range = range == VIDEO_RANGE_FULL;
+
+	const float y_min = full_range ? 0.0f : 16.0f * scale;
+	const float y_max = full_range ? bit_max : 235.0f * scale;
+	const float uv_min = full_range ? 0.0f : 16.0f * scale;
+	const float uv_max = full_range ? bit_max : 240.0f * scale;
+	const float black_y = full_range ? 0.0f : 16.0f * scale;
+	const float black_uv = full_range ? 0.5f * bit_max : 128.0f * scale;
+
+	const float yscale = bit_max / (y_max - y_min);
+	const float uscale = bit_max / ((uv_max - uv_min) / 2.0f);
+	const float vscale = uscale;
+
+	const float m00 = yscale;
+	const float m01 = 0.0f;
+	const float m02 = vscale * (1.0f - kr);
+	const float m10 = yscale;
+	const float m11 = uscale * (kb - 1.0f) * kb / kg;
+	const float m12 = vscale * (kr - 1.0f) * kr / kg;
+	const float m20 = yscale;
+	const float m21 = uscale * (1.0f - kb);
+	const float m22 = 0.0f;
+
+	const float y_off = -black_y / bit_max;
+	const float u_off = -black_uv / bit_max;
+	const float v_off = -black_uv / bit_max;
+
+	matrix[0] = m00;
+	matrix[1] = m01;
+	matrix[2] = m02;
+	matrix[3] = m00 * y_off + m01 * u_off + m02 * v_off;
+	matrix[4] = m10;
+	matrix[5] = m11;
+	matrix[6] = m12;
+	matrix[7] = m10 * y_off + m11 * u_off + m12 * v_off;
+	matrix[8] = m20;
+	matrix[9] = m21;
+	matrix[10] = m22;
+	matrix[11] = m20 * y_off + m21 * u_off + m22 * v_off;
+	matrix[12] = 0.0f;
+	matrix[13] = 0.0f;
+	matrix[14] = 0.0f;
+	matrix[15] = 1.0f;
+
+	if (min_range) {
+		const float minv = full_range ? 0.0f : 16.0f / 255.0f;
+		min_range[0] = minv;
+		min_range[1] = minv;
+		min_range[2] = minv;
+	}
+	if (max_range) {
+		const float maxv = full_range ? 1.0f : 235.0f / 255.0f;
+		max_range[0] = maxv;
+		max_range[1] = maxv;
+		max_range[2] = maxv;
+	}
+
+	return true;
 }
 
 static uint8_t obs_trc_from_av(const AVFrame *frame)
@@ -468,8 +560,26 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 
 	enum video_colorspace cs = obs_colorspace_from_av(out);
 	enum video_range_type range = obs_range_from_av(out);
-	video_format_get_parameters_for_format(cs, range, fmt, obs_frame.color_matrix, obs_frame.color_range_min,
-					       obs_frame.color_range_max);
+	bool matrix_ok;
+	const bool bt2020_sdr = ((enum AVColorSpace)out->colorspace == AVCOL_SPC_BT2020_NCL
+				 || (enum AVColorSpace)out->colorspace == AVCOL_SPC_BT2020_CL)
+				&& out->color_trc != AVCOL_TRC_ARIB_STD_B67
+				&& out->color_trc != AVCOL_TRC_SMPTE2084;
+
+	if (bt2020_sdr) {
+		matrix_ok = obs_bt2020_sdr_matrix(fmt, range, obs_frame.color_matrix,
+						   obs_frame.color_range_min, obs_frame.color_range_max);
+		obs_log(LOG_DEBUG, "scrcpy-reader: using explicit BT.2020-SDR YUV matrix");
+	} else {
+		matrix_ok = video_format_get_parameters_for_format(cs, range, fmt, obs_frame.color_matrix,
+								   obs_frame.color_range_min, obs_frame.color_range_max);
+	}
+
+	if (!matrix_ok) {
+		obs_log(LOG_WARNING, "scrcpy-reader: could not build color matrix for colorspace=%d format=%d range=%d",
+			out->colorspace, fmt, range);
+		return;
+	}
 	obs_frame.full_range = range == VIDEO_RANGE_FULL;
 	obs_frame.trc = obs_trc_from_av(out);
 
