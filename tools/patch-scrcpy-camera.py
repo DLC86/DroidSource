@@ -1607,6 +1607,8 @@ helpers = r'''    private ColorSpaceTransform getTargetColorTransform() {
         requestBuilder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE);
         requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, null);
         requestBuilder.set(CaptureRequest.TONEMAP_CURVE, tonemap);
+        }
+
     }
 
 '''
@@ -1633,7 +1635,5 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/video/CameraControlS
 """,
     ),
 ])
-
-print("scrcpy camera patch applied")
 
 print("scrcpy camera patch applied")
