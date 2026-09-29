@@ -1233,7 +1233,7 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/video/SurfaceEncoder
 """,
         """        Codec codec = streamer.getCodec();
         MediaCodec mediaCodec = createMediaCodec(codec, encoderName);
-        boolean camera10Bit = options.getVideoSource() == VideoSource.CAMERA && options.getCamera10Bit();
+        boolean camera10Bit = tenBit;
         if (camera10Bit && !MediaFormat.MIMETYPE_VIDEO_HEVC.equals(codec.getMimeType())) {
             throw new ConfigurationException("Camera 10-bit requires HEVC");
         }
@@ -1261,6 +1261,28 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/video/SurfaceEncoder
             format.setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_HLG);
         }
         if (Build.VERSION.SDK_INT >= AndroidVersions.API_24_ANDROID_7_0) {
+""",
+    ),
+])
+
+
+patch_generated("server/src/main/java/com/genymobile/scrcpy/video/SurfaceEncoder.java", [
+    (
+        """    private final boolean downsizeOnError;
+    private final int minSizeAlignment;
+""",
+        """    private final boolean downsizeOnError;
+    private final int minSizeAlignment;
+    private final boolean tenBit;
+""",
+    ),
+    (
+        """        this.downsizeOnError = options.getDownsizeOnError();
+        this.minSizeAlignment = options.getMinSizeAlignment();
+""",
+        """        this.downsizeOnError = options.getDownsizeOnError();
+        this.minSizeAlignment = options.getMinSizeAlignment();
+        this.tenBit = options.getVideoSource() == VideoSource.CAMERA && options.getCamera10Bit();
 """,
     ),
 ])
