@@ -1252,6 +1252,10 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/Options.java", [
                                 }
                                 options.cameraControlPort = port;
                                 codecOptions.remove(j);
+                            } else if (CAMERA_WB_LOCK_OPTION.equals(optionKey)
+                                    && valueObj instanceof Integer) {
+                                options.cameraWbLock = (Integer) valueObj != 0;
+                                codecOptions.remove(j);
                             } else {
                                 ++j;
                             }
