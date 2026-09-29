@@ -1594,8 +1594,8 @@ helpers = r'''    private static final float[] SRGB_TO_REC2020 = {
     private static boolean isAutoColorResultReady(TotalCaptureResult result) {
         Integer awbState = result.get(TotalCaptureResult.CONTROL_AWB_STATE);
         return awbState == null
-                || awbState == CaptureResult.CONTROL_AWB_STATE_CONVERGED
-                || awbState == CaptureResult.CONTROL_AWB_STATE_LOCKED;
+                || awbState == TotalCaptureResult.CONTROL_AWB_STATE_CONVERGED
+                || awbState == TotalCaptureResult.CONTROL_AWB_STATE_LOCKED;
     }
 
     private boolean hasToneMapMode(int mode) {
