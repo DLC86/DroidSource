@@ -1377,9 +1377,11 @@ import android.hardware.camera2.params.TonemapCurve;
             boolean tenBitSupported = contains(
                     capabilities, CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_DYNAMIC_RANGE_TEN_BIT);
             boolean hlg10Supported = profiles != null
-                    && profiles.getSupportedProfiles().contains(DynamicRangeProfiles.HLG10);
+                    && profiles.getSupportedColorSpacesForDynamicRange(
+                            android.graphics.ImageFormat.PRIVATE, DynamicRangeProfiles.HLG10)
+                            .contains(android.graphics.ColorSpace.Named.BT2020_HLG);
             if (!tenBitSupported || !hlg10Supported) {
-                throw new IOException("Camera does not support HLG10 10-bit output");
+                throw new IOException("Camera does not support HLG10 10-bit BT.2020 output");
             }
             outputConfig.setDynamicRangeProfile(DynamicRangeProfiles.HLG10);
         }
@@ -1505,9 +1507,18 @@ import android.hardware.camera2.params.TonemapCurve;
                             break;
                     }
                 }
-                if (requestedColorSpace != null && profiles != null
-                        && profiles.getSupportedColorSpaces(android.graphics.ImageFormat.UNKNOWN)
-                                .contains(requestedColorSpace)) {
+                boolean colorSpaceSupported = false;
+                if (profiles != null && requestedColorSpace != null) {
+                    if (cameraTenBit) {
+                        colorSpaceSupported = profiles.getSupportedColorSpacesForDynamicRange(
+                                android.graphics.ImageFormat.PRIVATE, DynamicRangeProfiles.HLG10)
+                                .contains(requestedColorSpace);
+                    } else {
+                        colorSpaceSupported = profiles.getSupportedColorSpaces(
+                                android.graphics.ImageFormat.PRIVATE).contains(requestedColorSpace);
+                    }
+                }
+                if (requestedColorSpace != null && colorSpaceSupported) {
                     sessionConfig.setColorSpace(requestedColorSpace);
                 } else if (cameraTenBit) {
                     throw new IOException("Camera does not support BT.2020 HLG color space");
