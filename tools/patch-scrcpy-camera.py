@@ -1212,11 +1212,15 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/Options.java", [
         '    private static final String CAMERA_WB_LOCK_OPTION = "__scrcpy_obs_camera_wb_lock";\n'
         '    private static final String CAMERA_COLOR_SPACE_OPTION = "__scrcpy_obs_camera_color_space";\n'
         '    private static final String CAMERA_GAMMA_OPTION = "__scrcpy_obs_camera_gamma";\n'
-        '    private static final String CAMERA_10BIT_OPTION = "__scrcpy_obs_camera_10bit";\n',
+        '    private static final String CAMERA_10BIT_OPTION = "__scrcpy_obs_camera_10bit";\n'
+        '    private static final String CAMERA_ISO_OPTION = "__scrcpy_obs_camera_iso";\n'
+        '    private static final String CAMERA_SHUTTER_OPTION = "__scrcpy_obs_camera_shutter_us";\n'
+        '    private static final String CAMERA_FOCUS_OPTION = "__scrcpy_obs_camera_focus_distance";\n'
+        '    private static final String CAMERA_WB_KELVIN_OPTION = "__scrcpy_obs_camera_wb_kelvin";\n',
     ),
     (
         "    private int cameraControlPort;\n    private boolean showTouches;\n",
-        "    private int cameraControlPort;\n    private boolean cameraWbLock;\n    private int cameraColorSpace;\n    private int cameraGamma;\n    private boolean camera10Bit;\n    private boolean showTouches;\n",
+        "    private int cameraControlPort;\n    private boolean cameraWbLock;\n    private int cameraColorSpace;\n    private int cameraGamma;\n    private boolean camera10Bit;\n    private int cameraInitialIso;\n    private int cameraInitialShutterUs;\n    private float cameraInitialFocusDistance;\n    private int cameraInitialWbKelvin;\n    private boolean showTouches;\n",
     ),
     (
         """    public int getCameraControlPort() {
