@@ -384,7 +384,11 @@ import android.hardware.camera2.params.StreamConfigurationMap;
 """,
         """        this.initialTorch = options.getCameraTorch();
         this.cameraControlPort = options.getCameraControlPort();
-        this.cameraWbLock = options.getCameraWbLock();
+        this.cameraWbLock = options.getCameraWbLock() && options.getCameraInitialWbKelvin() <= 0;
+        this.manualIso = Math.max(0, options.getCameraInitialIso());
+        this.manualShutterUs = Math.max(0, options.getCameraInitialShutterUs());
+        this.manualFocusDistance = Math.max(0, options.getCameraInitialFocusDistance());
+        this.whiteBalanceKelvin = Math.max(0, options.getCameraInitialWbKelvin());
         this.zoom = options.getCameraZoom();
         this.torchEnabled = initialTorch;
 """,
@@ -1240,6 +1244,22 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/Options.java", [
         return camera10Bit;
     }
 
+    public int getCameraInitialIso() {
+        return cameraInitialIso;
+    }
+
+    public int getCameraInitialShutterUs() {
+        return cameraInitialShutterUs;
+    }
+
+    public float getCameraInitialFocusDistance() {
+        return cameraInitialFocusDistance;
+    }
+
+    public int getCameraInitialWbKelvin() {
+        return cameraInitialWbKelvin;
+    }
+
     public boolean getShowTouches() {
 """,
     ),
@@ -1291,6 +1311,38 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/Options.java", [
                             } else if (CAMERA_10BIT_OPTION.equals(optionKey)
                                     && valueObj instanceof Integer) {
                                 options.camera10Bit = (Integer) valueObj != 0;
+                                codecOptions.remove(j);
+                            } else if (CAMERA_ISO_OPTION.equals(optionKey)
+                                    && valueObj instanceof Integer) {
+                                int iso = (Integer) valueObj;
+                                if (iso < 0) {
+                                    throw new IllegalArgumentException("Invalid initial camera ISO: " + iso);
+                                }
+                                options.cameraInitialIso = iso;
+                                codecOptions.remove(j);
+                            } else if (CAMERA_SHUTTER_OPTION.equals(optionKey)
+                                    && valueObj instanceof Integer) {
+                                int shutterUs = (Integer) valueObj;
+                                if (shutterUs < 0) {
+                                    throw new IllegalArgumentException("Invalid initial camera shutter: " + shutterUs);
+                                }
+                                options.cameraInitialShutterUs = shutterUs;
+                                codecOptions.remove(j);
+                            } else if (CAMERA_FOCUS_OPTION.equals(optionKey)
+                                    && valueObj instanceof Float) {
+                                float focusDistance = (Float) valueObj;
+                                if (focusDistance < 0) {
+                                    throw new IllegalArgumentException("Invalid initial camera focus distance: " + focusDistance);
+                                }
+                                options.cameraInitialFocusDistance = focusDistance;
+                                codecOptions.remove(j);
+                            } else if (CAMERA_WB_KELVIN_OPTION.equals(optionKey)
+                                    && valueObj instanceof Integer) {
+                                int wbKelvin = (Integer) valueObj;
+                                if (wbKelvin < 0) {
+                                    throw new IllegalArgumentException("Invalid initial camera white balance: " + wbKelvin);
+                                }
+                                options.cameraInitialWbKelvin = wbKelvin;
                                 codecOptions.remove(j);
                             } else {
                                 ++j;
