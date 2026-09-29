@@ -1242,30 +1242,29 @@ static bool refresh_cameras_clicked(obs_properties_t *props, obs_property_t *p, 
 
 static bool camera_wb_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
 {
+	UNUSED_PARAMETER(props);
 	UNUSED_PARAMETER(p);
-	int wb_kelvin = (int)obs_data_get_int(settings, "camera_wb_kelvin");
-	obs_property_t *camera_wb_lock = obs_properties_get(props, "camera_wb_lock");
 
-	/* Moving away from Auto must release the AWB lock. The Kelvin slider
-	 * remains enabled so it can always be used to leave the locked state. */
-	obs_data_set_bool(settings, "camera_wb_lock", false);
-	if (camera_wb_lock)
-		obs_property_set_enabled(camera_wb_lock, wb_kelvin <= 0);
+	/* Changing Kelvin away from Auto must release the native AWB lock, but
+	 * this callback must not request a properties-panel refresh while the
+	 * slider is being dragged. */
+	if (obs_data_get_int(settings, "camera_wb_kelvin") > 0)
+		obs_data_set_bool(settings, "camera_wb_lock", false);
 
-	return true;
+	return false;
 }
 
 static bool camera_wb_lock_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
 {
+	UNUSED_PARAMETER(props);
 	UNUSED_PARAMETER(p);
-	UNUSED_PARAMETER(settings);
 
-	/* The lock is an Auto-WB option only; never disable the Kelvin slider. */
-	obs_property_t *camera_wb = obs_properties_get(props, "camera_wb_kelvin");
-	if (camera_wb)
-		obs_property_set_enabled(camera_wb, true);
+	/* Lock is only meaningful in Auto (0 K). Ignore an attempt to enable it
+	 * while a manual Kelvin value is selected, without rebuilding the panel. */
+	if (obs_data_get_int(settings, "camera_wb_kelvin") > 0)
+		obs_data_set_bool(settings, "camera_wb_lock", false);
 
-	return true;
+	return false;
 }
 
 static bool camera_10bit_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
