@@ -669,8 +669,8 @@ static bool parse_camera_id_line(const char *line, char *id, size_t id_size, cha
 	return true;
 }
 
-static void parse_camera_sensor_ranges(const char *line, int *iso_min, int *iso_max,
-					 long long *exposure_min_ns, long long *exposure_max_ns)
+static void parse_camera_sensor_ranges(const char *line, int *iso_min, int *iso_max, long long *exposure_min_ns,
+				       long long *exposure_max_ns)
 {
 	if (!line)
 		return;
@@ -1075,8 +1075,7 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 	if (iso_prop) {
 		int sensor_iso_max = selected_iso_max > 0 ? selected_iso_max : 12800;
 		int boost_max = selected_post_raw_boost_max > 0 ? selected_post_raw_boost_max : 100;
-		long long effective_iso_max_ll =
-			(long long)sensor_iso_max * (long long)boost_max / 100LL;
+		long long effective_iso_max_ll = (long long)sensor_iso_max * (long long)boost_max / 100LL;
 		int iso_max = effective_iso_max_ll > 1000000LL ? 1000000 : (int)effective_iso_max_ll;
 		if (iso_max < sensor_iso_max)
 			iso_max = sensor_iso_max;
@@ -1135,19 +1134,17 @@ static void populate_shutter_list(obs_property_t *prop, long long min_exposure_n
 		const char *label;
 		int microseconds;
 	} options[] = {
-		{"8 s", 8000000}, {"4 s", 4000000}, {"2 s", 2000000}, {"1 s", 1000000},
-		{"1/2 s", 500000}, {"1/3 s", 333333}, {"1/4 s", 250000}, {"1/5 s", 200000},
-		{"1/6 s", 166667}, {"1/8 s", 125000}, {"1/10 s", 100000}, {"1/12 s", 83333},
-		{"1/15 s", 66667}, {"1/20 s", 50000}, {"1/24 s", 41667}, {"1/25 s", 40000},
-		{"1/30 s", 33333}, {"1/40 s", 25000}, {"1/48 s", 20833}, {"1/50 s", 20000},
-		{"1/60 s", 16667}, {"1/80 s", 12500}, {"1/96 s", 10417}, {"1/100 s", 10000},
-		{"1/120 s", 8333}, {"1/125 s", 8000}, {"1/160 s", 6250}, {"1/180 s", 5556},
-		{"1/200 s", 5000}, {"1/240 s", 4167}, {"1/250 s", 4000}, {"1/320 s", 3125},
-		{"1/400 s", 2500}, {"1/500 s", 2000}, {"1/640 s", 1563}, {"1/750 s", 1333},
-		{"1/800 s", 1250}, {"1/1000 s", 1000}, {"1/1250 s", 800}, {"1/1500 s", 667},
-		{"1/2000 s", 500}, {"1/2500 s", 400}, {"1/3000 s", 333}, {"1/4000 s", 250},
-		{"1/5000 s", 200}, {"1/6000 s", 167}, {"1/8000 s", 125}, {"1/10000 s", 100},
-		{"1/12000 s", 83}, {"1/16000 s", 63}, {"1/20000 s", 50}, {"1/32000 s", 31},
+		{"8 s", 8000000},   {"4 s", 4000000},  {"2 s", 2000000},   {"1 s", 1000000},   {"1/2 s", 500000},
+		{"1/3 s", 333333},  {"1/4 s", 250000}, {"1/5 s", 200000},  {"1/6 s", 166667},  {"1/8 s", 125000},
+		{"1/10 s", 100000}, {"1/12 s", 83333}, {"1/15 s", 66667},  {"1/20 s", 50000},  {"1/24 s", 41667},
+		{"1/25 s", 40000},  {"1/30 s", 33333}, {"1/40 s", 25000}, {"1/48 s", 20833}, {"1/50 s", 20000},
+		{"1/60 s", 16667},  {"1/80 s", 12500}, {"1/96 s", 10417},  {"1/100 s", 10000}, {"1/120 s", 8333},
+		{"1/125 s", 8000},  {"1/160 s", 6250}, {"1/180 s", 5556}, {"1/200 s", 5000}, {"1/240 s", 4167},
+		{"1/250 s", 4000}, {"1/320 s", 3125}, {"1/400 s", 2500}, {"1/500 s", 2000}, {"1/640 s", 1563},
+		{"1/750 s", 1333}, {"1/800 s", 1250}, {"1/1000 s", 1000}, {"1/1250 s", 800},  {"1/1500 s", 667},
+		{"1/2000 s", 500},  {"1/2500 s", 400}, {"1/3000 s", 333},  {"1/4000 s", 250}, {"1/5000 s", 200},
+		{"1/6000 s", 167},  {"1/8000 s", 125}, {"1/10000 s", 100}, {"1/12000 s", 83},  {"1/16000 s", 63},
+		{"1/20000 s", 50}, {"1/32000 s", 31},
 	};
 
 	obs_property_list_clear(prop);
@@ -1221,9 +1218,9 @@ static bool camera_10bit_supported(const struct scrcpy_src *ctx)
 
 	pthread_mutex_lock(&g_camera_capabilities_mutex);
 	bool supported = g_camera_capabilities_output && g_camera_capabilities_serial &&
-				strcmp(g_camera_capabilities_serial, ctx->serial) == 0 &&
-				strstr(g_camera_capabilities_output, "dynamic-range-10bit=true") != NULL &&
-				strstr(g_camera_capabilities_output, "HLG10") != NULL;
+			 strcmp(g_camera_capabilities_serial, ctx->serial) == 0 &&
+			 strstr(g_camera_capabilities_output, "dynamic-range-10bit=true") != NULL &&
+			 strstr(g_camera_capabilities_output, "HLG10") != NULL;
 	pthread_mutex_unlock(&g_camera_capabilities_mutex);
 	return supported;
 }
@@ -1297,12 +1294,11 @@ static bool video_source_modified(obs_properties_t *props, obs_property_t *p, ob
 	UNUSED_PARAMETER(p);
 	const char *source = obs_data_get_string(settings, "video_source");
 	bool is_camera = source && strcmp(source, "camera") == 0;
-	const char *keys[] = {"camera_id",          "camera_size",        "camera_fps",       "camera_zoom",
-			      "camera_torch",       "camera_iso",         "camera_shutter_us", "camera_focus_distance",
-			      "camera_wb_kelvin",   "camera_wb_lock",     "camera_color_space", "camera_gamma",
-			      "camera_10bit",
-			      "portrait_mode",      "flip_vertical",      "hardware_decoding", "refresh_cameras",
-			      "video_buffer_ms"};
+	const char *keys[] = {"camera_id",        "camera_size",    "camera_fps",         "camera_zoom",
+			      "camera_torch",     "camera_iso",     "camera_shutter_us",  "camera_focus_distance",
+			      "camera_wb_kelvin", "camera_wb_lock", "camera_color_space", "camera_gamma",
+			      "camera_10bit",     "portrait_mode",  "flip_vertical",      "hardware_decoding",
+			      "refresh_cameras",  "video_buffer_ms"};
 
 	for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
 		obs_property_t *property = obs_properties_get(props, keys[i]);
@@ -1372,18 +1368,19 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_set_modified_callback(camera_wb, camera_wb_modified);
 
 	obs_property_t *camera_wb_lock =
-			obs_properties_add_bool(props, "camera_wb_lock", obs_module_text("CameraWhiteBalanceLock"));
+		obs_properties_add_bool(props, "camera_wb_lock", obs_module_text("CameraWhiteBalanceLock"));
 	obs_property_set_modified_callback(camera_wb_lock, camera_wb_lock_modified);
 
 	obs_property_t *camera_color_space = obs_properties_add_list(props, "camera_color_space",
-								     obs_module_text("CameraColorSpace"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+								     obs_module_text("CameraColorSpace"),
+								     OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(camera_color_space, "Camera default", CAMERA_COLOR_SPACE_AUTO);
 	obs_property_list_add_int(camera_color_space, "sRGB", CAMERA_COLOR_SPACE_SRGB);
 	obs_property_list_add_int(camera_color_space, "Rec.709", CAMERA_COLOR_SPACE_REC709);
 	obs_property_list_add_int(camera_color_space, "Rec.2020", CAMERA_COLOR_SPACE_REC2020);
 
 	obs_property_t *camera_gamma = obs_properties_add_list(props, "camera_gamma", obs_module_text("CameraGamma"),
-								 OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+							       OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(camera_gamma, "Camera default", CAMERA_GAMMA_AUTO);
 	obs_property_list_add_int(camera_gamma, "Gamma 2.2", CAMERA_GAMMA_22);
 	obs_property_list_add_int(camera_gamma, "Gamma 2.4", CAMERA_GAMMA_24);
@@ -1391,8 +1388,7 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_list_add_int(camera_gamma, "Rec.709-A", CAMERA_GAMMA_REC709_A);
 	obs_property_list_add_int(camera_gamma, "HLG", CAMERA_GAMMA_HLG);
 
-	obs_property_t *camera_10bit =
-		obs_properties_add_bool(props, "camera_10bit", obs_module_text("Camera10Bit"));
+	obs_property_t *camera_10bit = obs_properties_add_bool(props, "camera_10bit", obs_module_text("Camera10Bit"));
 	obs_property_set_modified_callback(camera_10bit, camera_10bit_modified);
 
 	obs_property_t *portrait_mode =
