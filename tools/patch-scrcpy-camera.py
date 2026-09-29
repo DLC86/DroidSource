@@ -453,7 +453,7 @@ import android.hardware.camera2.params.StreamConfigurationMap;
                         if (gains != null) {
                             lastAutoColorCorrectionGains = gains;
                         }
-                        if ((whiteBalanceKelvin > 0 || cameraColorSpace != 0)
+                        if (whiteBalanceKelvin > 0
                                 && cameraCharacteristics != null
                                 && requestBuilder != null) {
                             try {
