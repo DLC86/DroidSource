@@ -897,8 +897,8 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
                 requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TEMPERATURE, null);
                 requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TINT, null);
             }
-            Ln.i("Camera white balance: manual gains "
-                    + whiteBalanceKelvin + " K relative to AUTO -> " + gains);
+            Ln.i("Camera white balance: manual output transform "
+                    + whiteBalanceKelvin + " K relative to AUTO");
             return;
         }
 
@@ -1523,18 +1523,20 @@ import android.hardware.camera2.params.TonemapCurve;
     ),
     (
         """            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM,
-                    lastAutoColorCorrectionTransform);
-
-            RggbChannelVector gains = makeManualGainsFromAuto(whiteBalanceKelvin);
-            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS, gains);
+                    makeManualWhiteBalanceTransform(whiteBalanceKelvin));
+            // Keep the camera's own AUTO gains. Applying the Kelvin offset in the
+            // output color transform avoids changing the sensor-domain channel
+            // gains, which can otherwise alter saturation and clipping.
+            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS,
+                    lastAutoColorCorrectionGains);
 """,
         """            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM,
-                    getTargetColorTransform());
-
-            RggbChannelVector gains = whiteBalanceKelvin > 0
-                    ? makeManualGainsFromAuto(whiteBalanceKelvin)
-                    : lastAutoColorCorrectionGains;
-            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS, gains);
+                    makeManualWhiteBalanceTransform(whiteBalanceKelvin));
+            // Keep the camera's own AUTO gains. Applying the Kelvin offset in the
+            // output color transform avoids changing the sensor-domain channel
+            // gains, which can otherwise alter saturation and clipping.
+            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS,
+                    lastAutoColorCorrectionGains);
 """,
     ),
     (
