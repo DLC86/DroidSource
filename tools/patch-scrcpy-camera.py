@@ -1168,11 +1168,11 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/Options.java", [
     (
         '    private static final String CAMERA_CONTROL_OPTION = "__scrcpy_obs_camera_control_port";\n',
         '    private static final String CAMERA_CONTROL_OPTION = "__scrcpy_obs_camera_control_port";\n'
-        '    private static final String CAMERA_10BIT_OPTION = "__scrcpy_obs_camera_10bit";\n',
+        '    private static final String CAMERA_COLOR_SPACE_OPTION = "__scrcpy_obs_camera_color_space";\n'        '    private static final String CAMERA_10BIT_OPTION = "__scrcpy_obs_camera_10bit";\n',
     ),
     (
         "    private int cameraControlPort;\n    private boolean showTouches;\n",
-        "    private int cameraControlPort;\n    private boolean camera10Bit;\n    private boolean showTouches;\n",
+        "    private int cameraControlPort;\n    private int cameraColorSpace;\n    private boolean camera10Bit;\n    private boolean showTouches;\n",
     ),
     (
         """    public int getCameraControlPort() {
@@ -1183,6 +1183,10 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/Options.java", [
 """,
         """    public int getCameraControlPort() {
         return cameraControlPort;
+    }
+
+    public int getCameraColorSpace() {
+        return cameraColorSpace;
     }
 
     public boolean getCamera10Bit() {
@@ -1212,6 +1216,14 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/Options.java", [
                                     throw new IllegalArgumentException("Invalid camera control port: " + port);
                                 }
                                 options.cameraControlPort = port;
+                                codecOptions.remove(j);
+                            } else if (CAMERA_COLOR_SPACE_OPTION.equals(optionKey)
+                                    && valueObj instanceof Integer) {
+                                int colorSpace = (Integer) valueObj;
+                                if (colorSpace < 0 || colorSpace > 3) {
+                                    throw new IllegalArgumentException("Invalid camera color space: " + colorSpace);
+                                }
+                                options.cameraColorSpace = colorSpace;
                                 codecOptions.remove(j);
                             } else if (CAMERA_10BIT_OPTION.equals(optionKey)
                                     && valueObj instanceof Integer) {
@@ -1318,7 +1330,7 @@ import android.hardware.camera2.params.TonemapCurve;
         this.zoom = options.getCameraZoom();
 """,
         """        this.cameraControlPort = options.getCameraControlPort();
-        this.cameraColorSpace = 0;
+        this.cameraColorSpace = options.getCameraColorSpace();
         this.cameraGamma = 0;
         this.cameraTenBit = options.getCamera10Bit();
         this.zoom = options.getCameraZoom();
