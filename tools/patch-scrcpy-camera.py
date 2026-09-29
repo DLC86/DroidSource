@@ -1377,9 +1377,7 @@ import android.hardware.camera2.params.TonemapCurve;
             boolean tenBitSupported = contains(
                     capabilities, CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_DYNAMIC_RANGE_TEN_BIT);
             boolean hlg10Supported = profiles != null
-                    && profiles.getSupportedColorSpacesForDynamicRange(
-                            android.graphics.ImageFormat.PRIVATE, DynamicRangeProfiles.HLG10)
-                            .contains(android.graphics.ColorSpace.Named.BT2020_HLG);
+                    && profiles.getSupportedProfiles().contains(DynamicRangeProfiles.HLG10);
             if (!tenBitSupported || !hlg10Supported) {
                 throw new IOException("Camera does not support HLG10 10-bit BT.2020 output");
             }
@@ -1507,17 +1505,10 @@ import android.hardware.camera2.params.TonemapCurve;
                             break;
                     }
                 }
-                boolean colorSpaceSupported = false;
-                if (profiles != null && requestedColorSpace != null) {
-                    if (cameraTenBit) {
-                        colorSpaceSupported = profiles.getSupportedColorSpacesForDynamicRange(
-                                android.graphics.ImageFormat.PRIVATE, DynamicRangeProfiles.HLG10)
-                                .contains(requestedColorSpace);
-                    } else {
-                        colorSpaceSupported = profiles.getSupportedColorSpaces(
+                boolean colorSpaceSupported = profiles != null
+                        && requestedColorSpace != null
+                        && profiles.getSupportedColorSpaces(
                                 android.graphics.ImageFormat.PRIVATE).contains(requestedColorSpace);
-                    }
-                }
                 if (requestedColorSpace != null && colorSpaceSupported) {
                     sessionConfig.setColorSpace(requestedColorSpace);
                 } else if (cameraTenBit) {
