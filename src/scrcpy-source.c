@@ -196,8 +196,9 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 		snprintf(
 			control_codec_arg, sizeof(control_codec_arg),
 			"--video-codec-options=__scrcpy_obs_camera_control_port:int=%u,__scrcpy_obs_camera_iso:int=%d,__scrcpy_obs_camera_shutter_us:int=%d,__scrcpy_obs_camera_focus_distance:float=%.6f,__scrcpy_obs_camera_wb_kelvin:int=%d,__scrcpy_obs_camera_wb_lock:int=%d,__scrcpy_obs_camera_color_space:int=%d,__scrcpy_obs_camera_gamma:int=%d%s",
-			(unsigned)control_port, ctx->camera_iso, ctx->camera_shutter_us, ctx->camera_focus_distance,
-			ctx->camera_wb_kelvin, ctx->camera_wb_lock ? 1 : 0, startup_color_space, ctx->camera_gamma,
+			(unsigned)control_port, ctx->camera_iso, ctx->camera_shutter_us,
+			ctx->camera_focus_distance, ctx->camera_wb_kelvin, ctx->camera_wb_lock ? 1 : 0,
+			startup_color_space, ctx->camera_gamma,
 			ctx->camera_10bit ? ",__scrcpy_obs_camera_10bit:int=1" : "");
 	}
 
