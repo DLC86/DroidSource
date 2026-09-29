@@ -1205,6 +1205,20 @@ static bool camera_fps_modified(obs_properties_t *props, obs_property_t *p, obs_
 	return true;
 }
 
+static bool camera_10bit_supported(const struct scrcpy_src *ctx)
+{
+	if (!ctx || !ctx->serial || !*ctx->serial)
+		return false;
+
+	pthread_mutex_lock(&g_camera_capabilities_mutex);
+	bool supported = g_camera_capabilities_output && g_camera_capabilities_serial &&
+				 strcmp(g_camera_capabilities_serial, ctx->serial) == 0 &&
+				 strstr(g_camera_capabilities_output, "dynamic-range-10bit=true") != NULL &&
+				 strstr(g_camera_capabilities_output, "HLG10") != NULL;
+	pthread_mutex_unlock(&g_camera_capabilities_mutex);
+	return supported;
+}
+
 static bool refresh_cameras_clicked(obs_properties_t *props, obs_property_t *p, void *data)
 {
 	UNUSED_PARAMETER(p);
@@ -1214,6 +1228,9 @@ static bool refresh_cameras_clicked(obs_properties_t *props, obs_property_t *p, 
 	obs_data_t *settings = obs_source_get_settings(ctx->source);
 	bool ok = refresh_camera_capabilities(props, settings, true);
 	obs_data_release(settings);
+	obs_property_t *camera_10bit = obs_properties_get(props, "camera_10bit");
+	if (camera_10bit)
+		obs_property_set_enabled(camera_10bit, camera_10bit_supported(ctx));
 	return ok;
 }
 
@@ -1386,6 +1403,8 @@ static obs_properties_t *src_get_properties(void *data)
 		populate_camera_fallbacks(camera_id, camera_size, camera_fps);
 	}
 
+	obs_property_set_enabled(camera_10bit, camera_10bit_supported(ctx));
+
 	obs_property_t *focus_prop = obs_properties_get(props, "camera_focus_distance");
 	if (focus_prop) {
 		obs_property_set_enabled(focus_prop, true);
@@ -1401,6 +1420,11 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_list_add_string(codec_list, "H.264", "h264");
 	obs_property_list_add_string(codec_list, "H.265", "h265");
 	obs_property_list_add_string(codec_list, "AV1", "av1");
+
+	obs_data_t *codec_settings = obs_source_get_settings(ctx->source);
+	bool codec_locked = obs_data_get_bool(codec_settings, "camera_10bit");
+	obs_data_release(codec_settings);
+	obs_property_set_enabled(codec_list, !codec_locked);
 
 	obs_property_t *buffering = obs_properties_add_list(props, "video_buffer_ms", obs_module_text("Buffering"),
 							    OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
