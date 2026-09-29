@@ -1350,7 +1350,12 @@ import android.hardware.camera2.params.TonemapCurve;
             if (highSpeed) {
                 throw new IOException("Camera 10-bit is not supported for high-speed capture");
             }
-            CameraCharacteristics characteristics = ServiceManager.getCameraManager().getCameraCharacteristics(cameraId);
+            CameraCharacteristics characteristics;
+            try {
+                characteristics = ServiceManager.getCameraManager().getCameraCharacteristics(cameraId);
+            } catch (CameraAccessException e) {
+                throw new IOException("Could not get camera characteristics for 10-bit output", e);
+            }
             int[] capabilities = characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
             DynamicRangeProfiles profiles =
                     characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES);
@@ -1456,8 +1461,13 @@ import android.hardware.camera2.params.TonemapCurve;
 
         if (cameraTenBit || (cameraColorSpace != 0 && Build.VERSION.SDK_INT >= AndroidVersions.API_34_ANDROID_14)) {
             if (Build.VERSION.SDK_INT >= AndroidVersions.API_34_ANDROID_14) {
-                CameraCharacteristics characteristics =
-                        ServiceManager.getCameraManager().getCameraCharacteristics(cameraId);
+                CameraCharacteristics characteristics;
+                try {
+                    characteristics =
+                            ServiceManager.getCameraManager().getCameraCharacteristics(cameraId);
+                } catch (CameraAccessException e) {
+                    throw new IOException("Could not get camera characteristics for color-space selection", e);
+                }
                 ColorSpaceProfiles profiles =
                         characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_COLOR_SPACE_PROFILES);
                 android.graphics.ColorSpace.Named requestedColorSpace = null;
