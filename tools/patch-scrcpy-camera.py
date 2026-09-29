@@ -1376,29 +1376,9 @@ import android.hardware.camera2.params.TonemapCurve;
 """,
     ),
     (
-        """        try {
-            applyWhiteBalance();
-        } catch (RuntimeException e) {
-            Ln.w("Could not apply camera white balance: " + e.getMessage());
+        """        Boolean flashAvailable =
 """,
         """        try {
-            applyWhiteBalance();
-        } catch (RuntimeException e) {
-            Ln.w("Could not apply camera white balance: " + e.getMessage());
-""",
-    ),
-    (
-        """            requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
-                    CaptureRequest.CONTROL_AWB_MODE_AUTO);
-        }
-
-        Boolean flashAvailable =
-""",
-        """            requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
-                    CaptureRequest.CONTROL_AWB_MODE_AUTO);
-        }
-
-        try {
             applyGamma();
         } catch (RuntimeException e) {
             Ln.w("Could not apply camera gamma: " + e.getMessage());
