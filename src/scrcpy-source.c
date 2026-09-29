@@ -1247,10 +1247,13 @@ static bool camera_10bit_modified(obs_properties_t *props, obs_property_t *p, ob
 	}
 	obs_property_t *color_space = obs_properties_get(props, "camera_color_space");
 	obs_property_t *gamma = obs_properties_get(props, "camera_gamma");
+	obs_property_t *codec = obs_properties_get(props, "codec");
 	if (color_space)
 		obs_property_set_enabled(color_space, !enabled);
 	if (gamma)
 		obs_property_set_enabled(gamma, !enabled);
+	if (codec)
+		obs_property_set_enabled(codec, !enabled);
 	return true;
 }
 
