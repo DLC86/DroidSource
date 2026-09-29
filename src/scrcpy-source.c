@@ -193,10 +193,11 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 		/* Keep startup Camera2 and encoder configuration independent from
 		 * runtime camera controls. */
 		int startup_color_space = ctx->camera_10bit ? CAMERA_COLOR_SPACE_REC2020 : ctx->camera_color_space;
-		snprintf(control_codec_arg, sizeof(control_codec_arg),
-			 "--video-codec-options=__scrcpy_obs_camera_control_port:int=%u,__scrcpy_obs_camera_wb_lock:int=%d,__scrcpy_obs_camera_color_space:int=%d,__scrcpy_obs_camera_gamma:int=%d%s",
-			 (unsigned)control_port, ctx->camera_wb_lock ? 1 : 0, startup_color_space, ctx->camera_gamma,
-			 ctx->camera_10bit ? ",__scrcpy_obs_camera_10bit:int=1" : "");
+		snprintf(
+			control_codec_arg, sizeof(control_codec_arg),
+			"--video-codec-options=__scrcpy_obs_camera_control_port:int=%u,__scrcpy_obs_camera_wb_lock:int=%d,__scrcpy_obs_camera_color_space:int=%d,__scrcpy_obs_camera_gamma:int=%d%s",
+			(unsigned)control_port, ctx->camera_wb_lock ? 1 : 0, startup_color_space, ctx->camera_gamma,
+			ctx->camera_10bit ? ",__scrcpy_obs_camera_10bit:int=1" : "");
 	}
 
 	char serial_arg[128] = {0};
@@ -262,8 +263,8 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 		if (ctx->camera_control &&
 		    !scrcpy_camera_control_apply(ctx->camera_control, ctx->camera_zoom, ctx->camera_torch,
 						 ctx->camera_iso, ctx->camera_shutter_us, ctx->camera_focus_distance,
-						 ctx->camera_wb_kelvin, ctx->camera_wb_lock, ctx->camera_color_space, ctx->camera_gamma,
-						 ctx->camera_10bit)) {
+						 ctx->camera_wb_kelvin, ctx->camera_wb_lock, ctx->camera_color_space,
+						 ctx->camera_gamma, ctx->camera_10bit)) {
 			obs_log(LOG_WARNING, "scrcpy-source: camera control connection not ready");
 		}
 	}
@@ -482,8 +483,8 @@ static void src_update(void *data, obs_data_t *settings)
 	if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0 && ctx->camera_control)
 		(void)scrcpy_camera_control_apply(ctx->camera_control, ctx->camera_zoom, ctx->camera_torch,
 						  ctx->camera_iso, ctx->camera_shutter_us, ctx->camera_focus_distance,
-						  ctx->camera_wb_kelvin, ctx->camera_wb_lock, ctx->camera_color_space, ctx->camera_gamma,
-						  ctx->camera_10bit);
+						  ctx->camera_wb_kelvin, ctx->camera_wb_lock, ctx->camera_color_space,
+						  ctx->camera_gamma, ctx->camera_10bit);
 
 	os_atomic_set_bool(&ctx->updating, false);
 	pthread_mutex_unlock(&ctx->state_mutex);
@@ -1269,7 +1270,6 @@ static bool camera_wb_lock_modified(obs_properties_t *props, obs_property_t *p, 
 
 	return true;
 }
-
 
 static bool camera_10bit_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
 {
