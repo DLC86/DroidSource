@@ -1443,7 +1443,7 @@ import android.hardware.camera2.params.TonemapCurve;
     ),
     (
         """    public void setCameraSettings(float zoomValue, boolean torch, int iso, int shutterUs,
-                                  float focusDistance, int wbKelvin) {
+                                  float focusDistance, int wbKelvin, boolean wbLock) {
 """,
         """    public void setCameraSettings(float zoomValue, boolean torch, int iso, int shutterUs,
                                   float focusDistance, int wbKelvin, boolean wbLock,
@@ -1453,6 +1453,7 @@ import android.hardware.camera2.params.TonemapCurve;
     (
         """            manualFocusDistance = Math.max(0, focusDistance);
             whiteBalanceKelvin = Math.max(0, wbKelvin);
+            cameraWbLock = wbLock && whiteBalanceKelvin <= 0;
 
             if (currentSession != null && requestBuilder != null) {
 """,
