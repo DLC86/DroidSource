@@ -543,7 +543,7 @@ marker = """    @TargetApi(AndroidVersions.API_30_ANDROID_11)
     private void zoom(boolean in) {
 """
 methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, int iso, int shutterUs,
-                                  float focusDistance, int wbKelvin) {
+                                  float focusDistance, int wbKelvin, boolean wbLock) {
         cameraHandler.post(() -> {
             assertCameraThread();
             zoom = zoomValue;
@@ -552,6 +552,7 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
             manualShutterUs = Math.max(0, shutterUs);
             manualFocusDistance = Math.max(0, focusDistance);
             whiteBalanceKelvin = Math.max(0, wbKelvin);
+            cameraWbLock = wbLock && whiteBalanceKelvin <= 0;
 
             if (currentSession != null && requestBuilder != null) {
                 try {
@@ -1379,6 +1380,7 @@ import android.hardware.camera2.params.TonemapCurve;
     ),
     (
         """    private final int cameraControlPort;
+    private boolean cameraWbLock;
     private float zoom;
 """,
         """    private final int cameraControlPort;
@@ -1391,6 +1393,7 @@ import android.hardware.camera2.params.TonemapCurve;
     ),
     (
         """        this.cameraControlPort = options.getCameraControlPort();
+        this.cameraWbLock = options.getCameraWbLock();
         this.zoom = options.getCameraZoom();
 """,
         """        this.cameraControlPort = options.getCameraControlPort();
