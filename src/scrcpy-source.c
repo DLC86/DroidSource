@@ -732,6 +732,35 @@ static bool parse_camera_id_line(const char *line, char *id, size_t id_size, cha
 	return true;
 }
 
+static bool color_space_list_contains(const char *list, const char *token)
+{
+	if (!list || !token)
+		return false;
+
+	const char *p = list;
+	while (*p) {
+		while (*p == ' ' || *p == '\t')
+			p++;
+
+		const char *end = strchr(p, ',');
+		if (!end)
+			end = p + strlen(p);
+
+		const char *trim_end = end;
+		while (trim_end > p && (trim_end[-1] == ' ' || trim_end[-1] == '\t'))
+			trim_end--;
+
+		size_t len = (size_t)(trim_end - p);
+		if (strlen(token) == len && strncmp(p, token, len) == 0)
+			return true;
+
+		if (!*end)
+			break;
+		p = end + 1;
+	}
+	return false;
+}
+
 static bool parse_camera_color_capabilities(const char *line, bool *srgb, bool *rec709, bool *rec2020,
 						bool *tone_map_gamma, bool *tone_map_rec709)
 {
@@ -764,11 +793,11 @@ static bool parse_camera_color_capabilities(const char *line, bool *srgb, bool *
 		list[len] = '\0';
 
 		if (srgb)
-			*srgb = strstr(list, "SRGB") != NULL;
+			*srgb = color_space_list_contains(list, "SRGB");
 		if (rec709)
-			*rec709 = strstr(list, "BT709") != NULL;
+			*rec709 = color_space_list_contains(list, "BT709");
 		if (rec2020)
-			*rec2020 = strstr(list, "BT2020") != NULL;
+			*rec2020 = color_space_list_contains(list, "BT2020");
 	}
 
 	if (tone_map_gamma)
@@ -1619,10 +1648,10 @@ static obs_properties_t *src_get_properties(void *data)
 			refresh_camera_capabilities(props, settings_now, false);
 			obs_data_release(settings_now);
 		} else {
-			populate_camera_fallbacks(camera_id, camera_size, camera_fps);
+			populate_camera_fallbacks(camera_id, camera_size, camera_fps, camera_color_profile);
 		}
 	} else {
-		populate_camera_fallbacks(camera_id, camera_size, camera_fps);
+		populate_camera_fallbacks(camera_id, camera_size, camera_fps, camera_color_profile);
 	}
 
 	obs_property_set_enabled(camera_10bit, camera_10bit_supported(ctx));
