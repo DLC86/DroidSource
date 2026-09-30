@@ -61,6 +61,22 @@
 #define CAMERA_COLOR_PROFILE_REC2020_HDR10 36
 #define CAMERA_COLOR_PROFILE_REC2020_HDR10_PLUS 37
 
+#define CAMERA_DYNAMIC_RANGE_STANDARD 0
+#define CAMERA_DYNAMIC_RANGE_HLG10 1
+#define CAMERA_DYNAMIC_RANGE_HDR10 2
+#define CAMERA_DYNAMIC_RANGE_HDR10_PLUS 3
+
+static int camera_gamma_to_dynamic_range(int gamma, bool ten_bit)
+{
+	if (!ten_bit)
+		return CAMERA_DYNAMIC_RANGE_STANDARD;
+	if (gamma == CAMERA_GAMMA_HDR10)
+		return CAMERA_DYNAMIC_RANGE_HDR10;
+	if (gamma == CAMERA_GAMMA_HDR10_PLUS)
+		return CAMERA_DYNAMIC_RANGE_HDR10_PLUS;
+	return CAMERA_DYNAMIC_RANGE_HLG10;
+}
+
 static bool camera_color_profile_to_components(int profile, int *color_space, int *gamma)
 {
 	if (!color_space || !gamma)
@@ -233,10 +249,10 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 		 * runtime camera controls. */
 		int startup_color_space = 0;
 		int startup_gamma = 0;
-		if (ctx->camera_10bit) {
-			startup_color_space = CAMERA_COLOR_SPACE_REC2020;
-			startup_gamma = CAMERA_GAMMA_HLG;
-		} else {
+		if (!camera_color_profile_to_components(ctx->camera_color_profile, &startup_color_space, &startup_gamma)) {
+			startup_color_space = ctx->camera_10bit ? CAMERA_COLOR_SPACE_REC2020 : 0;
+			startup_gamma = ctx->camera_10bit ? CAMERA_GAMMA_HLG : 0;
+		}
 			camera_color_profile_to_components(ctx->camera_color_profile, &startup_color_space,
 							   &startup_gamma);
 		}
@@ -321,7 +337,8 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 			if (!scrcpy_camera_control_apply(
 				    ctx->camera_control, ctx->camera_zoom, ctx->camera_torch, ctx->camera_iso,
 				    ctx->camera_shutter_us, ctx->camera_focus_distance, ctx->camera_wb_kelvin,
-				    ctx->camera_wb_lock, startup_color_space, startup_gamma, ctx->camera_10bit)) {
+				    ctx->camera_wb_lock, startup_color_space, startup_gamma, ctx->camera_10bit,
+				    camera_gamma_to_dynamic_range(startup_gamma, ctx->camera_10bit))) {
 				obs_log(LOG_WARNING, "scrcpy-source: camera control connection not ready");
 			}
 		}
@@ -544,17 +561,18 @@ static void src_update(void *data, obs_data_t *settings)
 	if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0 && ctx->camera_control) {
 		int runtime_color_space = 0;
 		int runtime_gamma = 0;
-		if (ctx->camera_10bit) {
-			runtime_color_space = CAMERA_COLOR_SPACE_REC2020;
-			runtime_gamma = CAMERA_GAMMA_HLG;
-		} else {
+		if (!camera_color_profile_to_components(ctx->camera_color_profile, &runtime_color_space, &runtime_gamma)) {
+			runtime_color_space = ctx->camera_10bit ? CAMERA_COLOR_SPACE_REC2020 : 0;
+			runtime_gamma = ctx->camera_10bit ? CAMERA_GAMMA_HLG : 0;
+		}
 			camera_color_profile_to_components(ctx->camera_color_profile, &runtime_color_space,
 							   &runtime_gamma);
 		}
 		(void)scrcpy_camera_control_apply(ctx->camera_control, ctx->camera_zoom, ctx->camera_torch,
 						  ctx->camera_iso, ctx->camera_shutter_us, ctx->camera_focus_distance,
 						  ctx->camera_wb_kelvin, ctx->camera_wb_lock, runtime_color_space,
-						  runtime_gamma, ctx->camera_10bit);
+						  runtime_gamma, ctx->camera_10bit,
+						  camera_gamma_to_dynamic_range(runtime_gamma, ctx->camera_10bit));
 	}
 
 	os_atomic_set_bool(&ctx->updating, false);
@@ -792,7 +810,7 @@ static bool dynamic_range_list_contains(const char *line, const char *token)
 }
 
 static bool parse_camera_color_capabilities(const char *line, bool *srgb, bool *rec709, bool *rec2020,
-					    bool *tone_map_gamma, bool *tone_map_rec709, bool *tenbit_hlg,
+					    bool *tone_map_gamma, bool *tone_map_rec709, bool *tone_map_contrast, bool *tenbit_hlg,
 					    bool *tenbit_hdr10, bool *tenbit_hdr10_plus)
 {
 	if (!line)
@@ -808,6 +826,8 @@ static bool parse_camera_color_capabilities(const char *line, bool *srgb, bool *
 		*tone_map_gamma = false;
 	if (tone_map_rec709)
 		*tone_map_rec709 = false;
+	if (tone_map_contrast)
+		*tone_map_contrast = false;
 	if (tenbit_hlg)
 		*tenbit_hlg = false;
 	if (tenbit_hdr10)
@@ -841,6 +861,8 @@ static bool parse_camera_color_capabilities(const char *line, bool *srgb, bool *
 		*tone_map_gamma = strstr(line, "tonemap-gamma=true") != NULL;
 	if (tone_map_rec709)
 		*tone_map_rec709 = strstr(line, "tonemap-rec709=true") != NULL;
+	if (tone_map_contrast)
+		*tone_map_contrast = strstr(line, "tonemap-contrast=true") != NULL;
 	if (tenbit_hlg)
 		*tenbit_hlg = dynamic_range_list_contains(line, "HLG10");
 	if (tenbit_hdr10)
@@ -1092,6 +1114,7 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 	bool selected_color_rec2020 = false;
 	bool selected_tone_map_gamma = false;
 	bool selected_tone_map_rec709 = false;
+	bool selected_tone_map_contrast = false;
 	bool selected_tenbit_hlg = false;
 	bool selected_tenbit_hdr10 = false;
 	bool selected_tenbit_hdr10_plus = false;
@@ -1141,12 +1164,13 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 		bool line_color_rec2020 = false;
 		bool line_tone_map_gamma = false;
 		bool line_tone_map_rec709 = false;
+		bool line_tone_map_contrast = false;
 		bool line_tenbit_hlg = false;
 		bool line_tenbit_hdr10 = false;
 		bool line_tenbit_hdr10_plus = false;
 		parse_camera_color_capabilities(line_copy, &line_color_srgb, &line_color_rec709, &line_color_rec2020,
-						&line_tone_map_gamma, &line_tone_map_rec709, &line_tenbit_hlg, &line_tenbit_hdr10,
-						&line_tenbit_hdr10_plus);
+						&line_tone_map_gamma, &line_tone_map_rec709, &line_tone_map_contrast, &line_tenbit_hlg,
+						&line_tenbit_hdr10, &line_tenbit_hdr10_plus);
 		if (parse_camera_id_line(line_copy, id, sizeof(id), label, sizeof(label), fps, &fps_count, &focus_max,
 					 &zoom_min, &zoom_max, &wb_min, &wb_max, &wb_manual)) {
 			in_selected_camera = selected_id[0] && strcmp(selected_id, id) == 0;
@@ -1200,6 +1224,7 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 				selected_color_rec2020 = line_color_rec2020;
 				selected_tone_map_gamma = line_tone_map_gamma;
 				selected_tone_map_rec709 = line_tone_map_rec709;
+				selected_tone_map_contrast = line_tone_map_contrast;
 				selected_tenbit_hlg = line_tenbit_hlg;
 				selected_tenbit_hdr10 = line_tenbit_hdr10;
 				selected_tenbit_hdr10_plus = line_tenbit_hdr10_plus;
@@ -1276,19 +1301,18 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 	}
 
 	const bool camera_10bit = obs_data_get_bool(settings, "camera_10bit");
+	obs_property_list_add_int(color_profile_prop, "Camera-provided / Auto (default)", CAMERA_COLOR_PROFILE_AUTO);
 	if (camera_10bit) {
-		obs_property_list_add_int(color_profile_prop, "Rec.2020 / HLG (default)", CAMERA_COLOR_PROFILE_AUTO);
+		
 		if (selected_tenbit_hlg)
 			obs_property_list_add_int(color_profile_prop, "Rec.2020 / HLG", CAMERA_COLOR_PROFILE_REC2020_HLG);
 		if (selected_tenbit_hdr10)
 			obs_property_list_add_int(color_profile_prop, "Rec.2020 / PQ (HDR10)", CAMERA_COLOR_PROFILE_REC2020_HDR10);
 		if (selected_tenbit_hdr10_plus)
 			obs_property_list_add_int(color_profile_prop, "Rec.2020 / PQ (HDR10+)", CAMERA_COLOR_PROFILE_REC2020_HDR10_PLUS);
-	} else {
-		obs_property_list_add_int(color_profile_prop, "Camera-provided / Auto (default)", CAMERA_COLOR_PROFILE_AUTO);
 	}
 
-	if (!camera_10bit && (selected_tone_map_gamma || selected_tone_map_rec709)) {
+	if (!camera_10bit && (selected_tone_map_gamma || selected_tone_map_rec709 || selected_tone_map_contrast)) {
 		struct color_profile_option {
 			const char *label;
 			int value;
@@ -1321,13 +1345,25 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 			const struct color_profile_option *option = &options[i];
 			if (option->gamma == CAMERA_GAMMA_REC709_SCENE && !selected_tone_map_rec709)
 				continue;
-			if (option->gamma != CAMERA_GAMMA_REC709_SCENE && !selected_tone_map_gamma)
+			if (option->gamma == CAMERA_GAMMA_HLG && !selected_tone_map_contrast)
+				continue;
+			if (option->gamma != CAMERA_GAMMA_REC709_SCENE && option->gamma != CAMERA_GAMMA_HLG &&
+			    !selected_tone_map_gamma)
 				continue;
 			bool color_supported = (option->color_srgb && selected_color_srgb) ||
 					       (option->color_rec709 && selected_color_rec709) ||
 					       (option->color_rec2020 && selected_color_rec2020);
 			if (color_supported)
 				obs_property_list_add_int(color_profile_prop, option->label, option->value);
+		}
+
+		if (selected_tone_map_contrast) {
+			if (selected_color_srgb)
+				obs_property_list_add_int(color_profile_prop, "sRGB / HLG", 15);
+			if (selected_color_rec709)
+				obs_property_list_add_int(color_profile_prop, "Rec.709 / HLG", 25);
+			if (selected_color_rec2020)
+				obs_property_list_add_int(color_profile_prop, "Rec.2020 / HLG", CAMERA_COLOR_PROFILE_REC2020_HLG);
 		}
 	}
 
@@ -1570,7 +1606,7 @@ static bool camera_10bit_modified(obs_properties_t *props, obs_property_t *p, ob
 	obs_property_t *color_profile = obs_properties_get(props, "camera_color_profile");
 	obs_property_t *codec = obs_properties_get(props, "codec");
 	if (color_profile)
-		obs_property_set_enabled(color_profile, !enabled);
+		obs_property_set_enabled(color_profile, true);
 	if (codec)
 		obs_property_set_enabled(codec, !enabled);
 	return true;
@@ -1705,7 +1741,7 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_data_release(ui_settings);
 	obs_property_set_enabled(camera_wb, true);
 	obs_property_set_enabled(camera_wb_lock, !wb_manual);
-	obs_property_set_enabled(camera_color_profile, !ten_bit_enabled);
+	obs_property_set_enabled(camera_color_profile, true);
 	obs_property_set_visible(camera_10bit, is_camera);
 	obs_property_set_visible(portrait_mode, is_camera);
 	obs_property_set_visible(refresh_cameras, is_camera);
