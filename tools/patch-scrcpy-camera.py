@@ -296,6 +296,26 @@ patch("server/src/main/java/com/genymobile/scrcpy/util/LogUtils.java", [
                                     builder.append("STANDARD");
                                 } else if (profile == android.hardware.camera2.params.DynamicRangeProfiles.HLG10) {
                                     builder.append("HLG10");
+                                } else if (profile == android.hardware.camera2.params.DynamicRangeProfiles.HDR10) {
+                                    builder.append("HDR10");
+                                } else if (profile == android.hardware.camera2.params.DynamicRangeProfiles.HDR10_PLUS) {
+                                    builder.append("HDR10_PLUS");
+                                } else if (profile == android.hardware.camera2.params.DynamicRangeProfiles.DOLBY_VISION_10B_HDR_REF) {
+                                    builder.append("DOLBY_VISION_10B_HDR_REF");
+                                } else if (profile == android.hardware.camera2.params.DynamicRangeProfiles.DOLBY_VISION_10B_HDR_REF_PO) {
+                                    builder.append("DOLBY_VISION_10B_HDR_REF_PO");
+                                } else if (profile == android.hardware.camera2.params.DynamicRangeProfiles.DOLBY_VISION_10B_HDR_OEM) {
+                                    builder.append("DOLBY_VISION_10B_HDR_OEM");
+                                } else if (profile == android.hardware.camera2.params.DynamicRangeProfiles.DOLBY_VISION_10B_HDR_OEM_PO) {
+                                    builder.append("DOLBY_VISION_10B_HDR_OEM_PO");
+                                } else if (profile == android.hardware.camera2.params.DynamicRangeProfiles.DOLBY_VISION_8B_HDR_REF) {
+                                    builder.append("DOLBY_VISION_8B_HDR_REF");
+                                } else if (profile == android.hardware.camera2.params.DynamicRangeProfiles.DOLBY_VISION_8B_HDR_REF_PO) {
+                                    builder.append("DOLBY_VISION_8B_HDR_REF_PO");
+                                } else if (profile == android.hardware.camera2.params.DynamicRangeProfiles.DOLBY_VISION_8B_HDR_OEM) {
+                                    builder.append("DOLBY_VISION_8B_HDR_OEM");
+                                } else if (profile == android.hardware.camera2.params.DynamicRangeProfiles.DOLBY_VISION_8B_HDR_OEM_PO) {
+                                    builder.append("DOLBY_VISION_8B_HDR_OEM_PO");
                                 } else {
                                     builder.append(profile);
                                 }
@@ -323,6 +343,33 @@ patch("server/src/main/java/com/genymobile/scrcpy/util/LogUtils.java", [
                                     builder.append(colorSpace.name());
                                 }
                                 builder.append(']');
+
+                                long[] hdrProfiles = {
+                                        android.hardware.camera2.params.DynamicRangeProfiles.HLG10,
+                                        android.hardware.camera2.params.DynamicRangeProfiles.HDR10,
+                                        android.hardware.camera2.params.DynamicRangeProfiles.HDR10_PLUS
+                                };
+                                String[] hdrNames = {"HLG10", "HDR10", "HDR10_PLUS"};
+                                for (int i = 0; i < hdrProfiles.length; ++i) {
+                                    try {
+                                        java.util.Set<android.graphics.ColorSpace.Named> hdrColorSpaces =
+                                                colorSpaceProfiles.getSupportedColorSpacesForDynamicRange(
+                                                        android.graphics.ImageFormat.PRIVATE, hdrProfiles[i]);
+                                        builder.append(", ").append(hdrNames[i]).append("-color-spaces=[");
+                                        boolean firstHdrColorSpace = true;
+                                        for (android.graphics.ColorSpace.Named colorSpace : hdrColorSpaces) {
+                                            if (!firstHdrColorSpace) {
+                                                builder.append(", ");
+                                            }
+                                            firstHdrColorSpace = false;
+                                            builder.append(colorSpace.name());
+                                        }
+                                        builder.append(']');
+                                    } catch (IllegalArgumentException e) {
+                                        Ln.w("Could not get supported " + hdrNames[i]
+                                                + " camera color spaces for " + id, e);
+                                    }
+                                }
                             } catch (IllegalArgumentException e) {
                                 Ln.w("Could not get supported standard camera color spaces for " + id, e);
                             }
@@ -332,12 +379,15 @@ patch("server/src/main/java/com/genymobile/scrcpy/util/LogUtils.java", [
                     int[] tonemapModes = characteristics.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES);
                     boolean toneMapGamma = false;
                     boolean toneMapRec709 = false;
+                    boolean toneMapContrast = false;
                     if (tonemapModes != null) {
                         for (int mode : tonemapModes) {
                             if (mode == android.hardware.camera2.CaptureRequest.TONEMAP_MODE_GAMMA_VALUE) {
                                 toneMapGamma = true;
                             } else if (mode == android.hardware.camera2.CaptureRequest.TONEMAP_MODE_PRESET_CURVE) {
                                 toneMapRec709 = true;
+                            } else if (mode == android.hardware.camera2.CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE) {
+                                toneMapContrast = true;
                             }
                         }
                     }
@@ -346,6 +396,9 @@ patch("server/src/main/java/com/genymobile/scrcpy/util/LogUtils.java", [
                     }
                     if (toneMapRec709) {
                         builder.append(", tonemap-rec709=true");
+                    }
+                    if (toneMapContrast) {
+                        builder.append(", tonemap-contrast=true");
                     }
 
                     builder.append(')');
