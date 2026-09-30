@@ -29,7 +29,7 @@ typedef int camera_socket_t;
 #endif
 
 #define CAMERA_CTL_SETTINGS 6
-#define CAMERA_CTL_SETTINGS_SIZE 25
+#define CAMERA_CTL_SETTINGS_SIZE 26
 
 struct scrcpy_camera_control {
 	char *serial;
@@ -54,6 +54,7 @@ struct scrcpy_camera_control {
 	int color_space;
 	int gamma;
 	bool ten_bit;
+	int dynamic_range;
 };
 
 static void shutdown_control_socket(camera_socket_t socket)
@@ -132,7 +133,7 @@ static bool connect_control(struct scrcpy_camera_control *control)
 }
 
 static bool send_snapshot(struct scrcpy_camera_control *control, float zoom, bool torch, int iso, int shutter_us,
-			  float focus_distance, int wb_kelvin, bool wb_lock, int color_space, int gamma, bool ten_bit)
+			  float focus_distance, int wb_kelvin, bool wb_lock, int color_space, int gamma, bool ten_bit, int dynamic_range)
 {
 	if (!connect_control(control))
 		return false;
@@ -150,6 +151,7 @@ static bool send_snapshot(struct scrcpy_camera_control *control, float zoom, boo
 	packet[24] = (uint8_t)color_space;
 	packet[25] = (uint8_t)gamma;
 	packet[26] = ten_bit ? 1 : 0;
+	packet[27] = (uint8_t)dynamic_range;
 
 	if (send_all(control->socket, packet, sizeof(packet)))
 		return true;
@@ -183,11 +185,12 @@ static void *camera_control_worker(void *data)
 		int color_space = control->color_space;
 		int gamma = control->gamma;
 		bool ten_bit = control->ten_bit;
+		int dynamic_range = control->dynamic_range;
 		uint64_t generation = control->generation;
 		pthread_mutex_unlock(&control->mutex);
 
 		bool ok = send_snapshot(control, zoom, torch, iso, shutter_us, focus_distance, wb_kelvin, wb_lock,
-						 color_space, gamma, ten_bit);
+						 color_space, gamma, ten_bit, dynamic_range);
 
 		pthread_mutex_lock(&control->mutex);
 		if (ok && generation == control->generation)
@@ -269,6 +272,7 @@ bool scrcpy_camera_control_apply(scrcpy_camera_control_t *control, float zoom, b
 	control->color_space = color_space;
 	control->gamma = gamma;
 	control->ten_bit = ten_bit;
+	control->dynamic_range = dynamic_range;
 	control->generation++;
 	pthread_cond_signal(&control->cond);
 	pthread_mutex_unlock(&control->mutex);
