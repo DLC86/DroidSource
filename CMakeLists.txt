@@ -18,8 +18,11 @@ add_library(${CMAKE_PROJECT_NAME} MODULE)
 find_package(libobs REQUIRED)
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::libobs)
 
-find_package(FFmpeg REQUIRED COMPONENTS avcodec avutil swscale)
-target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE FFmpeg::avcodec FFmpeg::avutil FFmpeg::swscale)
+find_package(FFmpeg REQUIRED COMPONENTS avcodec avutil avfilter swscale)
+target_link_libraries(
+  ${CMAKE_PROJECT_NAME}
+  PRIVATE FFmpeg::avcodec FFmpeg::avutil FFmpeg::avfilter FFmpeg::swscale
+)
 
 if(ENABLE_FRONTEND_API)
   find_package(obs-frontend-api REQUIRED)
@@ -41,7 +44,14 @@ endif()
 
 target_sources(
   ${CMAKE_PROJECT_NAME}
-  PRIVATE src/plugin-main.c src/scrcpy-adb.c src/scrcpy-source.c src/scrcpy-process.c src/scrcpy-reader.c src/scrcpy-camera-control.c
+  PRIVATE
+    src/plugin-main.c
+    src/scrcpy-adb.c
+    src/scrcpy-source.c
+    src/scrcpy-process.c
+    src/scrcpy-reader.c
+    src/scrcpy-color-transform.c
+    src/scrcpy-camera-control.c
 )
 
 if(WIN32)
