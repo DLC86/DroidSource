@@ -133,7 +133,9 @@ static bool source_is_hdr(const scrcpy_color_transform_t *transform, const AVFra
 
 static void frame_colorimetry(const AVFrame *input, const char **primaries, const char **matrix, const char **trc)
 {
-	*primaries = input->color_primaries == AVCOL_PRI_BT2020 ? "bt2020" : "bt709";
+	const bool bt2020_matrix = input->colorspace == AVCOL_SPC_BT2020_CL ||
+					   input->colorspace == AVCOL_SPC_BT2020_NCL;
+	*primaries = (input->color_primaries == AVCOL_PRI_BT2020 || bt2020_matrix) ? "bt2020" : "bt709";
 
 	switch (input->colorspace) {
 	case AVCOL_SPC_BT2020_CL:
@@ -146,7 +148,7 @@ static void frame_colorimetry(const AVFrame *input, const char **primaries, cons
 		*matrix = "709";
 		break;
 	default:
-		*matrix = input->color_primaries == AVCOL_PRI_BT2020 ? "2020_ncl" : "709";
+		*matrix = bt2020_matrix ? "2020_ncl" : "709";
 		break;
 	}
 
