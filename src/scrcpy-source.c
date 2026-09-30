@@ -1771,8 +1771,8 @@ static obs_properties_t *src_get_properties(void *data)
 								     OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(camera_color_range, "Auto (from stream)", SCRCPY_COLOR_RANGE_AUTO);
 
-	obs_property_t *camera_cst = obs_properties_add_list(props, "camera_cst",
-								  obs_module_text("CameraCST"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_t *camera_cst = obs_properties_add_list(props, "camera_cst", obs_module_text("CameraCST"),
+								     OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(camera_cst, "Off / Bypass", CAMERA_CST_OFF);
 	obs_property_list_add_int(camera_cst, "Rec.709 / sRGB (8-bit)", CAMERA_COLOR_PROFILE_REC709_SRGB);
 	obs_property_list_add_int(camera_cst, "Rec.709 / Rec.709 (Scene) (8-bit)",
