@@ -66,6 +66,9 @@
 #define CAMERA_COLOR_PROFILE_SRGB_SRGB 18
 #define CAMERA_COLOR_PROFILE_REC709_SRGB 28
 #define CAMERA_COLOR_PROFILE_REC2020_SRGB 38
+#define CAMERA_CST_PROFILE_SRGB_HLG_8BIT 1005
+#define CAMERA_CST_PROFILE_REC709_HLG_8BIT 1025
+#define CAMERA_CST_PROFILE_REC2020_HLG_8BIT 1035
 
 #define CAMERA_DYNAMIC_RANGE_STANDARD 0
 #define CAMERA_DYNAMIC_RANGE_HLG10 1
@@ -1782,6 +1785,9 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_list_add_int(camera_cst, "Rec.2020 / Rec.709 (Scene) (8-bit)",
 						  CAMERA_COLOR_PROFILE_REC2020_REC709_SCENE);
 	obs_property_list_add_int(camera_cst, "Rec.2020 / Gamma 2.2 (8-bit)", CAMERA_COLOR_PROFILE_REC2020_22);
+	obs_property_list_add_int(camera_cst, "sRGB / HLG (8-bit)", CAMERA_CST_PROFILE_SRGB_HLG_8BIT);
+	obs_property_list_add_int(camera_cst, "Rec.709 / HLG (8-bit)", CAMERA_CST_PROFILE_REC709_HLG_8BIT);
+	obs_property_list_add_int(camera_cst, "Rec.2020 / HLG (8-bit)", CAMERA_CST_PROFILE_REC2020_HLG_8BIT);
 	obs_property_list_add_int(camera_cst, "Rec.2020 / HLG (10-bit)", CAMERA_COLOR_PROFILE_REC2020_HLG);
 	obs_property_list_add_int(camera_cst, "Rec.2020 / PQ (10-bit)", CAMERA_COLOR_PROFILE_REC2020_HDR10);
 	obs_property_list_add_int(camera_color_range, "Full range", SCRCPY_COLOR_RANGE_FULL);
