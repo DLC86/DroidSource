@@ -180,6 +180,7 @@ static bool frame_color_info(const AVFrame *frame, struct cst_color_info *info)
 	default:
 		info->trc = "bt709";
 		info->av_trc = AVCOL_TRC_BT709;
+		info->transfer_id = 3;
 		break;
 	}
 
@@ -417,81 +418,71 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		current = next;
 	}
 
-	if (!source.hdr && !target.hdr) {
-		snprintf(
-			scale_args, sizeof(scale_args),
-			"iprimaries=%s:ispace=%s:itrc=%s:irange=%s:primaries=%s:space=%s:trc=%s:range=tv:format=yuv420p:dither=fsb:fast=0:wpadapt=bradford",
-			source.primaries, source_space, source.trc, range_name, target.primaries, target_space,
-			target.trc);
-		if (!create_filter(transform->graph, "colorspace", "sdr-cst", scale_args, &next))
-			goto fail;
-		if (!link_filters(current, next, "SDR CST"))
-			goto fail;
-		current = next;
-	} else {
-		snprintf(scale_args, sizeof(scale_args), "in_range=%s:in_color_matrix=%s:out_range=full", range_name,
-			 source_space == "bt2020ncl" ? "bt2020" : "bt709");
-		if (!create_filter(transform->graph, "scale", "yuv-to-rgb", scale_args, &next))
-			goto fail;
-		if (!link_filters(current, next, "YUV to RGB"))
-			goto fail;
-		current = next;
+	/* Use one explicit RGB pipeline for every CST. This avoids relying on
+	 * colorspace metadata shortcuts and guarantees that transfer/gamut changes
+	 * are applied to the actual samples. */
+	snprintf(scale_args, sizeof(scale_args), "in_range=%s:in_color_matrix=%s:out_range=full", range_name,
+		 source_space == "bt2020ncl" ? "bt2020" : "bt709");
+	if (!create_filter(transform->graph, "scale", "yuv-to-rgb", scale_args, &next))
+		goto fail;
+	if (!link_filters(current, next, "YUV to RGB"))
+		goto fail;
+	current = next;
 
-		if (!create_filter(transform->graph, "format", "rgb16", "pix_fmts=gbrp16le", &next))
+	if (!create_filter(transform->graph, "format", "rgb16", "pix_fmts=gbrp16le", &next))
+		goto fail;
+	if (!link_filters(current, next, "RGB 16-bit"))
+		goto fail;
+	current = next;
+
+	if (source.transfer_id != 9) {
+		if (!get_transfer_expression(&source, false, expression, sizeof(expression)))
 			goto fail;
-		if (!link_filters(current, next, "RGB 16-bit"))
-			goto fail;
-		current = next;
-
-		if (source.transfer_id != 9) {
-			if (!get_transfer_expression(&source, false, expression, sizeof(expression)))
-				goto fail;
-			if (!add_lutrgb_filter(transform->graph, current, "decode-transfer", expression, &next))
-				goto fail;
-			current = next;
-		}
-
-		if (source.hdr && !target.hdr) {
-			if (!create_filter(transform->graph, "format", "tone-map-float", "pix_fmts=gbrpf32le", &next))
-				goto fail;
-			if (!link_filters(current, next, "tone map float format"))
-				goto fail;
-			current = next;
-
-			if (!create_filter(transform->graph, "tonemap", "tone-map", "tonemap=mobius:param=0.3:desat=2",
-					   &next))
-				goto fail;
-			if (!link_filters(current, next, "tone map"))
-				goto fail;
-			current = next;
-
-			if (!create_filter(transform->graph, "format", "tone-map-back", "pix_fmts=gbrp16le", &next))
-				goto fail;
-			if (!link_filters(current, next, "tone map 16-bit format"))
-				goto fail;
-			current = next;
-		}
-
-		if (!add_primary_matrix(transform->graph, current, &source, &target, &next))
-			goto fail;
-		current = next;
-
-		if (target.transfer_id != 9) {
-			if (!get_transfer_expression(&target, true, expression, sizeof(expression)))
-				goto fail;
-			if (!add_lutrgb_filter(transform->graph, current, "encode-transfer", expression, &next))
-				goto fail;
-			current = next;
-		}
-
-		snprintf(scale_args, sizeof(scale_args), "in_range=full:out_range=limited:out_color_matrix=%s",
-			 target_space == "bt2020ncl" ? "bt2020" : "bt709");
-		if (!create_filter(transform->graph, "scale", "rgb-to-yuv", scale_args, &next))
-			goto fail;
-		if (!link_filters(current, next, "RGB to YUV"))
+		if (!add_lutrgb_filter(transform->graph, current, "decode-transfer", expression, &next))
 			goto fail;
 		current = next;
 	}
+
+	if (source.hdr && !target.hdr) {
+		if (!create_filter(transform->graph, "format", "tone-map-float", "pix_fmts=gbrpf32le", &next))
+			goto fail;
+		if (!link_filters(current, next, "tone map float format"))
+			goto fail;
+		current = next;
+
+		if (!create_filter(transform->graph, "tonemap", "tone-map", "tonemap=mobius:param=0.3:desat=2",
+				   &next))
+			goto fail;
+		if (!link_filters(current, next, "tone map"))
+			goto fail;
+		current = next;
+
+		if (!create_filter(transform->graph, "format", "tone-map-back", "pix_fmts=gbrp16le", &next))
+			goto fail;
+		if (!link_filters(current, next, "tone map 16-bit format"))
+			goto fail;
+		current = next;
+	}
+
+	if (!add_primary_matrix(transform->graph, current, &source, &target, &next))
+		goto fail;
+	current = next;
+
+	if (target.transfer_id != 9) {
+		if (!get_transfer_expression(&target, true, expression, sizeof(expression)))
+			goto fail;
+		if (!add_lutrgb_filter(transform->graph, current, "encode-transfer", expression, &next))
+			goto fail;
+		current = next;
+	}
+
+	snprintf(scale_args, sizeof(scale_args), "in_range=full:out_range=limited:out_color_matrix=%s",
+		 target_space == "bt2020ncl" ? "bt2020" : "bt709");
+	if (!create_filter(transform->graph, "scale", "rgb-to-yuv", scale_args, &next))
+		goto fail;
+	if (!link_filters(current, next, "RGB to YUV"))
+		goto fail;
+	current = next;
 
 	{
 		const char *target_format_name = av_get_pix_fmt_name(target.output_format);
