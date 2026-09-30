@@ -1902,10 +1902,10 @@ helpers = r'''    private static String getActivePhysicalCameraId(TotalCaptureRe
             return;
         }
 
-        if (cameraGamma == 5) {
+        if (cameraGamma == 5 || cameraGamma == 6 || cameraGamma == 7) {
             /*
-             * For 10-bit HLG the dynamic-range profile already carries the
-             * HLG transfer, so do not stack a second tone curve.
+             * For 10-bit HDR profiles the dynamic-range profile already carries
+             * the transfer function, so do not stack a second tone curve.
              */
             if (cameraTenBit) {
                 requestBuilder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_FAST);
