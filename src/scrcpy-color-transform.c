@@ -1,5 +1,4 @@
 #include "scrcpy-color-transform.h"
-/* clang-format probe */
 
 #include <obs-module.h>
 #include <plugin-support.h>
@@ -111,7 +110,8 @@ static bool profile_to_color_info(int profile, struct cst_color_info *info)
 	/* This field is used for the CST destination. Source precision is taken
 	 * from the actual AVFrame and must never be inferred from the profile. */
 	info->output_format = output_8bit ? AV_PIX_FMT_YUV420P
-				  : info->hdr ? AV_PIX_FMT_YUV420P10LE : AV_PIX_FMT_YUV420P;
+			      : info->hdr ? AV_PIX_FMT_YUV420P10LE
+				      : AV_PIX_FMT_YUV420P;
 	return true;
 }
 
@@ -417,8 +417,7 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 	const enum AVPixelFormat source_format = (enum AVPixelFormat)input->format;
 	const enum AVPixelFormat input_format = normalize_input_format(source_format);
 	const AVPixFmtDescriptor *source_desc = av_pix_fmt_desc_get(source_format);
-	const bool source_is_10bit =
-		source_desc && source_desc->nb_components >= 3 && source_desc->comp[0].depth >= 10;
+	const bool source_is_10bit = source_desc && source_desc->nb_components >= 3 && source_desc->comp[0].depth >= 10;
 	const char *rgb_pix_fmt_name = source_is_10bit ? "gbrp16le" : "gbrp";
 	const char *target_pix_fmt_name = av_get_pix_fmt_name(target.output_format);
 	const char *source_pix_fmt_name = av_get_pix_fmt_name(source_format);
@@ -430,8 +429,7 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 	const char *target_space = target.av_primaries == AVCOL_PRI_BT2020 ? "bt2020ncl" : "bt709";
 	const char *range_name = input_range == AVCOL_RANGE_JPEG ? "pc" : "tv";
 
-	snprintf(buffer_args, sizeof(buffer_args),
-		 "video_size=%dx%d:pix_fmt=%s:time_base=1/1000000:pixel_aspect=1/1",
+	snprintf(buffer_args, sizeof(buffer_args), "video_size=%dx%d:pix_fmt=%s:time_base=1/1000000:pixel_aspect=1/1",
 		 input->width, input->height, source_pix_fmt_name);
 	if (!create_filter(transform->graph, "buffer", "in", buffer_args, &transform->buffer_src))
 		goto fail;
@@ -449,10 +447,11 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 	/* SDR -> SDR stays entirely in YUV. This is the normal and fastest path,
 	 * including 10-bit source to 8-bit destination conversion. */
 	if (!source.hdr && !target.hdr) {
-		snprintf(filter_args, sizeof(filter_args),
-			 "iprimaries=%s:ispace=%s:itrc=%s:irange=%s:primaries=%s:space=%s:trc=%s:range=tv:format=yuv420p:dither=fsb:fast=0:wpadapt=bradford",
-			 source.primaries, source_space, source.trc, range_name, target.primaries,
-			 target_space, target.trc);
+		snprintf(
+			filter_args, sizeof(filter_args),
+			"iprimaries=%s:ispace=%s:itrc=%s:irange=%s:primaries=%s:space=%s:trc=%s:range=tv:format=yuv420p:dither=fsb:fast=0:wpadapt=bradford",
+			source.primaries, source_space, source.trc, range_name, target.primaries, target_space,
+			target.trc);
 		if (!create_filter(transform->graph, "colorspace", "sdr-cst", filter_args, &next))
 			goto fail;
 		if (!link_filters(current, next, "SDR CST"))
@@ -462,9 +461,8 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		/* HDR -> SDR: perform the one unavoidable tone-map pass. The intermediate
 		 * is 8-bit RGB because the destination is 8-bit; the previous 16-bit RGB
 		 * pipeline was unnecessarily expensive at 4K. */
-		snprintf(filter_args, sizeof(filter_args),
-			 "in_range=%s:in_color_matrix=%s:out_range=full",
-			 range_name, source_space == "bt2020ncl" ? "bt2020" : "bt709");
+		snprintf(filter_args, sizeof(filter_args), "in_range=%s:in_color_matrix=%s:out_range=full", range_name,
+			 source_space == "bt2020ncl" ? "bt2020" : "bt709");
 		if (!create_filter(transform->graph, "scale", "yuv-to-rgb", filter_args, &next))
 			goto fail;
 		if (!link_filters(current, next, "YUV to RGB"))
@@ -500,9 +498,10 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 			goto fail;
 		current = next;
 
-		snprintf(filter_args, sizeof(filter_args),
-			 "iprimaries=%s:ispace=gbr:itrc=linear:irange=pc:primaries=%s:space=%s:trc=%s:range=tv:format=yuv420p:dither=fsb:wpadapt=bradford",
-			 source.primaries, target.primaries, target_space, target.trc);
+		snprintf(
+			filter_args, sizeof(filter_args),
+			"iprimaries=%s:ispace=gbr:itrc=linear:irange=pc:primaries=%s:space=%s:trc=%s:range=tv:format=yuv420p:dither=fsb:wpadapt=bradford",
+			source.primaries, target.primaries, target_space, target.trc);
 		if (!create_filter(transform->graph, "colorspace", "hdr-to-sdr", filter_args, &next))
 			goto fail;
 		if (!link_filters(current, next, "HDR to SDR colorspace"))
@@ -547,8 +546,7 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 			current = next;
 		}
 
-		snprintf(filter_args, sizeof(filter_args),
-			 "in_range=full:out_range=limited:out_color_matrix=%s",
+		snprintf(filter_args, sizeof(filter_args), "in_range=full:out_range=limited:out_color_matrix=%s",
 			 target_space == "bt2020ncl" ? "bt2020" : "bt709");
 		if (!create_filter(transform->graph, "scale", "rgb-to-yuv", filter_args, &next))
 			goto fail;
