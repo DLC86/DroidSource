@@ -253,9 +253,6 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 			startup_color_space = ctx->camera_10bit ? CAMERA_COLOR_SPACE_REC2020 : 0;
 			startup_gamma = ctx->camera_10bit ? CAMERA_GAMMA_HLG : 0;
 		}
-			camera_color_profile_to_components(ctx->camera_color_profile, &startup_color_space,
-							   &startup_gamma);
-		}
 		snprintf(
 			control_codec_arg, sizeof(control_codec_arg),
 			"--video-codec-options=__scrcpy_obs_camera_control_port:int=%u,__scrcpy_obs_camera_iso:int=%d,__scrcpy_obs_camera_shutter_us:int=%d,__scrcpy_obs_camera_focus_distance:float=%.6f,__scrcpy_obs_camera_wb_kelvin:int=%d,__scrcpy_obs_camera_wb_lock:int=%d,__scrcpy_obs_camera_color_space:int=%d,__scrcpy_obs_camera_gamma:int=%d%s",
@@ -327,12 +324,9 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 		if (ctx->camera_control) {
 			int startup_color_space = 0;
 			int startup_gamma = 0;
-			if (ctx->camera_10bit) {
-				startup_color_space = CAMERA_COLOR_SPACE_REC2020;
-				startup_gamma = CAMERA_GAMMA_HLG;
-			} else {
-				camera_color_profile_to_components(ctx->camera_color_profile, &startup_color_space,
-								   &startup_gamma);
+			if (!camera_color_profile_to_components(ctx->camera_color_profile, &startup_color_space, &startup_gamma)) {
+				startup_color_space = ctx->camera_10bit ? CAMERA_COLOR_SPACE_REC2020 : 0;
+				startup_gamma = ctx->camera_10bit ? CAMERA_GAMMA_HLG : 0;
 			}
 			if (!scrcpy_camera_control_apply(
 				    ctx->camera_control, ctx->camera_zoom, ctx->camera_torch, ctx->camera_iso,
