@@ -1932,26 +1932,16 @@ helpers = r'''    private static String getActivePhysicalCameraId(TotalCaptureRe
          * produced a visibly darker image on this camera pipeline.
          */
         if (cameraGamma == 3) {
-            if (hasToneMapMode(CaptureRequest.TONEMAP_MODE_PRESET_CURVE)) {
-                requestBuilder.set(CaptureRequest.TONEMAP_MODE,
-                        CaptureRequest.TONEMAP_MODE_PRESET_CURVE);
-                requestBuilder.set(CaptureRequest.TONEMAP_PRESET_CURVE,
-                        CaptureRequest.TONEMAP_PRESET_CURVE_REC709);
-                requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, null);
-                requestBuilder.set(CaptureRequest.TONEMAP_CURVE, null);
-                return;
-            }
-
-            if (hasToneMapMode(CaptureRequest.TONEMAP_MODE_GAMMA_VALUE)) {
-                requestBuilder.set(CaptureRequest.TONEMAP_MODE,
-                        CaptureRequest.TONEMAP_MODE_GAMMA_VALUE);
-                requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, 2.2f);
-                requestBuilder.set(CaptureRequest.TONEMAP_PRESET_CURVE, null);
-                requestBuilder.set(CaptureRequest.TONEMAP_CURVE, null);
-                return;
-            }
-
-            throw new IllegalArgumentException("Camera does not support Rec.709 tone mapping");
+            /*
+             * Rec.709 Scene is represented by the BT.709 Camera2 session
+             * ColorSpace. Avoid applying the preset a second time.
+             */
+            requestBuilder.set(CaptureRequest.TONEMAP_MODE,
+                    CaptureRequest.TONEMAP_MODE_FAST);
+            requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, null);
+            requestBuilder.set(CaptureRequest.TONEMAP_CURVE, null);
+            requestBuilder.set(CaptureRequest.TONEMAP_PRESET_CURVE, null);
+            return;
         }
 
         /*
@@ -1984,31 +1974,18 @@ helpers = r'''    private static String getActivePhysicalCameraId(TotalCaptureRe
             return;
         }
 
-        if (cameraGamma == 8) {
-            if (!hasToneMapMode(CaptureRequest.TONEMAP_MODE_PRESET_CURVE)) {
-                throw new IllegalArgumentException("Camera does not support preset sRGB tone mapping");
-            }
+        if (cameraGamma == 8 || cameraGamma == 9) {
+            /*
+             * sRGB and Linear sRGB are represented by the selected Camera2
+             * session ColorSpace. Do not also apply a preset/identity
+             * tone-mapping curve here: doing both can cause the HAL to apply
+             * the transfer twice or otherwise produce a severe contrast shift.
+             */
             requestBuilder.set(CaptureRequest.TONEMAP_MODE,
-                    CaptureRequest.TONEMAP_MODE_PRESET_CURVE);
-            requestBuilder.set(CaptureRequest.TONEMAP_PRESET_CURVE,
-                    CaptureRequest.TONEMAP_PRESET_CURVE_SRGB);
+                    CaptureRequest.TONEMAP_MODE_FAST);
             requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, null);
             requestBuilder.set(CaptureRequest.TONEMAP_CURVE, null);
-            return;
-        }
-
-        if (cameraGamma == 9) {
-            if (!hasToneMapMode(CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)) {
-                throw new IllegalArgumentException("Camera does not support custom tone mapping");
-            }
-            int points = 2;
-            float[] curve = {0.0f, 0.0f, 1.0f, 1.0f};
-            TonemapCurve tonemap = new TonemapCurve(curve, curve, curve);
-            requestBuilder.set(CaptureRequest.TONEMAP_MODE,
-                    CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE);
-            requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, null);
             requestBuilder.set(CaptureRequest.TONEMAP_PRESET_CURVE, null);
-            requestBuilder.set(CaptureRequest.TONEMAP_CURVE, tonemap);
             return;
         }
 
