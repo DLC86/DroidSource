@@ -232,14 +232,14 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 			startup_color_space = CAMERA_COLOR_SPACE_REC2020;
 			startup_gamma = CAMERA_GAMMA_HLG;
 		} else {
-			camera_color_profile_to_components(ctx->camera_color_profile, &startup_color_space, &startup_gamma);
+			camera_color_profile_to_components(ctx->camera_color_profile, &startup_color_space,
+							   &startup_gamma);
 		}
 		snprintf(
 			control_codec_arg, sizeof(control_codec_arg),
 			"--video-codec-options=__scrcpy_obs_camera_control_port:int=%u,__scrcpy_obs_camera_iso:int=%d,__scrcpy_obs_camera_shutter_us:int=%d,__scrcpy_obs_camera_focus_distance:float=%.6f,__scrcpy_obs_camera_wb_kelvin:int=%d,__scrcpy_obs_camera_wb_lock:int=%d,__scrcpy_obs_camera_color_space:int=%d,__scrcpy_obs_camera_gamma:int=%d%s",
-			(unsigned)control_port, ctx->camera_iso, ctx->camera_shutter_us,
-			ctx->camera_focus_distance, ctx->camera_wb_kelvin, ctx->camera_wb_lock ? 1 : 0,
-			startup_color_space, startup_gamma,
+			(unsigned)control_port, ctx->camera_iso, ctx->camera_shutter_us, ctx->camera_focus_distance,
+			ctx->camera_wb_kelvin, ctx->camera_wb_lock ? 1 : 0, startup_color_space, startup_gamma,
 			ctx->camera_10bit ? ",__scrcpy_obs_camera_10bit:int=1" : "");
 	}
 
@@ -310,12 +310,13 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 				startup_color_space = CAMERA_COLOR_SPACE_REC2020;
 				startup_gamma = CAMERA_GAMMA_HLG;
 			} else {
-				camera_color_profile_to_components(ctx->camera_color_profile, &startup_color_space, &startup_gamma);
+				camera_color_profile_to_components(ctx->camera_color_profile, &startup_color_space,
+								   &startup_gamma);
 			}
-			if (!scrcpy_camera_control_apply(ctx->camera_control, ctx->camera_zoom, ctx->camera_torch,
-							 ctx->camera_iso, ctx->camera_shutter_us, ctx->camera_focus_distance,
-							 ctx->camera_wb_kelvin, ctx->camera_wb_lock, startup_color_space,
-							 startup_gamma, ctx->camera_10bit)) {
+			if (!scrcpy_camera_control_apply(
+				    ctx->camera_control, ctx->camera_zoom, ctx->camera_torch, ctx->camera_iso,
+				    ctx->camera_shutter_us, ctx->camera_focus_distance, ctx->camera_wb_kelvin,
+				    ctx->camera_wb_lock, startup_color_space, startup_gamma, ctx->camera_10bit)) {
 				obs_log(LOG_WARNING, "scrcpy-source: camera control connection not ready");
 			}
 		}
@@ -542,7 +543,8 @@ static void src_update(void *data, obs_data_t *settings)
 			runtime_color_space = CAMERA_COLOR_SPACE_REC2020;
 			runtime_gamma = CAMERA_GAMMA_HLG;
 		} else {
-			camera_color_profile_to_components(ctx->camera_color_profile, &runtime_color_space, &runtime_gamma);
+			camera_color_profile_to_components(ctx->camera_color_profile, &runtime_color_space,
+							   &runtime_gamma);
 		}
 		(void)scrcpy_camera_control_apply(ctx->camera_control, ctx->camera_zoom, ctx->camera_torch,
 						  ctx->camera_iso, ctx->camera_shutter_us, ctx->camera_focus_distance,
@@ -763,7 +765,7 @@ static bool color_space_list_contains(const char *list, const char *token)
 }
 
 static bool parse_camera_color_capabilities(const char *line, bool *srgb, bool *rec709, bool *rec2020,
-						bool *tone_map_gamma, bool *tone_map_rec709)
+					    bool *tone_map_gamma, bool *tone_map_rec709)
 {
 	if (!line)
 		return false;
@@ -1094,7 +1096,7 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 		bool line_tone_map_gamma = false;
 		bool line_tone_map_rec709 = false;
 		parse_camera_color_capabilities(line_copy, &line_color_srgb, &line_color_rec709, &line_color_rec2020,
-						   &line_tone_map_gamma, &line_tone_map_rec709);
+						&line_tone_map_gamma, &line_tone_map_rec709);
 		if (parse_camera_id_line(line_copy, id, sizeof(id), label, sizeof(label), fps, &fps_count, &focus_max,
 					 &zoom_min, &zoom_max, &wb_min, &wb_max, &wb_manual)) {
 			in_selected_camera = selected_id[0] && strcmp(selected_id, id) == 0;
@@ -1108,7 +1110,7 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 			parse_camera_sensor_ranges(line_copy, &line_iso_min, &line_iso_max, &line_exposure_min_ns,
 						   &line_exposure_max_ns);
 			parse_camera_post_raw_boost_range(line_copy, &line_post_raw_boost_min,
-						   &line_post_raw_boost_max);
+							  &line_post_raw_boost_max);
 
 			if (!first_id[0]) {
 				snprintf(first_id, sizeof(first_id), "%s", id);
@@ -1227,7 +1229,8 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 			{"sRGB / Gamma 2.4", CAMERA_COLOR_PROFILE_SRGB_24, true, false, false, CAMERA_GAMMA_24},
 			{"sRGB / Rec.709 Scene", CAMERA_COLOR_PROFILE_SRGB_REC709_SCENE, true, false, false,
 			 CAMERA_GAMMA_REC709_SCENE},
-			{"sRGB / Rec.709-A", CAMERA_COLOR_PROFILE_SRGB_REC709_A, true, false, false, CAMERA_GAMMA_REC709_A},
+			{"sRGB / Rec.709-A", CAMERA_COLOR_PROFILE_SRGB_REC709_A, true, false, false,
+			 CAMERA_GAMMA_REC709_A},
 			{"Rec.709 / Gamma 2.2", CAMERA_COLOR_PROFILE_REC709_22, false, true, false, CAMERA_GAMMA_22},
 			{"Rec.709 / Gamma 2.4", CAMERA_COLOR_PROFILE_REC709_24, false, true, false, CAMERA_GAMMA_24},
 			{"Rec.709 / Rec.709 Scene", CAMERA_COLOR_PROFILE_REC709_REC709_SCENE, false, true, false,
@@ -1248,10 +1251,9 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 				continue;
 			if (option->gamma != CAMERA_GAMMA_REC709_SCENE && !selected_tone_map_gamma)
 				continue;
-			bool color_supported =
-				(option->color_srgb && selected_color_srgb) ||
-				(option->color_rec709 && selected_color_rec709) ||
-				(option->color_rec2020 && selected_color_rec2020);
+			bool color_supported = (option->color_srgb && selected_color_srgb) ||
+					       (option->color_rec709 && selected_color_rec709) ||
+					       (option->color_rec2020 && selected_color_rec2020);
 			if (color_supported)
 				obs_property_list_add_int(color_profile_prop, option->label, option->value);
 		}
@@ -1356,14 +1358,14 @@ static void populate_shutter_list(obs_property_t *prop, long long min_exposure_n
 		{"8 s", 8000000},   {"4 s", 4000000},  {"2 s", 2000000},   {"1 s", 1000000},   {"1/2 s", 500000},
 		{"1/3 s", 333333},  {"1/4 s", 250000}, {"1/5 s", 200000},  {"1/6 s", 166667},  {"1/8 s", 125000},
 		{"1/10 s", 100000}, {"1/12 s", 83333}, {"1/15 s", 66667},  {"1/20 s", 50000},  {"1/24 s", 41667},
-		{"1/25 s", 40000},  {"1/30 s", 33333}, {"1/40 s", 25000}, {"1/48 s", 20833}, {"1/50 s", 20000},
+		{"1/25 s", 40000},  {"1/30 s", 33333}, {"1/40 s", 25000},  {"1/48 s", 20833},  {"1/50 s", 20000},
 		{"1/60 s", 16667},  {"1/80 s", 12500}, {"1/96 s", 10417},  {"1/100 s", 10000}, {"1/120 s", 8333},
-		{"1/125 s", 8000},  {"1/160 s", 6250}, {"1/180 s", 5556}, {"1/200 s", 5000}, {"1/240 s", 4167},
-		{"1/250 s", 4000}, {"1/320 s", 3125}, {"1/400 s", 2500}, {"1/500 s", 2000}, {"1/640 s", 1563},
-		{"1/750 s", 1333}, {"1/800 s", 1250}, {"1/1000 s", 1000}, {"1/1250 s", 800},  {"1/1500 s", 667},
-		{"1/2000 s", 500},  {"1/2500 s", 400}, {"1/3000 s", 333},  {"1/4000 s", 250}, {"1/5000 s", 200},
+		{"1/125 s", 8000},  {"1/160 s", 6250}, {"1/180 s", 5556},  {"1/200 s", 5000},  {"1/240 s", 4167},
+		{"1/250 s", 4000},  {"1/320 s", 3125}, {"1/400 s", 2500},  {"1/500 s", 2000},  {"1/640 s", 1563},
+		{"1/750 s", 1333},  {"1/800 s", 1250}, {"1/1000 s", 1000}, {"1/1250 s", 800},  {"1/1500 s", 667},
+		{"1/2000 s", 500},  {"1/2500 s", 400}, {"1/3000 s", 333},  {"1/4000 s", 250},  {"1/5000 s", 200},
 		{"1/6000 s", 167},  {"1/8000 s", 125}, {"1/10000 s", 100}, {"1/12000 s", 83},  {"1/16000 s", 63},
-		{"1/20000 s", 50}, {"1/32000 s", 31},
+		{"1/20000 s", 50},  {"1/32000 s", 31},
 	};
 
 	obs_property_list_clear(prop);
@@ -1507,10 +1509,10 @@ static bool video_source_modified(obs_properties_t *props, obs_property_t *p, ob
 	UNUSED_PARAMETER(p);
 	const char *source = obs_data_get_string(settings, "video_source");
 	bool is_camera = source && strcmp(source, "camera") == 0;
-	const char *keys[] = {"camera_id",        "camera_size",    "camera_fps",         "camera_zoom",
-			      "camera_torch",     "camera_iso",     "camera_shutter_us",  "camera_focus_distance",
-			      "camera_wb_kelvin", "camera_wb_lock", "camera_color_profile",
-			      "camera_color_range", "camera_10bit", "portrait_mode", "flip_vertical", "hardware_decoding",
+	const char *keys[] = {"camera_id",        "camera_size",    "camera_fps",           "camera_zoom",
+			      "camera_torch",     "camera_iso",     "camera_shutter_us",    "camera_focus_distance",
+			      "camera_wb_kelvin", "camera_wb_lock", "camera_color_profile", "camera_color_range",
+			      "camera_10bit",     "portrait_mode",  "flip_vertical",        "hardware_decoding",
 			      "refresh_cameras",  "video_buffer_ms"};
 
 	for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
@@ -1585,8 +1587,8 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_set_modified_callback(camera_wb_lock, camera_wb_lock_modified);
 
 	obs_property_t *camera_color_profile = obs_properties_add_list(props, "camera_color_profile",
-								      obs_module_text("CameraColorProfile"),
-								      OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+								       obs_module_text("CameraColorProfile"),
+								       OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(camera_color_profile, "Camera default", CAMERA_COLOR_PROFILE_AUTO);
 
 	obs_property_t *camera_color_range = obs_properties_add_list(props, "camera_color_range",
