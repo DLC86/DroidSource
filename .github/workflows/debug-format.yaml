@@ -12,11 +12,10 @@ jobs:
         run: |
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           brew install --quiet obsproject/tools/clang-format@19
+          echo "/home/linuxbrew/.linuxbrew/opt/clang-format@19/bin" >> "$GITHUB_PATH"
       - name: Show formatted diff
         shell: bash
         run: |
-          formatter=$(find /home/linuxbrew/.linuxbrew -type f -name 'clang-format*' 2>/dev/null | head -1)
-          echo "formatter=$formatter"
-          "$formatter" --version
-          "$formatter" --style=file --fallback-style=none src/scrcpy-reader.c > /tmp/scrcpy-reader.c
+          clang-format-19 --version
+          clang-format-19 --style=file --fallback-style=none src/scrcpy-reader.c > /tmp/scrcpy-reader.c
           diff -u src/scrcpy-reader.c /tmp/scrcpy-reader.c || true
