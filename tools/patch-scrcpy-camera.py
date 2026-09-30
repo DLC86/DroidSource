@@ -1328,7 +1328,7 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/Options.java", [
                             } else if (CAMERA_GAMMA_OPTION.equals(optionKey)
                                     && valueObj instanceof Integer) {
                                 int gamma = (Integer) valueObj;
-                                if (gamma < 0 || gamma > 5) {
+                                if (gamma < 0 || gamma > 7) {
                                     throw new IllegalArgumentException("Invalid camera gamma: " + gamma);
                                 }
                                 options.cameraGamma = gamma;
@@ -1387,7 +1387,9 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/video/SurfaceEncoder
         MediaCodec mediaCodec = createMediaCodec(codec, encoderName);
         boolean camera10Bit = tenBit;
         int cameraColorSpace = camera10Bit ? 3 : this.cameraColorSpace;
-        int cameraGamma = camera10Bit ? 5 : this.cameraGamma;
+        int cameraGamma = camera10Bit
+                ? (this.cameraGamma >= 5 && this.cameraGamma <= 7 ? this.cameraGamma : 5)
+                : this.cameraGamma;
         if (camera10Bit && !MediaFormat.MIMETYPE_VIDEO_HEVC.equals(codec.getMimeType())) {
             throw new ConfigurationException("Camera 10-bit requires HEVC");
         }
@@ -1418,10 +1420,22 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/video/SurfaceEncoder
                 if (Build.VERSION.SDK_INT < AndroidVersions.API_33_ANDROID_13) {
                     throw new ConfigurationException("Camera 10-bit requires Android 13 or newer");
                 }
-                format.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.HEVCProfileMain10);
+                int profile;
+                int transfer;
+                if (cameraGamma == 6) {
+                    profile = MediaCodecInfo.CodecProfileLevel.HEVCProfileMain10HDR10;
+                    transfer = MediaFormat.COLOR_TRANSFER_ST2084;
+                } else if (cameraGamma == 7) {
+                    profile = MediaCodecInfo.CodecProfileLevel.HEVCProfileMain10HDR10Plus;
+                    transfer = MediaFormat.COLOR_TRANSFER_ST2084;
+                } else {
+                    profile = MediaCodecInfo.CodecProfileLevel.HEVCProfileMain10;
+                    transfer = MediaFormat.COLOR_TRANSFER_HLG;
+                }
+                format.setInteger(MediaFormat.KEY_PROFILE, profile);
                 format.setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT2020);
                 format.setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED);
-                format.setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_HLG);
+                format.setInteger(MediaFormat.KEY_COLOR_TRANSFER, transfer);
             } else if (cameraColorSpace == 1 || cameraColorSpace == 2 || cameraColorSpace == 3) {
                 int standard = cameraColorSpace == 3
                         ? MediaFormat.COLOR_STANDARD_BT2020
@@ -1562,12 +1576,18 @@ import android.hardware.camera2.params.TonemapCurve;
                     characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_DYNAMIC_RANGE_PROFILES);
             boolean tenBitSupported = contains(
                     capabilities, CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_DYNAMIC_RANGE_TEN_BIT);
-            boolean hlg10Supported = profiles != null
-                    && profiles.getSupportedProfiles().contains(DynamicRangeProfiles.HLG10);
-            if (!tenBitSupported || !hlg10Supported) {
-                throw new IOException("Camera does not support HLG10 10-bit BT.2020 output");
+            long dynamicRange = DynamicRangeProfiles.HLG10;
+            if (cameraGamma == 6) {
+                dynamicRange = DynamicRangeProfiles.HDR10;
+            } else if (cameraGamma == 7) {
+                dynamicRange = DynamicRangeProfiles.HDR10_PLUS;
             }
-            outputConfig.setDynamicRangeProfile(DynamicRangeProfiles.HLG10);
+            boolean dynamicRangeSupported = profiles != null
+                    && profiles.getSupportedProfiles().contains(dynamicRange);
+            if (!tenBitSupported || !dynamicRangeSupported) {
+                throw new IOException("Camera does not support the requested 10-bit HDR profile");
+            }
+            outputConfig.setDynamicRangeProfile(dynamicRange);
         }
         List<OutputConfiguration> outputs = Collections.singletonList(outputConfig);
 """,
@@ -1578,7 +1598,7 @@ import android.hardware.camera2.params.TonemapCurve;
 """,
         """    public void setCameraSettings(float zoomValue, boolean torch, int iso, int shutterUs,
                                   float focusDistance, int wbKelvin, boolean wbLock,
-                                  int colorSpace, int gamma, boolean tenBit) {
+                                  int colorSpace, int gamma, boolean tenBit, int dynamicRange) {
 """,
     ),
     (
@@ -1592,7 +1612,7 @@ import android.hardware.camera2.params.TonemapCurve;
             whiteBalanceKelvin = Math.max(0, wbKelvin);
             cameraWbLock = wbLock && whiteBalanceKelvin <= 0;
             cameraColorSpace = Math.max(0, Math.min(3, colorSpace));
-            cameraGamma = Math.max(0, Math.min(5, gamma));
+            cameraGamma = Math.max(0, Math.min(7, gamma));
             cameraTenBit = tenBit;
 
             if (currentSession != null && requestBuilder != null) {
@@ -1673,9 +1693,22 @@ import android.hardware.camera2.params.TonemapCurve;
                 }
                 ColorSpaceProfiles profiles =
                         characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_COLOR_SPACE_PROFILES);
+                long requestedDynamicRange = DynamicRangeProfiles.STANDARD;
+                if (cameraTenBit) {
+                    if (cameraGamma == 6) {
+                        requestedDynamicRange = DynamicRangeProfiles.HDR10;
+                    } else if (cameraGamma == 7) {
+                        requestedDynamicRange = DynamicRangeProfiles.HDR10_PLUS;
+                    } else {
+                        requestedDynamicRange = DynamicRangeProfiles.HLG10;
+                    }
+                }
+
                 android.graphics.ColorSpace.Named requestedColorSpace = null;
                 if (cameraTenBit) {
-                    requestedColorSpace = android.graphics.ColorSpace.Named.BT2020_HLG;
+                    requestedColorSpace = (requestedDynamicRange == DynamicRangeProfiles.HLG10)
+                            ? android.graphics.ColorSpace.Named.BT2020_HLG
+                            : android.graphics.ColorSpace.Named.BT2020_PQ;
                 } else {
                     switch (cameraColorSpace) {
                         case 1:
@@ -1711,8 +1744,7 @@ import android.hardware.camera2.params.TonemapCurve;
                     if (Build.VERSION.SDK_INT >= AndroidVersions.API_34_ANDROID_14) {
                         if (cameraTenBit) {
                             supportedStandardColorSpaces = profiles.getSupportedColorSpacesForDynamicRange(
-                                    android.graphics.ImageFormat.PRIVATE,
-                                    DynamicRangeProfiles.HLG10);
+                                    android.graphics.ImageFormat.PRIVATE, requestedDynamicRange);
                             standardProfileSupported = supportedStandardColorSpaces.contains(requestedColorSpace);
                         } else {
                             supportedStandardColorSpaces = profiles.getSupportedColorSpacesForDynamicRange(
@@ -1739,12 +1771,12 @@ import android.hardware.camera2.params.TonemapCurve;
                 if (requestedColorSpace != null && colorSpaceSupported && standardProfileSupported) {
                     sessionConfig.setColorSpace(requestedColorSpace);
                     Ln.i("Camera session color space set to " + requestedColorSpace.name()
-                            + " with " + (cameraTenBit ? "HLG10" : "STANDARD") + " profile");
+                            + " with " + (cameraTenBit ? String.valueOf(requestedDynamicRange) : "STANDARD") + " profile");
                 } else if (cameraTenBit) {
-                    throw new IOException("Camera does not support BT.2020 HLG10 color space profile");
+                    throw new IOException("Camera does not support the requested 10-bit HDR color space profile");
                 } else if (requestedColorSpace != null) {
                     Ln.w("Requested camera color space is not supported for the "
-                            + (cameraTenBit ? "HLG10" : "STANDARD") + " profile: " + requestedColorSpace);
+                            + (cameraTenBit ? String.valueOf(requestedDynamicRange) : "STANDARD") + " profile: " + requestedColorSpace);
                 }
             } else if (cameraTenBit) {
                 throw new IOException("Camera 10-bit requires Android 14 or newer");
@@ -1932,7 +1964,7 @@ p.write_text(s,encoding="utf-8")
 
 
 patch_generated("server/src/main/java/com/genymobile/scrcpy/video/CameraControlServer.java", [
-    ("private static final int SETTINGS_SIZE = 21;", "private static final int SETTINGS_SIZE = 25;"),
+    ("private static final int SETTINGS_SIZE = 21;", "private static final int SETTINGS_SIZE = 26;"),
     (
         """            int wbKelvin = in.readInt();
 
@@ -1943,9 +1975,10 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/video/CameraControlS
             int colorSpace = in.readUnsignedByte();
             int gamma = in.readUnsignedByte();
             boolean tenBit = in.readUnsignedByte() != 0;
+            int dynamicRange = in.readUnsignedByte();
 
             capture.setCameraSettings(zoom, torch, iso, shutterUs, focusDistance, wbKelvin, wbLock,
-                    colorSpace, gamma, tenBit);
+                    colorSpace, gamma, tenBit, dynamicRange);
 """,
     ),
 ])
