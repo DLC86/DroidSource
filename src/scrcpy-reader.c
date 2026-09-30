@@ -618,11 +618,11 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	enum video_range_type source_range = resolve_color_range(out, color_range_override);
 	enum AVColorRange source_av_range = source_range == VIDEO_RANGE_FULL ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
 
-
 	if (r->force_8bit_output) {
 		AVFrame *converted = NULL;
 		if (!convert_frame_to_8bit(r, out, &converted)) {
-			obs_log(LOG_WARNING, "scrcpy-reader: 8-bit output conversion failed for pixel format %d", out->format);
+			obs_log(LOG_WARNING, "scrcpy-reader: 8-bit output conversion failed for pixel format %d",
+				out->format);
 			return;
 		}
 		out = converted;
@@ -834,8 +834,8 @@ done:
 }
 
 scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port, bool hardware_decoding, bool flip_vertical,
-				      int video_buffer_ms, bool portrait_mode, int color_range_override, int source_color_profile,
-				      int cst_target_profile, bool force_8bit_output)
+				      int video_buffer_ms, bool portrait_mode, int color_range_override,
+				      int source_color_profile, int cst_target_profile, bool force_8bit_output)
 {
 	struct scrcpy_reader *r = bzalloc(sizeof(*r));
 	r->source = source;
