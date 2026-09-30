@@ -1,0 +1,28 @@
+name: Debug CST formatter
+on:
+  push:
+    branches: [master]
+permissions:
+  contents: read
+jobs:
+  format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install clang-format 19
+        shell: bash
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          brew install --quiet obsproject/tools/clang-format@19
+          echo "/home/linuxbrew/.linuxbrew/opt/clang-format@19/bin" >> "$GITHUB_PATH"
+      - name: Generate formatted CST source
+        shell: bash
+        run: |
+          clang-format-19 --version
+          clang-format-19 --style=file --fallback-style=none src/scrcpy-color-transform.c > /tmp/scrcpy-color-transform.c
+          cp /tmp/scrcpy-color-transform.c ./scrcpy-color-transform.formatted.c
+      - name: Upload formatted source
+        uses: actions/upload-artifact@v5
+        with:
+          name: formatted-cst
+          path: scrcpy-color-transform.formatted.c
