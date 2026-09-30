@@ -511,8 +511,8 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		/* SDR -> HDR and HDR -> HDR. Preserve 10-bit precision for the destination.
 		 * This path is only used when an HDR destination is explicitly requested. */
 		snprintf(filter_args, sizeof(filter_args),
-			 "in_range=%s:in_color_matrix=%s:out_range=full:dst_format=%s",
-			 range_name, source_space == "bt2020ncl" ? "bt2020" : "bt709", rgb_pix_fmt_name);
+			 "in_range=%s:in_color_matrix=%s:out_range=full",
+			 range_name, source_space == "bt2020ncl" ? "bt2020" : "bt709");
 		if (!create_filter(transform->graph, "scale", "yuv-to-rgb", filter_args, &next))
 			goto fail;
 		if (!link_filters(current, next, "YUV to RGB"))
