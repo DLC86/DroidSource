@@ -710,10 +710,10 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	enum video_colorspace cs = obs_colorspace_from_av(out, force_sdr_hlg);
 	enum video_range_type range = out->color_range == AVCOL_RANGE_JPEG ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
 	bool matrix_ok;
-	const bool bt2020_sdr = ((enum AVColorSpace)out->colorspace == AVCOL_SPC_BT2020_NCL ||
-				 (enum AVColorSpace)out->colorspace == AVCOL_SPC_BT2020_CL) &&
-				(force_sdr_hlg || (out->color_trc != AVCOL_TRC_ARIB_STD_B67 &&
-						   out->color_trc != AVCOL_TRC_SMPTE2084));
+	const bool bt2020_sdr =
+		((enum AVColorSpace)out->colorspace == AVCOL_SPC_BT2020_NCL ||
+		 (enum AVColorSpace)out->colorspace == AVCOL_SPC_BT2020_CL) &&
+		(force_sdr_hlg || (out->color_trc != AVCOL_TRC_ARIB_STD_B67 && out->color_trc != AVCOL_TRC_SMPTE2084));
 
 	if (bt2020_sdr) {
 		matrix_ok = obs_bt2020_sdr_matrix(fmt, range, obs_frame.color_matrix, obs_frame.color_range_min,
