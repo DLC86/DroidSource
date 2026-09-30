@@ -1,5 +1,7 @@
 #include "scrcpy-color-transform.h"
 
+#include <obs-module.h>
+
 #include <libavfilter/avfilter.h>
 #include <libavfilter/buffersink.h>
 #include <libavfilter/buffersrc.h>
@@ -289,7 +291,7 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		AVFilterContext *linear = NULL;
 		AVFilterContext *float_format = NULL;
 		AVFilterContext *tone_map = NULL;
-		AVFilterContext *target = NULL;
+		AVFilterContext *target_filter = NULL;
 
 		snprintf(zscale_args, sizeof(zscale_args),
 			 "primariesin=%s:matrixin=%s:transferin=%s:rangein=%s:primaries=%s:matrix=gbr:transfer=linear:range=full",
@@ -317,11 +319,11 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 			 "primariesin=%s:matrixin=gbr:transferin=linear:rangein=full:primaries=%s:matrix=%s:transfer=%s:range=limited",
 			 source.primaries, target.primaries, target.matrix, target.trc);
 
-		if (!create_filter(transform->graph, "zscale", "to-target-sdr", zscale_args, &target))
+		if (!create_filter(transform->graph, "zscale", "to-target-sdr", zscale_args, &target_filter))
 			goto fail;
-		if (!link_filters(current, target, "linear RGB to target SDR"))
+		if (!link_filters(current, target_filter, "linear RGB to target SDR"))
 			goto fail;
-		current = target;
+		current = target_filter;
 	} else {
 		AVFilterContext *zscale = NULL;
 
