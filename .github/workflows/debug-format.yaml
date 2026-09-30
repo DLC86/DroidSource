@@ -15,5 +15,5 @@ jobs:
       - name: Show formatted diff
         shell: bash
         run: |
-          /home/linuxbrew/.linuxbrew/bin/clang-format-19 --style=file --fallback-style=none src/scrcpy-reader.c > /tmp/scrcpy-reader.c
+          /home/linuxbrew/.linuxbrew/opt/clang-format@19/bin/clang-format --style=file --fallback-style=none src/scrcpy-reader.c > /tmp/scrcpy-reader.c
           diff -u src/scrcpy-reader.c /tmp/scrcpy-reader.c || true
