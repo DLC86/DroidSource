@@ -1,4 +1,5 @@
 #include "scrcpy-color-transform.h"
+/* clang-format probe */
 
 #include <obs-module.h>
 #include <plugin-support.h>
