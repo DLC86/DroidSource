@@ -320,7 +320,6 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 			}
 		}
 	}
-	}
 
 	dstr_free(&sink_arg);
 	bfree(exe_path);
