@@ -561,8 +561,8 @@ static bool convert_frame_to_8bit(struct scrcpy_reader *r, AVFrame *input, AVFra
 	const int src_range = input->color_range == AVCOL_RANGE_JPEG ? 1 : 0;
 	const int colorspace = sws_colorspace_for_frame(input);
 	const int *coefficients = sws_getCoefficients(colorspace);
-	if (sws_setColorspaceDetails(r->eight_bit_sws, coefficients, src_range, coefficients, src_range, 0,
-				     1 << 16, 1 << 16) < 0)
+	if (sws_setColorspaceDetails(r->eight_bit_sws, coefficients, src_range, coefficients, src_range, 0, 1 << 16,
+					 1 << 16) < 0)
 		return false;
 
 	av_frame_unref(r->eight_bit_frame);
