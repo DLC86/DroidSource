@@ -539,8 +539,6 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 
 	log_frame_color_info(r, out, hardware_path);
 
-	/* clang-format probe. */
-
 	/* The range selector describes the source stream. Resolve it once and
 	 * pass the result explicitly to both OBS and the CST graph. */
 	pthread_mutex_lock(&r->state_mutex);
@@ -556,7 +554,8 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 			/* A selected CST is an explicit output-format contract. Never fall
 			 * back to the camera frame here, because doing so can silently send
 			 * 10-bit to OBS when an 8-bit target was selected (or vice versa). */
-			obs_log(LOG_WARNING, "scrcpy-reader: CST failed; dropping frame instead of bypassing selected target");
+			obs_log(LOG_WARNING,
+				"scrcpy-reader: CST failed; dropping frame instead of bypassing selected target");
 			return;
 		}
 	} else if (color_range_override != SCRCPY_COLOR_RANGE_AUTO) {
