@@ -251,8 +251,9 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 	AVFilterContext *sink = NULL;
 	char buffer_args[256];
 	char args[1024];
-	const enum AVPixelFormat input_format = normalize_input_format((enum AVPixelFormat)input->format);
-	const bool normalize = input_format != (enum AVPixelFormat)input->format;
+	const enum AVPixelFormat source_format = (enum AVPixelFormat)input->format;
+	const enum AVPixelFormat input_format = normalize_input_format(source_format);
+	const bool normalize = input_format != source_format;
 	int ret;
 
 	if (!target_info(transform->target_profile, &target))
@@ -266,19 +267,20 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 	if (!transform->graph)
 		return false;
 
-	const char *pix_fmt_name = av_get_pix_fmt_name(input_format);
-	if (!pix_fmt_name)
+	const char *source_pix_fmt_name = av_get_pix_fmt_name(source_format);
+	const char *input_pix_fmt_name = av_get_pix_fmt_name(input_format);
+	if (!source_pix_fmt_name || !input_pix_fmt_name)
 		goto fail;
 
 	snprintf(buffer_args, sizeof(buffer_args), "video_size=%dx%d:pix_fmt=%s:time_base=1/1000000:pixel_aspect=1/1",
-		 input->width, input->height, pix_fmt_name);
+		 input->width, input->height, source_pix_fmt_name);
 
 	if (!create_filter(transform->graph, "buffer", "in", buffer_args, &transform->buffer_src))
 		goto fail;
 	current = transform->buffer_src;
 
 	if (normalize) {
-		snprintf(args, sizeof(args), "pix_fmts=%s", pix_fmt_name);
+		snprintf(args, sizeof(args), "pix_fmts=%s", input_pix_fmt_name);
 		if (!create_filter(transform->graph, "format", "normalize", args, &normalizer))
 			goto fail;
 		ret = avfilter_link(current, 0, normalizer, 0);
