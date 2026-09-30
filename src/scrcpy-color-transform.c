@@ -374,31 +374,6 @@ static bool add_primary_matrix(AVFilterGraph *graph, AVFilterContext *current, c
 	return link_filters(current, *next, "primary matrix");
 }
 
-static bool add_primary_matrix(AVFilterGraph *graph, AVFilterContext *current, const struct cst_color_info *source,
-			       const struct cst_color_info *target, AVFilterContext **next)
-{
-	if (!source || !target || source->av_primaries == target->av_primaries) {
-		*next = current;
-		return true;
-	}
-
-	const char *args;
-	if (source->av_primaries == AVCOL_PRI_BT709 && target->av_primaries == AVCOL_PRI_BT2020)
-		args = "rr=0.6274039:rg=0.3292830:rb=0.0433131:gr=0.0690973:gg=0.9195404:gb=0.0113623:br=0.0163914:bg=0.0880133:bb=0.8955953";
-	else if (source->av_primaries == AVCOL_PRI_BT2020 && target->av_primaries == AVCOL_PRI_BT709)
-		args = "rr=1.660491:rg=-0.58764114:rb=-0.07284986:gr=-0.12455047:gg=1.1328999:gb=-0.00834942:br=-0.01815076:bg=-0.1005789:bb=1.11872966";
-	else {
-		obs_log(LOG_WARNING, "scrcpy-color-transform: unsupported primary conversion %d -> %d",
-			source->av_primaries, target->av_primaries);
-		*next = current;
-		return true;
-	}
-
-	if (!create_filter(graph, "colorchannelmixer", "primary-matrix", args, next))
-		return false;
-	return link_filters(current, *next, "primary matrix");
-}
-
 static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *input, enum AVColorRange input_range)
 {
 	struct cst_color_info source;
