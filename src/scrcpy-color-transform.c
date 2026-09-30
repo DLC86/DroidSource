@@ -263,8 +263,8 @@ static bool add_lutrgb_filter(AVFilterGraph *graph, AVFilterContext *current, co
 	return link_filters(current, *next, instance);
 }
 
-static bool get_transfer_expression(const struct cst_color_info *info, bool encode, bool tone_map, char *expression,
-				    size_t expression_size)
+static bool get_transfer_expression(const struct cst_color_info *info, bool encode, char *expression,
+					 size_t expression_size)
 {
 	if (!info || !expression || expression_size == 0)
 		return false;
@@ -272,77 +272,62 @@ static bool get_transfer_expression(const struct cst_color_info *info, bool enco
 	switch (info->transfer_id) {
 	case 1:
 		if (encode)
-			snprintf(expression, expression_size, "exp(log(val/maxval)*(1/2.2))*maxval");
+			snprintf(expression, expression_size, "pow(val/maxval,1/2.2)*maxval");
 		else
-			snprintf(expression, expression_size, "exp(log(val/maxval)*2.2)*maxval");
+			snprintf(expression, expression_size, "pow(val/maxval,2.2)*maxval");
 		return true;
+
 	case 2:
 		if (encode)
-			snprintf(expression, expression_size, "exp(log(val/maxval)*(1/2.4))*maxval");
+			snprintf(expression, expression_size, "pow(val/maxval,1/2.4)*maxval");
 		else
-			snprintf(expression, expression_size, "exp(log(val/maxval)*2.4)*maxval");
+			snprintf(expression, expression_size, "pow(val/maxval,2.4)*maxval");
 		return true;
+
 	case 3:
 		if (encode) {
-			snprintf(
-				expression, expression_size,
-				"if(gt(val,0.018*maxval)\\,1.099*exp(log(val/maxval)*0.45)*maxval-0.099*maxval\\,4.5*val)");
-		} else if (tone_map) {
-			snprintf(expression, expression_size, "val");
+			snprintf(expression, expression_size,
+				 "if(lte(val/maxval,0.018)\\,4.5*(val/maxval)*maxval\\,(1.099*pow(val/maxval,0.45)-0.099)*maxval)");
 		} else {
-			snprintf(
-				expression, expression_size,
-				"if(gt(val,0.081*maxval)\\,exp(log((val/maxval+0.099)/1.099)*(1/0.45))*maxval\\,val/4.5)");
+			snprintf(expression, expression_size,
+				 "if(lte(val/maxval,0.081)\\,(val/maxval)/4.5*maxval\\,pow(((val/maxval)+0.099)/1.099,1/0.45)*maxval)");
 		}
 		return true;
+
 	case 4:
 		if (encode) {
-			snprintf(
-				expression, expression_size,
-				"if(gt(val,0.0031308*maxval)\\,1.055*exp(log(val/maxval)*(1/2.4))*maxval-0.055*maxval\\,12.92*val)");
+			snprintf(expression, expression_size,
+				 "if(lte(val/maxval,0.0031308)\\,12.92*(val/maxval)*maxval\\,(1.055*pow(val/maxval,1/2.4)-0.055)*maxval)");
 		} else {
-			snprintf(
-				expression, expression_size,
-				"if(gt(val,0.04045*maxval)\\,exp(log((val/maxval+0.055)/1.055)*2.4)*maxval\\,val/12.92)");
+			snprintf(expression, expression_size,
+				 "if(lte(val/maxval,0.04045)\\,(val/maxval)/12.92*maxval\\,pow(((val/maxval)+0.055)/1.055,2.4)*maxval)");
 		}
 		return true;
+
 	case 5:
 		if (encode) {
-			snprintf(
-				expression, expression_size,
-				"if(gt(val,maxval/144)\\,0.17883277*log(144*(val/maxval)-0.28466892)+0.55991073\\,6*sqrt(val/maxval))*maxval");
-		} else if (tone_map) {
-			snprintf(
-				expression, expression_size,
-				"if(gt(val,0.5*maxval)\\,(exp(((val/maxval)-0.55991073)/0.17883277)+0.28466892)/(1+exp(((val/maxval)-0.55991073)/0.17883277)+0.28466892)\\,4*(val/maxval)*(val/maxval)/(1+4*(val/maxval)*(val/maxval))*maxval");
+			snprintf(expression, expression_size,
+				 "if(lte(val/maxval,1/12)\\,sqrt(3*(val/maxval))*maxval\\,(0.17883277*log(12*(val/maxval)-0.28466892)+0.55991073)*maxval)");
 		} else {
-			snprintf(
-				expression, expression_size,
-				"if(gt(val,0.5*maxval)\\,(exp(((val/maxval)-0.55991073)/0.17883277)+0.28466892)/144\\,(val/maxval)*(val/maxval)/36)*maxval");
+			snprintf(expression, expression_size,
+				 "if(lte(val/maxval,0.5)\\,(val/maxval)*(val/maxval)/3*maxval\\,(exp(((val/maxval)-0.55991073)/0.17883277)+0.28466892)/12*maxval)");
 		}
 		return true;
-	case 6: {
-		const char *e = "exp(log(val/maxval)/78.84375)";
+
+	case 6:
 		if (encode) {
-			snprintf(
-				expression, expression_size,
-				"exp(log((0.8359375+18.8515625*exp(log(val/maxval)*0.1593017578))/(1+18.6875*exp(log(val/maxval)*0.1593017578)))*78.84375)*maxval");
-		} else if (tone_map) {
-			snprintf(
-				expression, expression_size,
-				"if(gt(%s,0.8359375)\\,100*exp(log((%s-0.8359375)/(18.8515625-18.6875*%s))/0.1593017578)/(1+100*exp(log((%s-0.8359375)/(18.8515625-18.6875*%s))/0.1593017578))\\,0)",
-				e, e, e, e, e);
+			snprintf(expression, expression_size,
+				 "pow((0.8359375+18.8515625*pow(val/maxval,0.1593017578))/(1+18.6875*pow(val/maxval,0.1593017578)),78.84375)*maxval");
 		} else {
-			snprintf(
-				expression, expression_size,
-				"if(gt(%s,0.8359375)\\,exp(log((%s-0.8359375)/(18.8515625-18.6875*%s))/0.1593017578)*maxval\\,0)",
-				e, e, e);
+			snprintf(expression, expression_size,
+				 "pow(max(pow(val/maxval,1/78.84375)-0.8359375\\,0)/(18.8515625-18.6875*pow(val/maxval,1/78.84375))\\,1/0.1593017578)*maxval");
 		}
 		return true;
-	}
+
 	case 9:
 		snprintf(expression, expression_size, "val");
 		return true;
+
 	default:
 		return false;
 	}
@@ -451,10 +436,30 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		current = next;
 
 		if (source.transfer_id != 9) {
-			if (!get_transfer_expression(&source, false, source.hdr && !target.hdr, expression,
-						     sizeof(expression)))
+			if (!get_transfer_expression(&source, false, expression, sizeof(expression)))
 				goto fail;
 			if (!add_lutrgb_filter(transform->graph, current, "decode-transfer", expression, &next))
+				goto fail;
+			current = next;
+		}
+
+		if (source.hdr && !target.hdr) {
+			if (!create_filter(transform->graph, "format", "tone-map-float", "pix_fmts=gbrpf32le", &next))
+				goto fail;
+			if (!link_filters(current, next, "tone map float format"))
+				goto fail;
+			current = next;
+
+			if (!create_filter(transform->graph, "tonemap", "tone-map",
+					    "tonemap=mobius:param=0.3:desat=2", &next))
+				goto fail;
+			if (!link_filters(current, next, "tone map"))
+				goto fail;
+			current = next;
+
+			if (!create_filter(transform->graph, "format", "tone-map-back", "pix_fmts=gbrp16le", &next))
+				goto fail;
+			if (!link_filters(current, next, "tone map 16-bit format"))
 				goto fail;
 			current = next;
 		}
@@ -464,7 +469,7 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		current = next;
 
 		if (target.transfer_id != 9) {
-			if (!get_transfer_expression(&target, true, false, expression, sizeof(expression)))
+			if (!get_transfer_expression(&target, true, expression, sizeof(expression)))
 				goto fail;
 			if (!add_lutrgb_filter(transform->graph, current, "encode-transfer", expression, &next))
 				goto fail;
