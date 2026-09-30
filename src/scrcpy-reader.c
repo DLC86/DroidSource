@@ -545,8 +545,7 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	int color_range_override = r->color_range_override;
 	pthread_mutex_unlock(&r->state_mutex);
 	enum video_range_type source_range = resolve_color_range(out, color_range_override);
-	enum AVColorRange source_av_range =
-		source_range == VIDEO_RANGE_FULL ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
+	enum AVColorRange source_av_range = source_range == VIDEO_RANGE_FULL ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
 
 	if (r->color_transform && r->cst_frame) {
 		if (scrcpy_color_transform_apply(r->color_transform, out, r->cst_frame,
@@ -752,8 +751,8 @@ done:
 }
 
 scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port, bool hardware_decoding, bool flip_vertical,
-				      int video_buffer_ms, bool portrait_mode, int color_range_override, int source_color_profile,
-				      int cst_target_profile)
+				      int video_buffer_ms, bool portrait_mode, int color_range_override,
+				      int source_color_profile, int cst_target_profile)
 {
 	struct scrcpy_reader *r = bzalloc(sizeof(*r));
 	r->source = source;
