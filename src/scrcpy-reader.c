@@ -83,6 +83,8 @@ struct scrcpy_reader {
 	int cst_target_profile;
 	scrcpy_color_transform_t *color_transform;
 	AVFrame *cst_frame;
+	scrcpy_color_transform_t *display_transform;
+	AVFrame *display_frame;
 	bool logged_color_info;
 
 	AVBufferRef *hw_device_ctx;
@@ -560,6 +562,21 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 		out->color_range = source_av_range;
 	}
 
+	/*
+	 * OBS has no independent LINEAR transfer entry for obs_source_frame.
+	 * Convert linear camera/CST output to a display transfer before OBS,
+	 * otherwise OBS interprets linear samples as sRGB and the image becomes
+	 * dramatically over-contrasted.
+	 */
+	if (r->display_transform && r->display_frame) {
+		if (!scrcpy_color_transform_apply(r->display_transform, out, r->display_frame,
+						  out->color_range)) {
+			obs_log(LOG_WARNING, "scrcpy-reader: linear display transform failed");
+			return;
+		}
+		out = r->display_frame;
+	}
+
 	if (r->portrait_mode) {
 		if (!rotate_frame_90_ccw(r, out)) {
 			obs_log(LOG_WARNING, "scrcpy-reader: portrait mode unsupported for pixel format %d",
@@ -771,6 +788,37 @@ scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port, bool 
 	r->cst_target_profile = cst_target_profile;
 	r->color_transform = scrcpy_color_transform_create(source_color_profile, cst_target_profile);
 	r->cst_frame = cst_target_profile != SCRCPY_CST_OFF ? av_frame_alloc() : NULL;
+
+	/*
+	 * Linear is valid as a camera/CST working space, but OBS cannot advertise
+	 * it directly. Encode it to a display transfer at the final boundary.
+	 */
+	int linear_profile = -1;
+	if (cst_target_profile != SCRCPY_CST_OFF && cst_target_profile % 10 == 9)
+		linear_profile = cst_target_profile;
+	else if (cst_target_profile == SCRCPY_CST_OFF && source_color_profile > 0 &&
+		 source_color_profile % 10 == 9)
+		linear_profile = source_color_profile;
+
+	r->display_transform = NULL;
+	r->display_frame = NULL;
+	if (linear_profile > 0) {
+		const int color_space = linear_profile / 10;
+		const int display_profile =
+			color_space == 1 ? 18 : (color_space == 2 ? 23 : 31);
+		r->display_transform = scrcpy_color_transform_create(linear_profile, display_profile);
+		r->display_frame = av_frame_alloc();
+		if (!r->display_transform || !r->display_frame) {
+			obs_log(LOG_ERROR, "scrcpy-reader: could not allocate linear display transform");
+			if (r->display_transform)
+				scrcpy_color_transform_destroy(r->display_transform);
+			if (r->display_frame)
+				av_frame_free(&r->display_frame);
+			r->display_transform = NULL;
+			r->display_frame = NULL;
+		}
+	}
+
 	r->hw_pix_fmt = AV_PIX_FMT_NONE;
 	r->stop = false;
 	r->running = false;
@@ -856,6 +904,10 @@ void scrcpy_reader_destroy(scrcpy_reader_t *r)
 		av_frame_free(&r->portrait_frame);
 	if (r->cst_frame)
 		av_frame_free(&r->cst_frame);
+	if (r->display_frame)
+		av_frame_free(&r->display_frame);
+	if (r->display_transform)
+		scrcpy_color_transform_destroy(r->display_transform);
 	if (r->color_transform)
 		scrcpy_color_transform_destroy(r->color_transform);
 	if (r->hw_device_ctx)
