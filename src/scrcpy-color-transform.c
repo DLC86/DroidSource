@@ -492,6 +492,8 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 
 	const enum AVPixelFormat source_format = (enum AVPixelFormat)input->format;
 	const enum AVPixelFormat input_format = normalize_input_format(source_format);
+	const bool source_is_10bit = source_format == AV_PIX_FMT_YUV420P10LE || source_format == AV_PIX_FMT_P010LE;
+	const char *rgb_pix_fmt_name = source_is_10bit ? "gbrp16le" : "gbrp";
 	const char *source_pix_fmt_name = av_get_pix_fmt_name(source_format);
 	const char *input_pix_fmt_name = av_get_pix_fmt_name(input_format);
 	if (!source_pix_fmt_name || !input_pix_fmt_name)
@@ -545,9 +547,10 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		/* Keep the HDR signal at 16-bit precision until after transfer
 		 * decode and tone mapping. Converting to 8-bit here destroys highlight
 		 * precision and can make 10->8 CST appear ineffective. */
-		if (!create_filter(transform->graph, "format", "rgb16", "pix_fmts=gbrp16le", &next))
+		snprintf(filter_args, sizeof(filter_args), "pix_fmts=%s", rgb_pix_fmt_name);
+		if (!create_filter(transform->graph, "format", "rgb", filter_args, &next))
 			goto fail;
-		if (!link_filters(current, next, "RGB 16-bit"))
+		if (!link_filters(current, next, source_is_10bit ? "RGB 16-bit" : "RGB 8-bit"))
 			goto fail;
 		current = next;
 
@@ -590,9 +593,10 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 			goto fail;
 		current = next;
 
-		if (!create_filter(transform->graph, "format", "rgb16", "pix_fmts=gbrp16le", &next))
+		snprintf(filter_args, sizeof(filter_args), "pix_fmts=%s", rgb_pix_fmt_name);
+		if (!create_filter(transform->graph, "format", "rgb", filter_args, &next))
 			goto fail;
-		if (!link_filters(current, next, "RGB 16-bit"))
+		if (!link_filters(current, next, source_is_10bit ? "RGB 16-bit" : "RGB 8-bit"))
 			goto fail;
 		current = next;
 
