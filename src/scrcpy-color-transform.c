@@ -526,8 +526,7 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		 * primaries, encode the requested HDR transfer and enforce the
 		 * target's exact 8/10-bit YUV format at the end.
 		 */
-		snprintf(filter_args, sizeof(filter_args),
-			 "in_range=%s:in_color_matrix=%s:out_range=full", range_name,
+		snprintf(filter_args, sizeof(filter_args), "in_range=%s:in_color_matrix=%s:out_range=full", range_name,
 			 source_space == "bt2020ncl" ? "bt2020" : "bt709");
 		if (!create_filter(transform->graph, "scale", "yuv-to-rgb", filter_args, &next))
 			goto fail;
@@ -573,8 +572,7 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 			current = next;
 		}
 
-		snprintf(filter_args, sizeof(filter_args),
-			 "in_range=full:out_range=limited:out_color_matrix=%s",
+		snprintf(filter_args, sizeof(filter_args), "in_range=full:out_range=limited:out_color_matrix=%s",
 			 target_space == "bt2020ncl" ? "bt2020" : "bt709");
 		if (!create_filter(transform->graph, "scale", "rgb-to-yuv", filter_args, &next))
 			goto fail;
