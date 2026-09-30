@@ -10,6 +10,7 @@
 #include <libavutil/frame.h>
 #include <libavutil/pixdesc.h>
 
+#include <stdint.h>
 #include <stdio.h>
 
 struct scrcpy_color_transform {
@@ -18,6 +19,7 @@ struct scrcpy_color_transform {
 	AVFilterGraph *graph;
 	AVFilterContext *buffer_src;
 	AVFilterContext *buffer_sink;
+	AVFrame *conversion_frame;
 	enum AVPixelFormat input_format;
 	enum AVColorRange input_range;
 	int input_width;
@@ -35,6 +37,52 @@ struct cst_color_info {
 	int transfer_id;
 	enum AVPixelFormat output_format;
 };
+
+static bool convert_yuv420_bit_depth(const AVFrame *src, AVFrame *dst, enum AVPixelFormat target_format)
+{
+	const enum AVPixelFormat source_format = (enum AVPixelFormat)src->format;
+	const bool source_8 = source_format == AV_PIX_FMT_YUV420P || source_format == AV_PIX_FMT_YUVJ420P;
+	const bool source_10 = source_format == AV_PIX_FMT_YUV420P10LE || source_format == AV_PIX_FMT_P010LE;
+	const bool target_8 = target_format == AV_PIX_FMT_YUV420P;
+	const bool target_10 = target_format == AV_PIX_FMT_YUV420P10LE;
+
+	if (!src || !dst || (!source_8 && !source_10) || (!target_8 && !target_10) ||
+	    source_8 == target_8)
+		return false;
+
+	av_frame_unref(dst);
+	dst->format = target_format;
+	dst->width = src->width;
+	dst->height = src->height;
+	if (av_frame_copy_props(dst, src) < 0 || av_frame_get_buffer(dst, 32) < 0)
+		return false;
+
+	for (int plane = 0; plane < 3; ++plane) {
+		const int width = plane == 0 ? src->width : (src->width + 1) / 2;
+		const int height = plane == 0 ? src->height : (src->height + 1) / 2;
+		for (int y = 0; y < height; ++y) {
+			const uint8_t *src_row = src->data[plane] + (size_t)y * src->linesize[plane];
+			uint8_t *dst_row = dst->data[plane] + (size_t)y * dst->linesize[plane];
+			for (int x = 0; x < width; ++x) {
+				if (target_10) {
+					uint16_t value;
+					if (source_format == AV_PIX_FMT_P010LE)
+						value = ((const uint16_t *)src_row)[x] >> 6;
+					else
+						value = src_row[x];
+					((uint16_t *)dst_row)[x] = source_8 ? (uint16_t)value << 2 : value;
+				} else {
+					const uint16_t value = source_format == AV_PIX_FMT_P010LE
+							       ? ((const uint16_t *)src_row)[x] >> 6
+						       : ((const uint16_t *)src_row)[x];
+					((uint8_t *)dst_row)[x] = (uint8_t)((value + 2) >> 2);
+				}
+			}
+		}
+	}
+
+	return true;
+}
 
 static bool profile_to_color_info(int profile, struct cst_color_info *info)
 {
@@ -582,6 +630,11 @@ scrcpy_color_transform_t *scrcpy_color_transform_create(int source_profile, int 
 
 	transform->source_profile = source_profile;
 	transform->target_profile = target_profile;
+	transform->conversion_frame = av_frame_alloc();
+	if (!transform->conversion_frame) {
+		av_free(transform);
+		return NULL;
+	}
 	transform->input_format = AV_PIX_FMT_NONE;
 	transform->input_range = AVCOL_RANGE_UNSPECIFIED;
 	return transform;
@@ -599,12 +652,23 @@ bool scrcpy_color_transform_apply(scrcpy_color_transform_t *transform, AVFrame *
 	if (input_range != AVCOL_RANGE_JPEG && input_range != AVCOL_RANGE_MPEG)
 		input_range = input->color_range == AVCOL_RANGE_JPEG ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
 	if (transform->source_profile > 0 && transform->source_profile == transform->target_profile) {
-		av_frame_unref(output);
-		if (av_frame_ref(output, input) < 0)
+		if ((enum AVPixelFormat)input->format == target.output_format) {
+			av_frame_unref(output);
+			if (av_frame_ref(output, input) < 0)
+				return false;
+		} else if (!convert_yuv420_bit_depth(input, output, target.output_format)) {
+			obs_log(LOG_ERROR,
+				"scrcpy-color-transform: same-profile bit-depth conversion failed: source=%s target=%s",
+				av_get_pix_fmt_name((enum AVPixelFormat)input->format),
+				av_get_pix_fmt_name(target.output_format));
 			return false;
+		}
 		output->color_primaries = target.av_primaries;
 		output->colorspace = target.av_space;
 		output->color_trc = target.av_trc;
+		output->color_range = input_range;
+		obs_log(LOG_DEBUG, "scrcpy-color-transform: target format=%s (same-profile path)",
+			av_get_pix_fmt_name((enum AVPixelFormat)output->format));
 		return (enum AVPixelFormat)output->format == target.output_format;
 	}
 
@@ -638,14 +702,27 @@ bool scrcpy_color_transform_apply(scrcpy_color_transform_t *transform, AVFrame *
 	output->color_range = AVCOL_RANGE_MPEG;
 
 	if ((enum AVPixelFormat)output->format != target.output_format) {
-		obs_log(LOG_ERROR, "scrcpy-color-transform: output format mismatch: got %s, expected %s",
-			av_get_pix_fmt_name((enum AVPixelFormat)output->format),
-			av_get_pix_fmt_name(target.output_format));
+		const enum AVPixelFormat graph_format = (enum AVPixelFormat)output->format;
+		obs_log(LOG_WARNING,
+			"scrcpy-color-transform: graph returned %s, forcing target format %s with explicit bit-depth conversion",
+			av_get_pix_fmt_name(graph_format), av_get_pix_fmt_name(target.output_format));
+		if (!convert_yuv420_bit_depth(output, transform->conversion_frame, target.output_format)) {
+			obs_log(LOG_ERROR, "scrcpy-color-transform: cannot force target format %s from %s",
+			av_get_pix_fmt_name(target.output_format), av_get_pix_fmt_name(graph_format));
+			av_frame_unref(output);
+			return false;
+		}
 		av_frame_unref(output);
-		return false;
+		av_frame_move_ref(output, transform->conversion_frame);
+		output->color_primaries = target.av_primaries;
+		output->colorspace = target.av_space;
+		output->color_trc = target.av_trc;
+		output->color_range = AVCOL_RANGE_MPEG;
 	}
 
-	return true;
+	obs_log(LOG_DEBUG, "scrcpy-color-transform: target format=%s",
+		av_get_pix_fmt_name((enum AVPixelFormat)output->format));
+	return (enum AVPixelFormat)output->format == target.output_format;
 }
 
 bool scrcpy_color_transform_target_is_hdr(int target_profile)
@@ -660,5 +737,6 @@ void scrcpy_color_transform_destroy(scrcpy_color_transform_t *transform)
 		return;
 
 	avfilter_graph_free(&transform->graph);
+	av_frame_free(&transform->conversion_frame);
 	av_free(transform);
 }
