@@ -1,0 +1,29 @@
+name: Format temporary source
+on:
+  push:
+    branches: [master]
+jobs:
+  format:
+    if: ${{ !contains(github.event.head_commit.message, 'Format C source with clang-format') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Install clang-format 19
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          brew install --quiet obsproject/tools/clang-format@19
+          echo "/home/linuxbrew/.linuxbrew/opt/clang-format@19/bin" >> "$GITHUB_PATH"
+      - name: Format source
+        run: clang-format-19 -style=file -fallback-style=none -i src/scrcpy-source.c
+      - name: Commit formatting
+        run: |
+          git config user.name "ToneScientist"
+          git config user.email "26407040+DLC86@users.noreply.github.com"
+          if git diff --quiet -- src/scrcpy-source.c; then
+            exit 0
+          fi
+          git add src/scrcpy-source.c
+          git commit -m "Format C source with clang-format"
+          git push origin master
