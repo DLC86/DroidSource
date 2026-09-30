@@ -400,6 +400,11 @@ patch("server/src/main/java/com/genymobile/scrcpy/util/LogUtils.java", [
                     if (toneMapContrast) {
                         builder.append(", tonemap-contrast=true");
                     }
+                    if (toneMapRec709) {
+                        // PRESET_CURVE supports both the Rec.709 and sRGB
+                        // standards on Camera2; expose this explicitly to the client.
+                        builder.append(", tonemap-srgb=true");
+                    }
 
                     builder.append(')');
 """,
@@ -1381,7 +1386,7 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/Options.java", [
                             } else if (CAMERA_GAMMA_OPTION.equals(optionKey)
                                     && valueObj instanceof Integer) {
                                 int gamma = (Integer) valueObj;
-                                if (gamma < 0 || gamma > 7) {
+                                if (gamma < 0 || gamma > 9) {
                                     throw new IllegalArgumentException("Invalid camera gamma: " + gamma);
                                 }
                                 options.cameraGamma = gamma;
@@ -1665,7 +1670,7 @@ import android.hardware.camera2.params.TonemapCurve;
             whiteBalanceKelvin = Math.max(0, wbKelvin);
             cameraWbLock = wbLock && whiteBalanceKelvin <= 0;
             cameraColorSpace = Math.max(0, Math.min(3, colorSpace));
-            cameraGamma = Math.max(0, Math.min(7, gamma));
+            cameraGamma = Math.max(0, Math.min(9, gamma));
             cameraTenBit = tenBit;
 
             if (currentSession != null && requestBuilder != null) {
@@ -1952,6 +1957,34 @@ helpers = r'''    private static String getActivePhysicalCameraId(TotalCaptureRe
                     cameraGamma == 1 ? 2.2f : 2.4f);
             requestBuilder.set(CaptureRequest.TONEMAP_PRESET_CURVE, null);
             requestBuilder.set(CaptureRequest.TONEMAP_CURVE, null);
+            return;
+        }
+
+        if (cameraGamma == 8) {
+            if (!hasToneMapMode(CaptureRequest.TONEMAP_MODE_PRESET_CURVE)) {
+                throw new IllegalArgumentException("Camera does not support preset sRGB tone mapping");
+            }
+            requestBuilder.set(CaptureRequest.TONEMAP_MODE,
+                    CaptureRequest.TONEMAP_MODE_PRESET_CURVE);
+            requestBuilder.set(CaptureRequest.TONEMAP_PRESET_CURVE,
+                    CaptureRequest.TONEMAP_PRESET_CURVE_SRGB);
+            requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, null);
+            requestBuilder.set(CaptureRequest.TONEMAP_CURVE, null);
+            return;
+        }
+
+        if (cameraGamma == 9) {
+            if (!hasToneMapMode(CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)) {
+                throw new IllegalArgumentException("Camera does not support custom tone mapping");
+            }
+            int points = 2;
+            float[] curve = {0.0f, 0.0f, 1.0f, 1.0f};
+            TonemapCurve tonemap = new TonemapCurve(curve, curve, curve);
+            requestBuilder.set(CaptureRequest.TONEMAP_MODE,
+                    CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE);
+            requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, null);
+            requestBuilder.set(CaptureRequest.TONEMAP_PRESET_CURVE, null);
+            requestBuilder.set(CaptureRequest.TONEMAP_CURVE, tonemap);
             return;
         }
 
