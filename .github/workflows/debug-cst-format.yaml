@@ -3,7 +3,7 @@ on:
   push:
     branches: [master]
 permissions:
-  contents: read
+  contents: write
 jobs:
   format:
     runs-on: ubuntu-24.04
@@ -15,14 +15,20 @@ jobs:
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           brew install --quiet obsproject/tools/clang-format@19
           echo "/home/linuxbrew/.linuxbrew/opt/clang-format@19/bin" >> "$GITHUB_PATH"
-      - name: Generate formatted CST source
+      - name: Format CST source
         shell: bash
         run: |
           clang-format-19 --version
-          clang-format-19 --style=file --fallback-style=none src/scrcpy-color-transform.c > /tmp/scrcpy-color-transform.c
-          cp /tmp/scrcpy-color-transform.c ./scrcpy-color-transform.formatted.c
-      - name: Upload formatted source
-        uses: actions/upload-artifact@v5
-        with:
-          name: formatted-cst
-          path: scrcpy-color-transform.formatted.c
+          clang-format-19 --style=file --fallback-style=none -i src/scrcpy-color-transform.c
+      - name: Commit formatting
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/scrcpy-color-transform.c
+          if git diff --cached --quiet; then
+            echo "CST source is already formatted."
+            exit 0
+          fi
+          git commit -m "Format CST source"
+          git push
