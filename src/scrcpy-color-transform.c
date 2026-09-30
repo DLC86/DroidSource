@@ -494,9 +494,10 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 	const enum AVPixelFormat input_format = normalize_input_format(source_format);
 	const bool source_is_10bit = source_format == AV_PIX_FMT_YUV420P10LE || source_format == AV_PIX_FMT_P010LE;
 	const char *rgb_pix_fmt_name = source_is_10bit ? "gbrp16le" : "gbrp";
+	const char *target_pix_fmt_name = av_get_pix_fmt_name(target.output_format);
 	const char *source_pix_fmt_name = av_get_pix_fmt_name(source_format);
 	const char *input_pix_fmt_name = av_get_pix_fmt_name(input_format);
-	if (!source_pix_fmt_name || !input_pix_fmt_name)
+	if (!source_pix_fmt_name || !input_pix_fmt_name || !target_pix_fmt_name)
 		goto fail;
 
 	const char *source_space = source.av_primaries == AVCOL_PRI_BT2020 ? "bt2020ncl" : "bt709";
@@ -536,8 +537,8 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		 * is 8-bit RGB because the destination is 8-bit; the previous 16-bit RGB
 		 * pipeline was unnecessarily expensive at 4K. */
 		snprintf(filter_args, sizeof(filter_args),
-			 "in_range=%s:in_color_matrix=%s:out_range=full",
-			 range_name, source_space == "bt2020ncl" ? "bt2020" : "bt709");
+			 "in_range=%s:in_color_matrix=%s:out_range=full:dst_format=%s",
+			 range_name, source_space == "bt2020ncl" ? "bt2020" : "bt709", rgb_pix_fmt_name);
 		if (!create_filter(transform->graph, "scale", "yuv-to-rgb", filter_args, &next))
 			goto fail;
 		if (!link_filters(current, next, "YUV to RGB"))
@@ -621,8 +622,8 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		}
 
 		snprintf(filter_args, sizeof(filter_args),
-			 "in_range=full:out_range=limited:out_color_matrix=%s",
-			 target_space == "bt2020ncl" ? "bt2020" : "bt709");
+			 "in_range=full:out_range=limited:out_color_matrix=%s:dst_format=%s",
+			 target_space == "bt2020ncl" ? "bt2020" : "bt709", target_pix_fmt_name);
 		if (!create_filter(transform->graph, "scale", "rgb-to-yuv", filter_args, &next))
 			goto fail;
 		if (!link_filters(current, next, "RGB to YUV"))
@@ -630,10 +631,7 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		current = next;
 	}
 
-	const char *target_format_name = av_get_pix_fmt_name(target.output_format);
-	if (!target_format_name)
-		goto fail;
-	snprintf(filter_args, sizeof(filter_args), "pix_fmts=%s", target_format_name);
+	snprintf(filter_args, sizeof(filter_args), "pix_fmts=%s", target_pix_fmt_name);
 	if (!create_filter(transform->graph, "format", "output-format", filter_args, &next))
 		goto fail;
 	if (!link_filters(current, next, "output format"))
