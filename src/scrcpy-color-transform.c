@@ -558,6 +558,17 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 			current = next;
 		}
 
+		/* Make the RGB precision explicit before the 10-bit YUV conversion.
+		 * This avoids relying on an automatically inserted scaler during graph
+		 * negotiation, which can reject the float/planar RGB -> YUV10 path. */
+		if (target.output_format == AV_PIX_FMT_YUV420P10LE) {
+			if (!create_filter(transform->graph, "format", "rgb-48", "pix_fmts=rgb48le", &next))
+				goto fail;
+			if (!link_filters(current, next, "RGB 48-bit"))
+				goto fail;
+			current = next;
+		}
+
 		snprintf(filter_args, sizeof(filter_args),
 			 "in_range=full:out_range=limited:out_color_matrix=%s",
 			 target_space == "bt2020ncl" ? "bt2020" : "bt709");
