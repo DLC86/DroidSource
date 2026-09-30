@@ -1214,7 +1214,7 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 		obs_property_list_add_int(fps_prop, label, selected_fps[i]);
 	}
 
-	const bool camera_10bit = obs_data_get_bool(settings, "camera_10bit");
+   const bool camera_10bit = obs_data_get_bool(settings, "camera_10bit");
 	const char *default_profile_label = camera_10bit
 			? "Rec.2020 / HLG (default)"
 			: "sRGB / Camera tone mapping (default)";
