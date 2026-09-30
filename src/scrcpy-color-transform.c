@@ -188,14 +188,16 @@ static bool frame_color_info(const AVFrame *frame, struct cst_color_info *info)
 		info->transfer_id = 6;
 		break;
 	case AVCOL_TRC_BT2020_10:
+		/* BT.2020-10 is an SDR transfer characteristic, not PQ. */
 		info->trc = "bt2020-10";
 		info->av_trc = AVCOL_TRC_BT2020_10;
-		info->transfer_id = 6;
+		info->transfer_id = 3;
 		break;
 	case AVCOL_TRC_BT2020_12:
+		/* BT.2020-12 is an SDR transfer characteristic, not PQ. */
 		info->trc = "bt2020-12";
 		info->av_trc = AVCOL_TRC_BT2020_12;
-		info->transfer_id = 6;
+		info->transfer_id = 3;
 		break;
 	default:
 		info->trc = "bt709";
