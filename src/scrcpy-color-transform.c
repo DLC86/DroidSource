@@ -92,6 +92,8 @@ static bool profile_to_color_info(int profile, struct cst_color_info *info)
 	}
 
 	info->hdr = gamma == 5 || gamma == 6 || gamma == 7;
+	/* This field is used for the CST destination. Source precision is taken
+	 * from the actual AVFrame and must never be inferred from the profile. */
 	info->output_format = info->hdr ? AV_PIX_FMT_YUV420P10LE : AV_PIX_FMT_YUV420P;
 	return true;
 }
