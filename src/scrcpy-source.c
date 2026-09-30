@@ -258,8 +258,12 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 		int startup_color_space = 0;
 		int startup_gamma = 0;
 		if (!camera_color_profile_to_components(ctx->camera_color_profile, &startup_color_space, &startup_gamma)) {
-			startup_color_space = ctx->camera_10bit ? CAMERA_COLOR_SPACE_REC2020 : 0;
-			startup_gamma = ctx->camera_10bit ? CAMERA_GAMMA_HLG : 0;
+			startup_color_space = 0;
+			startup_gamma = 0;
+		}
+		if (ctx->camera_10bit && (startup_gamma < CAMERA_GAMMA_HLG || startup_gamma > CAMERA_GAMMA_HDR10_PLUS)) {
+			startup_color_space = CAMERA_COLOR_SPACE_REC2020;
+			startup_gamma = CAMERA_GAMMA_HLG;
 		}
 		snprintf(
 			control_codec_arg, sizeof(control_codec_arg),
@@ -333,8 +337,12 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 			int startup_color_space = 0;
 			int startup_gamma = 0;
 			if (!camera_color_profile_to_components(ctx->camera_color_profile, &startup_color_space, &startup_gamma)) {
-				startup_color_space = ctx->camera_10bit ? CAMERA_COLOR_SPACE_REC2020 : 0;
-				startup_gamma = ctx->camera_10bit ? CAMERA_GAMMA_HLG : 0;
+				startup_color_space = 0;
+				startup_gamma = 0;
+			}
+			if (ctx->camera_10bit && (startup_gamma < CAMERA_GAMMA_HLG || startup_gamma > CAMERA_GAMMA_HDR10_PLUS)) {
+				startup_color_space = CAMERA_COLOR_SPACE_REC2020;
+				startup_gamma = CAMERA_GAMMA_HLG;
 			}
 			if (!scrcpy_camera_control_apply(
 				    ctx->camera_control, ctx->camera_zoom, ctx->camera_torch, ctx->camera_iso,
@@ -564,8 +572,12 @@ static void src_update(void *data, obs_data_t *settings)
 		int runtime_color_space = 0;
 		int runtime_gamma = 0;
 		if (!camera_color_profile_to_components(ctx->camera_color_profile, &runtime_color_space, &runtime_gamma)) {
-			runtime_color_space = ctx->camera_10bit ? CAMERA_COLOR_SPACE_REC2020 : 0;
-			runtime_gamma = ctx->camera_10bit ? CAMERA_GAMMA_HLG : 0;
+			runtime_color_space = 0;
+			runtime_gamma = 0;
+		}
+		if (ctx->camera_10bit && (runtime_gamma < CAMERA_GAMMA_HLG || runtime_gamma > CAMERA_GAMMA_HDR10_PLUS)) {
+			runtime_color_space = CAMERA_COLOR_SPACE_REC2020;
+			runtime_gamma = CAMERA_GAMMA_HLG;
 		}
 			camera_color_profile_to_components(ctx->camera_color_profile, &runtime_color_space,
 							   &runtime_gamma);
@@ -1015,7 +1027,7 @@ static void populate_camera_fallbacks(obs_property_t *camera_id_prop, obs_proper
 		obs_property_list_add_int(fps_prop, "30 fps", 30);
 	}
 	if (color_profile_prop && obs_property_list_item_count(color_profile_prop) == 0)
-		obs_property_list_add_int(color_profile_prop, "Camera default", CAMERA_COLOR_PROFILE_AUTO);
+		obs_property_list_add_int(color_profile_prop, "Camera-provided / Auto (default)", CAMERA_COLOR_PROFILE_AUTO);
 }
 
 static void add_unique_fps(int *values, size_t *count, int value)
@@ -1621,6 +1633,11 @@ static bool camera_10bit_modified(obs_properties_t *props, obs_property_t *p, ob
 	bool enabled = obs_data_get_bool(settings, "camera_10bit");
 	if (enabled)
 		obs_data_set_string(settings, "codec", "h265");
+
+	/* Rebuild the profile list immediately so it switches between the
+	 * 8-bit and 10-bit capability sets without closing the properties dialog. */
+	refresh_camera_capabilities(props, settings, false);
+
 	obs_property_t *color_profile = obs_properties_get(props, "camera_color_profile");
 	obs_property_t *codec = obs_properties_get(props, "codec");
 	if (color_profile)
