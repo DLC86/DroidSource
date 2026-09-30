@@ -1770,7 +1770,13 @@ import android.hardware.camera2.params.TonemapCurve;
                     requestedColorSpace = (requestedDynamicRange == DynamicRangeProfiles.HLG10)
                             ? android.graphics.ColorSpace.Named.BT2020_HLG
                             : android.graphics.ColorSpace.Named.BT2020_PQ;
-                } else {
+                } else if (cameraGamma != 9) {
+                    /*
+                     * Android's named SRGB/BT709/BT2020 spaces already imply a
+                     * non-linear transfer. Linear output is therefore left
+                     * without a named session ColorSpace; the tone-map stage
+                     * and encoder metadata define the linear transfer.
+                     */
                     switch (cameraColorSpace) {
                         case 1:
                             requestedColorSpace = android.graphics.ColorSpace.Named.SRGB;
@@ -1833,6 +1839,8 @@ import android.hardware.camera2.params.TonemapCurve;
                     sessionConfig.setColorSpace(requestedColorSpace);
                     Ln.i("Camera session color space set to " + requestedColorSpace.name()
                             + " with " + (cameraTenBit ? String.valueOf(requestedDynamicRange) : "STANDARD") + " profile");
+                } else if (!cameraTenBit && cameraGamma == 9) {
+                    Ln.i("Camera linear transfer selected; session ColorSpace left unspecified");
                 } else if (cameraTenBit) {
                     // The dynamic-range profile itself remains authoritative for HDR.
                     // Some devices do not expose a ColorSpaceProfiles entry for the
