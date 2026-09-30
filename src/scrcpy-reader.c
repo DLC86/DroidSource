@@ -553,7 +553,11 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 			out = r->cst_frame;
 		} else {
 			obs_log(LOG_WARNING, "scrcpy-reader: CST failed; using source frame unchanged");
+			out->color_range = source_av_range;
 		}
+	} else {
+		/* Apply the selected source range when CST is bypassed. */
+		out->color_range = source_av_range;
 	}
 
 	if (r->portrait_mode) {
