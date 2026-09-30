@@ -105,8 +105,7 @@ static bool target_info(int profile, struct cst_target_info *info)
 	enum AVColorSpace av_space;
 	enum AVColorTransferCharacteristic av_trc;
 
-	if (!info ||
-	    !profile_to_colorimetry(profile, &primaries, &matrix, &trc, &av_primaries, &av_space, &av_trc))
+	if (!info || !profile_to_colorimetry(profile, &primaries, &matrix, &trc, &av_primaries, &av_space, &av_trc))
 		return false;
 
 	info->primaries = primaries;
@@ -134,7 +133,7 @@ static bool source_is_hdr(const scrcpy_color_transform_t *transform, const AVFra
 static void frame_colorimetry(const AVFrame *input, const char **primaries, const char **matrix, const char **trc)
 {
 	const bool bt2020_matrix = input->colorspace == AVCOL_SPC_BT2020_CL ||
-					   input->colorspace == AVCOL_SPC_BT2020_NCL;
+				   input->colorspace == AVCOL_SPC_BT2020_NCL;
 	*primaries = (input->color_primaries == AVCOL_PRI_BT2020 || bt2020_matrix) ? "bt2020" : "bt709";
 
 	switch (input->colorspace) {
@@ -186,15 +185,15 @@ static void frame_colorimetry(const AVFrame *input, const char **primaries, cons
 	}
 }
 
-static void source_colorimetry(const scrcpy_color_transform_t *transform, const AVFrame *input,
-			       const char **primaries, const char **matrix, const char **trc)
+static void source_colorimetry(const scrcpy_color_transform_t *transform, const AVFrame *input, const char **primaries,
+			       const char **matrix, const char **trc)
 {
 	enum AVColorPrimaries av_primaries;
 	enum AVColorSpace av_space;
 	enum AVColorTransferCharacteristic av_trc;
 
-	if (transform->source_profile > 0 &&
-	    profile_to_colorimetry(transform->source_profile, primaries, matrix, trc, &av_primaries, &av_space, &av_trc))
+	if (transform->source_profile > 0 && profile_to_colorimetry(transform->source_profile, primaries, matrix, trc,
+								    &av_primaries, &av_space, &av_trc))
 		return;
 
 	frame_colorimetry(input, primaries, matrix, trc);
@@ -331,9 +330,10 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		}
 		current = third;
 
-		snprintf(args, sizeof(args),
-			 "matrixin=gbr:transferin=linear:primariesin=%s:matrix=%s:transfer=linear:primaries=%s:rangein=pc:range=tv",
-			 source_primaries, target.matrix, target.primaries);
+		snprintf(
+			args, sizeof(args),
+			"matrixin=gbr:transferin=linear:primariesin=%s:matrix=%s:transfer=linear:primaries=%s:rangein=pc:range=tv",
+			source_primaries, target.matrix, target.primaries);
 		if (!create_filter(transform->graph, "zscale", "linear-target", args, &first))
 			goto fail;
 		ret = avfilter_link(current, 0, first, 0);
@@ -352,9 +352,10 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		}
 		current = second;
 
-		snprintf(args, sizeof(args),
-			 "iprimaries=%s:ispace=%s:itrc=linear:irange=tv:primaries=%s:space=%s:trc=%s:range=tv:format=yuv420p:dither=fsb",
-			 target.primaries, target.matrix, target.primaries, target.matrix, target.trc);
+		snprintf(
+			args, sizeof(args),
+			"iprimaries=%s:ispace=%s:itrc=linear:irange=tv:primaries=%s:space=%s:trc=%s:range=tv:format=yuv420p:dither=fsb",
+			target.primaries, target.matrix, target.primaries, target.matrix, target.trc);
 		if (!create_filter(transform->graph, "colorspace", "target-transfer", args, &first))
 			goto fail;
 		ret = avfilter_link(current, 0, first, 0);
@@ -394,9 +395,10 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		 * transfer conversion is done mathematically rather than by
 		 * metadata substitution.
 		 */
-		snprintf(args, sizeof(args),
-			 "iprimaries=%s:ispace=%s:itrc=%s:irange=input:primaries=%s:space=%s:trc=%s:range=tv:format=yuv420p:dither=fsb:fast=0:wpadapt=bradford",
-			 source_primaries, source_matrix, source_trc, target.primaries, target.matrix, target.trc);
+		snprintf(
+			args, sizeof(args),
+			"iprimaries=%s:ispace=%s:itrc=%s:irange=input:primaries=%s:space=%s:trc=%s:range=tv:format=yuv420p:dither=fsb:fast=0:wpadapt=bradford",
+			source_primaries, source_matrix, source_trc, target.primaries, target.matrix, target.trc);
 		if (!create_filter(transform->graph, "colorspace", "target-sdr", args, &first))
 			goto fail;
 		ret = avfilter_link(current, 0, first, 0);
