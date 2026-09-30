@@ -539,6 +539,8 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 
 	log_frame_color_info(r, out, hardware_path);
 
+	/* clang-format probe. */
+
 	/* The range selector describes the source stream. Resolve it once and
 	 * pass the result explicitly to both OBS and the CST graph. */
 	pthread_mutex_lock(&r->state_mutex);
