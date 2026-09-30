@@ -1780,10 +1780,10 @@ import android.hardware.camera2.params.TonemapCurve;
                     requestedColorSpace = android.graphics.ColorSpace.Named.LINEAR_SRGB;
                 } else if (cameraGamma != 9) {
                     /*
-                     * Android's named SRGB/BT709/BT2020 spaces already imply a
-                     * non-linear transfer. Linear output is therefore left
-                     * without a named session ColorSpace; the tone-map stage
-                     * and encoder metadata define the linear transfer.
+                     * For Linear, LINEAR_SRGB is requested separately below.
+                     * For the other profiles, the named color space identifies
+                     * the requested gamut/primaries and the tone-map stage
+                     * supplies the requested transfer characteristic.
                      */
                     switch (cameraColorSpace) {
                         case 1:
@@ -1974,18 +1974,41 @@ helpers = r'''    private static String getActivePhysicalCameraId(TotalCaptureRe
             return;
         }
 
-        if (cameraGamma == 8 || cameraGamma == 9) {
+        if (cameraGamma == 8) {
             /*
-             * sRGB and Linear sRGB are represented by the selected Camera2
-             * session ColorSpace. Do not also apply a preset/identity
-             * tone-mapping curve here: doing both can cause the HAL to apply
-             * the transfer twice or otherwise produce a severe contrast shift.
+             * The sRGB transfer is selected explicitly with PRESET_CURVE.
+             * Session ColorSpace selects the output color space/profile;
+             * the preset supplies the actual sRGB transfer curve.
              */
+            if (!hasToneMapMode(CaptureRequest.TONEMAP_MODE_PRESET_CURVE)) {
+                throw new IllegalArgumentException("Camera does not support preset sRGB tone mapping");
+            }
             requestBuilder.set(CaptureRequest.TONEMAP_MODE,
-                    CaptureRequest.TONEMAP_MODE_FAST);
+                    CaptureRequest.TONEMAP_MODE_PRESET_CURVE);
+            requestBuilder.set(CaptureRequest.TONEMAP_PRESET_CURVE,
+                    CaptureRequest.TONEMAP_PRESET_CURVE_SRGB);
             requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, null);
             requestBuilder.set(CaptureRequest.TONEMAP_CURVE, null);
+            return;
+        }
+
+        if (cameraGamma == 9) {
+            /*
+             * Camera2 CONTRAST_CURVE is explicitly defined as an input->output
+             * mapping in normalized values. The identity curve therefore
+             * produces genuine linear output. LINEAR_SRGB, when supported,
+             * supplies the matching session color-space declaration.
+             */
+            if (!hasToneMapMode(CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)) {
+                throw new IllegalArgumentException("Camera does not support linear tone mapping");
+            }
+            float[] curve = {0.0f, 0.0f, 1.0f, 1.0f};
+            TonemapCurve tonemap = new TonemapCurve(curve, curve, curve);
+            requestBuilder.set(CaptureRequest.TONEMAP_MODE,
+                    CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE);
+            requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, null);
             requestBuilder.set(CaptureRequest.TONEMAP_PRESET_CURVE, null);
+            requestBuilder.set(CaptureRequest.TONEMAP_CURVE, tonemap);
             return;
         }
 
