@@ -21,7 +21,8 @@ typedef struct scrcpy_color_transform scrcpy_color_transform_t;
 
 scrcpy_color_transform_t *scrcpy_color_transform_create(int source_profile, int target_profile);
 
-bool scrcpy_color_transform_apply(scrcpy_color_transform_t *transform, AVFrame *input, AVFrame *output);
+bool scrcpy_color_transform_apply(scrcpy_color_transform_t *transform, AVFrame *input, AVFrame *output,
+				   enum AVColorRange input_range);
 
 void scrcpy_color_transform_destroy(scrcpy_color_transform_t *transform);
 
