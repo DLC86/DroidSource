@@ -552,8 +552,11 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 						       source_av_range)) {
 			out = r->cst_frame;
 		} else {
-			obs_log(LOG_WARNING, "scrcpy-reader: CST failed; using source frame unchanged");
-			out->color_range = source_av_range;
+			/* A selected CST is an explicit output-format contract. Never fall
+			 * back to the camera frame here, because doing so can silently send
+			 * 10-bit to OBS when an 8-bit target was selected (or vice versa). */
+			obs_log(LOG_WARNING, "scrcpy-reader: CST failed; dropping frame instead of bypassing selected target");
+			return;
 		}
 	} else if (color_range_override != SCRCPY_COLOR_RANGE_AUTO) {
 		/* CST bypass leaves camera samples and Auto metadata untouched. */
