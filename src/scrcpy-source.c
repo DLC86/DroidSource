@@ -333,9 +333,24 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 	bfree(log_path);
 
 	const bool camera_source = ctx->video_source && strcmp(ctx->video_source, "camera") == 0;
+	int effective_source_profile = camera_source ? ctx->camera_color_profile : 0;
+	if (camera_source && ctx->camera_10bit) {
+		/*
+		 * 10-bit mode forces BT.2020 and the selected HDR transfer in the
+		 * patched scrcpy server. The reader must use that actual stream
+		 * profile, not a stale disabled 8-bit UI selection.
+		 */
+		int hdr_gamma = CAMERA_GAMMA_HLG;
+		const int selected_gamma = ctx->camera_color_profile % 10;
+		if (selected_gamma == CAMERA_GAMMA_HDR10)
+			hdr_gamma = CAMERA_GAMMA_HDR10;
+		else if (selected_gamma == CAMERA_GAMMA_HDR10_PLUS)
+			hdr_gamma = CAMERA_GAMMA_HDR10_PLUS;
+		effective_source_profile = CAMERA_COLOR_SPACE_REC2020 * 10 + hdr_gamma;
+	}
 	ctx->reader = scrcpy_reader_create(ctx->source, port, ctx->hardware_decoding, ctx->flip_vertical,
 					   ctx->video_buffer_ms, ctx->portrait_mode, ctx->camera_color_range,
-					   camera_source ? ctx->camera_color_profile : 0, camera_source ? ctx->camera_cst : CAMERA_CST_OFF);
+					   effective_source_profile, camera_source ? ctx->camera_cst : CAMERA_CST_OFF);
 
 	if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0 && control_port != 0 && ctx->serial &&
 	    *ctx->serial) {
