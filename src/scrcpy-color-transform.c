@@ -41,13 +41,14 @@ struct cst_color_info {
 static bool convert_yuv420_bit_depth(const AVFrame *src, AVFrame *dst, enum AVPixelFormat target_format)
 {
 	const enum AVPixelFormat source_format = (enum AVPixelFormat)src->format;
-	const bool source_8 = source_format == AV_PIX_FMT_YUV420P || source_format == AV_PIX_FMT_YUVJ420P;
+	const bool source_8 = source_format == AV_PIX_FMT_YUV420P || source_format == AV_PIX_FMT_YUVJ420P ||
+			      source_format == AV_PIX_FMT_NV12;
 	const bool source_10 = source_format == AV_PIX_FMT_YUV420P10LE || source_format == AV_PIX_FMT_P010LE;
 	const bool target_8 = target_format == AV_PIX_FMT_YUV420P;
 	const bool target_10 = target_format == AV_PIX_FMT_YUV420P10LE;
 
 	if (!src || !dst || (!source_8 && !source_10) || (!target_8 && !target_10) ||
-	    source_8 == target_8)
+	    (source_format == target_format))
 		return false;
 
 	av_frame_unref(dst);
@@ -57,26 +58,55 @@ static bool convert_yuv420_bit_depth(const AVFrame *src, AVFrame *dst, enum AVPi
 	if (av_frame_copy_props(dst, src) < 0 || av_frame_get_buffer(dst, 32) < 0)
 		return false;
 
-	for (int plane = 0; plane < 3; ++plane) {
-		const int width = plane == 0 ? src->width : (src->width + 1) / 2;
-		const int height = plane == 0 ? src->height : (src->height + 1) / 2;
-		for (int y = 0; y < height; ++y) {
-			const uint8_t *src_row = src->data[plane] + (size_t)y * src->linesize[plane];
-			uint8_t *dst_row = dst->data[plane] + (size_t)y * dst->linesize[plane];
-			for (int x = 0; x < width; ++x) {
-				if (target_10) {
-					uint16_t value;
-					if (source_format == AV_PIX_FMT_P010LE)
-						value = ((const uint16_t *)src_row)[x] >> 6;
-					else
-						value = src_row[x];
-					((uint16_t *)dst_row)[x] = source_8 ? (uint16_t)value << 2 : value;
+	const int chroma_width = (src->width + 1) / 2;
+	const int chroma_height = (src->height + 1) / 2;
+
+	/* Luma plane. */
+	for (int y = 0; y < src->height; ++y) {
+		const uint8_t *src_row = src->data[0] + (size_t)y * src->linesize[0];
+		uint8_t *dst_row = dst->data[0] + (size_t)y * dst->linesize[0];
+		for (int x = 0; x < src->width; ++x) {
+			uint16_t value;
+			if (source_format == AV_PIX_FMT_P010LE)
+				value = ((const uint16_t *)src_row)[x] >> 6;
+			else if (source_10)
+				value = ((const uint16_t *)src_row)[x];
+			else
+				value = src_row[x];
+
+			if (target_10)
+				((uint16_t *)dst_row)[x] = source_10 ? value : (uint16_t)value << 2;
+			else
+				dst_row[x] = (uint8_t)((value + 2) >> 2);
+		}
+	}
+
+	/* Chroma planes. */
+	for (int plane = 0; plane < 2; ++plane) {
+		for (int y = 0; y < chroma_height; ++y) {
+			uint8_t *dst_row = dst->data[plane + 1] + (size_t)y * dst->linesize[plane + 1];
+
+			for (int x = 0; x < chroma_width; ++x) {
+				uint16_t value;
+				if (source_format == AV_PIX_FMT_NV12) {
+					const uint8_t *src_row = src->data[1] + (size_t)y * src->linesize[1];
+					value = src_row[2 * x + plane];
+				} else if (source_format == AV_PIX_FMT_P010LE) {
+					const uint16_t *src_row = (const uint16_t *)(src->data[1] + (size_t)y * src->linesize[1]);
+					value = src_row[2 * x + plane] >> 6;
+				} else if (source_10) {
+					const uint16_t *src_row =
+						(const uint16_t *)(src->data[plane + 1] + (size_t)y * src->linesize[plane + 1]);
+					value = src_row[x];
 				} else {
-					const uint16_t value = source_format == AV_PIX_FMT_P010LE
-							       ? ((const uint16_t *)src_row)[x] >> 6
-						       : ((const uint16_t *)src_row)[x];
-					((uint8_t *)dst_row)[x] = (uint8_t)((value + 2) >> 2);
+					const uint8_t *src_row = src->data[plane + 1] + (size_t)y * src->linesize[plane + 1];
+					value = src_row[x];
 				}
+
+				if (target_10)
+					((uint16_t *)dst_row)[x] = source_8 ? (uint16_t)value << 2 : value;
+				else
+					dst_row[x] = (uint8_t)((value + 2) >> 2);
 			}
 		}
 	}
