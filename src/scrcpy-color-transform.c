@@ -16,6 +16,7 @@ struct scrcpy_color_transform {
 	AVFilterContext *buffer_src;
 	AVFilterContext *buffer_sink;
 	enum AVPixelFormat input_format;
+	enum AVColorRange input_range;
 	int input_width;
 	int input_height;
 };
@@ -239,7 +240,7 @@ static enum AVPixelFormat normalize_input_format(enum AVPixelFormat format)
 	}
 }
 
-static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *input)
+static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *input, enum AVColorRange input_range)
 {
 	struct cst_target_info target;
 	AVFilterContext *current = NULL;
@@ -253,6 +254,7 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 	const enum AVPixelFormat source_format = (enum AVPixelFormat)input->format;
 	const enum AVPixelFormat input_format = normalize_input_format(source_format);
 	const bool normalize = input_format != source_format;
+	const char *input_range_name = input_range == AVCOL_RANGE_JPEG ? "pc" : "tv";
 	int ret;
 
 	if (!target_info(transform->target_profile, &target))
@@ -301,8 +303,8 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		 * colorspace conversion would clip highlights above the SDR range.
 		 */
 		snprintf(args, sizeof(args),
-			 "primariesin=%s:matrixin=%s:transferin=%s:primaries=%s:matrix=gbr:transfer=linear:range=pc",
-			 source_primaries, source_matrix, source_trc, source_primaries);
+			 "primariesin=%s:matrixin=%s:transferin=%s:rangein=%s:primaries=%s:matrix=gbr:transfer=linear:range=pc",
+			 source_primaries, source_matrix, source_trc, input_range_name, source_primaries);
 		if (!create_filter(transform->graph, "zscale", "hdr-linearize", args, &first))
 			goto fail;
 		ret = avfilter_link(current, 0, first, 0);
@@ -370,8 +372,8 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		 * represent HLG/PQ transfers as well as the 10-bit output format.
 		 */
 		snprintf(args, sizeof(args),
-			 "primariesin=%s:matrixin=%s:transferin=%s:primaries=%s:matrix=%s:transfer=%s:range=tv",
-			 source_primaries, source_matrix, source_trc, target.primaries, target.matrix, target.trc);
+			 "primariesin=%s:matrixin=%s:transferin=%s:rangein=%s:primaries=%s:matrix=%s:transfer=%s:range=tv",
+			 source_primaries, source_matrix, source_trc, input_range_name, target.primaries, target.matrix, target.trc);
 		if (!create_filter(transform->graph, "zscale", "target-hdr", args, &first))
 			goto fail;
 		ret = avfilter_link(current, 0, first, 0);
@@ -397,8 +399,8 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		 */
 		snprintf(
 			args, sizeof(args),
-			"iprimaries=%s:ispace=%s:itrc=%s:irange=input:primaries=%s:space=%s:trc=%s:range=tv:format=yuv420p:dither=fsb:fast=0:wpadapt=bradford",
-			source_primaries, source_matrix, source_trc, target.primaries, target.matrix, target.trc);
+			"iprimaries=%s:ispace=%s:itrc=%s:irange=%s:primaries=%s:space=%s:trc=%s:range=tv:format=yuv420p:dither=fsb:fast=0:wpadapt=bradford",
+			source_primaries, source_matrix, source_trc, input_range_name, target.primaries, target.matrix, target.trc);
 		if (!create_filter(transform->graph, "colorspace", "target-sdr", args, &first))
 			goto fail;
 		ret = avfilter_link(current, 0, first, 0);
@@ -408,6 +410,25 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		}
 		current = first;
 	}
+
+	/*
+	 * Always enforce the target pixel format at the end of the graph.
+	 * This guarantees that a 10-bit source with an 8-bit CST target
+	 * reaches OBS as an actual 8-bit frame.
+	 */
+	const char *target_pix_fmt_name = av_get_pix_fmt_name(target.output_format);
+	if (!target_pix_fmt_name)
+		goto fail;
+
+	snprintf(args, sizeof(args), "pix_fmts=%s", target_pix_fmt_name);
+	if (!create_filter(transform->graph, "format", "target-format", args, &third))
+		goto fail;
+	ret = avfilter_link(current, 0, third, 0);
+	if (ret < 0) {
+		log_filter_error("link target format", ret);
+		goto fail;
+	}
+	current = third;
 
 	if (!create_filter(transform->graph, "buffersink", "out", NULL, &sink))
 		goto fail;
@@ -426,6 +447,7 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 
 	transform->buffer_sink = sink;
 	transform->input_format = (enum AVPixelFormat)input->format;
+	transform->input_range = input_range;
 	transform->input_width = input->width;
 	transform->input_height = input->height;
 	return true;
@@ -451,10 +473,12 @@ scrcpy_color_transform_t *scrcpy_color_transform_create(int source_profile, int 
 	transform->source_profile = source_profile;
 	transform->target_profile = target_profile;
 	transform->input_format = AV_PIX_FMT_NONE;
+	transform->input_range = AVCOL_RANGE_UNSPECIFIED;
 	return transform;
 }
 
-bool scrcpy_color_transform_apply(scrcpy_color_transform_t *transform, AVFrame *input, AVFrame *output)
+bool scrcpy_color_transform_apply(scrcpy_color_transform_t *transform, AVFrame *input, AVFrame *output,
+				   enum AVColorRange input_range)
 {
 	struct cst_target_info target;
 	int ret;
@@ -462,9 +486,13 @@ bool scrcpy_color_transform_apply(scrcpy_color_transform_t *transform, AVFrame *
 	if (!transform || !input || !output || !target_info(transform->target_profile, &target))
 		return false;
 
+	if (input_range != AVCOL_RANGE_JPEG && input_range != AVCOL_RANGE_MPEG)
+		input_range = input->color_range == AVCOL_RANGE_JPEG ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
+
 	if (!transform->graph || transform->input_format != (enum AVPixelFormat)input->format ||
-	    transform->input_width != input->width || transform->input_height != input->height) {
-		if (!build_graph(transform, input))
+	    transform->input_range != input_range || transform->input_width != input->width ||
+	    transform->input_height != input->height) {
+		if (!build_graph(transform, input, input_range))
 			return false;
 	}
 
@@ -485,6 +513,16 @@ bool scrcpy_color_transform_apply(scrcpy_color_transform_t *transform, AVFrame *
 	output->colorspace = target.av_space;
 	output->color_trc = target.av_trc;
 	output->color_range = AVCOL_RANGE_MPEG;
+
+	if ((enum AVPixelFormat)output->format != target.output_format) {
+		av_log(NULL, AV_LOG_ERROR,
+		       "scrcpy-color-transform: target format mismatch: got %s, expected %s\n",
+		       av_get_pix_fmt_name((enum AVPixelFormat)output->format),
+		       av_get_pix_fmt_name(target.output_format));
+		av_frame_unref(output);
+		return false;
+	}
+
 	return true;
 }
 
