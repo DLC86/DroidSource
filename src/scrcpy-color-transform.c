@@ -450,8 +450,7 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 			goto fail;
 		current = next;
 
-		if (!create_filter(transform->graph, "tonemap", "tone-map", "tonemap=mobius:param=0.3:desat=2",
-				   &next))
+		if (!create_filter(transform->graph, "tonemap", "tone-map", "tonemap=mobius:param=0.3:desat=2", &next))
 			goto fail;
 		if (!link_filters(current, next, "tone map"))
 			goto fail;
