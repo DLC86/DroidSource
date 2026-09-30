@@ -1386,7 +1386,7 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/Options.java", [
                             } else if (CAMERA_GAMMA_OPTION.equals(optionKey)
                                     && valueObj instanceof Integer) {
                                 int gamma = (Integer) valueObj;
-                                if (gamma < 0 || gamma > 9) {
+                                if (gamma < 0 || gamma > 8) {
                                     throw new IllegalArgumentException("Invalid camera gamma: " + gamma);
                                 }
                                 options.cameraGamma = gamma;
@@ -1514,8 +1514,6 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/video/SurfaceEncoder
                     transfer = 2;
                 } else if (cameraGamma == 5) {
                     transfer = MediaFormat.COLOR_TRANSFER_HLG;
-                } else if (cameraGamma == 9) {
-                    transfer = MediaFormat.COLOR_TRANSFER_LINEAR;
                 } else if (cameraColorSpace == 3) {
                     // Android's BT.2020 named space uses a 2.2 OETF.
                     transfer = 4;
@@ -1673,7 +1671,7 @@ import android.hardware.camera2.params.TonemapCurve;
             whiteBalanceKelvin = Math.max(0, wbKelvin);
             cameraWbLock = wbLock && whiteBalanceKelvin <= 0;
             cameraColorSpace = Math.max(0, Math.min(3, colorSpace));
-            cameraGamma = Math.max(0, Math.min(9, gamma));
+            cameraGamma = Math.max(0, Math.min(8, gamma));
             cameraTenBit = tenBit;
 
             if (currentSession != null && requestBuilder != null) {
@@ -1770,21 +1768,7 @@ import android.hardware.camera2.params.TonemapCurve;
                     requestedColorSpace = (requestedDynamicRange == DynamicRangeProfiles.HLG10)
                             ? android.graphics.ColorSpace.Named.BT2020_HLG
                             : android.graphics.ColorSpace.Named.BT2020_PQ;
-                } else if (cameraGamma == 9 && (cameraColorSpace == 1 || cameraColorSpace == 2)) {
-                    /*
-                     * LINEAR_SRGB has the same primaries as sRGB/BT.709 but an
-                     * identity transfer. Use it when the device advertises it;
-                     * otherwise the existing unspecified-space fallback below
-                     * keeps Linear usable on devices with narrower camera profiles.
-                     */
-                    requestedColorSpace = android.graphics.ColorSpace.Named.LINEAR_SRGB;
-                } else if (cameraGamma != 9) {
-                    /*
-                     * For Linear, LINEAR_SRGB is requested separately below.
-                     * For the other profiles, the named color space identifies
-                     * the requested gamut/primaries and the tone-map stage
-                     * supplies the requested transfer characteristic.
-                     */
+                } else if (cameraColorSpace != 0) {
                     switch (cameraColorSpace) {
                         case 1:
                             requestedColorSpace = android.graphics.ColorSpace.Named.SRGB;
@@ -1847,8 +1831,6 @@ import android.hardware.camera2.params.TonemapCurve;
                     sessionConfig.setColorSpace(requestedColorSpace);
                     Ln.i("Camera session color space set to " + requestedColorSpace.name()
                             + " with " + (cameraTenBit ? String.valueOf(requestedDynamicRange) : "STANDARD") + " profile");
-                } else if (!cameraTenBit && cameraGamma == 9) {
-                    Ln.i("Camera linear transfer selected; session ColorSpace left unspecified");
                 } else if (cameraTenBit) {
                     // The dynamic-range profile itself remains authoritative for HDR.
                     // Some devices do not expose a ColorSpaceProfiles entry for the
@@ -1989,26 +1971,6 @@ helpers = r'''    private static String getActivePhysicalCameraId(TotalCaptureRe
                     CaptureRequest.TONEMAP_PRESET_CURVE_SRGB);
             requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, null);
             requestBuilder.set(CaptureRequest.TONEMAP_CURVE, null);
-            return;
-        }
-
-        if (cameraGamma == 9) {
-            /*
-             * Camera2 CONTRAST_CURVE is explicitly defined as an input->output
-             * mapping in normalized values. The identity curve therefore
-             * produces genuine linear output. LINEAR_SRGB, when supported,
-             * supplies the matching session color-space declaration.
-             */
-            if (!hasToneMapMode(CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)) {
-                throw new IllegalArgumentException("Camera does not support linear tone mapping");
-            }
-            float[] curve = {0.0f, 0.0f, 1.0f, 1.0f};
-            TonemapCurve tonemap = new TonemapCurve(curve, curve, curve);
-            requestBuilder.set(CaptureRequest.TONEMAP_MODE,
-                    CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE);
-            requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, null);
-            requestBuilder.set(CaptureRequest.TONEMAP_PRESET_CURVE, null);
-            requestBuilder.set(CaptureRequest.TONEMAP_CURVE, tonemap);
             return;
         }
 
