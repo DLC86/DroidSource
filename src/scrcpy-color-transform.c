@@ -296,52 +296,60 @@ static bool get_transfer_expression(const struct cst_color_info *info, bool enco
 
 	switch (info->transfer_id) {
 	case 1:
-		snprintf(expression, expression_size, encode ? "pow(val/maxval,1/2.2)*maxval"
-						    : "pow(val/maxval,2.2)*maxval");
+		snprintf(expression, expression_size,
+			 encode ? "pow(val/maxval,1/2.2)*maxval" : "pow(val/maxval,2.2)*maxval");
 		return true;
 
 	case 2:
-		snprintf(expression, expression_size, encode ? "pow(val/maxval,1/2.4)*maxval"
-						    : "pow(val/maxval,2.4)*maxval");
+		snprintf(expression, expression_size,
+			 encode ? "pow(val/maxval,1/2.4)*maxval" : "pow(val/maxval,2.4)*maxval");
 		return true;
 
 	case 3:
 		if (encode) {
-			snprintf(expression, expression_size,
-				 "if(lte(val/maxval,0.018),4.5*(val/maxval)*maxval,(1.099*pow(val/maxval,0.45)-0.099)*maxval)");
+			snprintf(
+				expression, expression_size,
+				"if(lte(val/maxval,0.018),4.5*(val/maxval)*maxval,(1.099*pow(val/maxval,0.45)-0.099)*maxval)");
 		} else {
-			snprintf(expression, expression_size,
-				 "if(lte(val/maxval,0.081),(val/maxval)/4.5*maxval,pow(((val/maxval)+0.099)/1.099,1/0.45)*maxval)");
+			snprintf(
+				expression, expression_size,
+				"if(lte(val/maxval,0.081),(val/maxval)/4.5*maxval,pow(((val/maxval)+0.099)/1.099,1/0.45)*maxval)");
 		}
 		return true;
 
 	case 4:
 		if (encode) {
-			snprintf(expression, expression_size,
-				 "if(lte(val/maxval,0.0031308),12.92*(val/maxval)*maxval,(1.055*pow(val/maxval,1/2.4)-0.055)*maxval)");
+			snprintf(
+				expression, expression_size,
+				"if(lte(val/maxval,0.0031308),12.92*(val/maxval)*maxval,(1.055*pow(val/maxval,1/2.4)-0.055)*maxval)");
 		} else {
-			snprintf(expression, expression_size,
-				 "if(lte(val/maxval,0.04045),(val/maxval)/12.92*maxval,pow(((val/maxval)+0.055)/1.055,2.4)*maxval)");
+			snprintf(
+				expression, expression_size,
+				"if(lte(val/maxval,0.04045),(val/maxval)/12.92*maxval,pow(((val/maxval)+0.055)/1.055,2.4)*maxval)");
 		}
 		return true;
 
 	case 5:
 		if (encode) {
-			snprintf(expression, expression_size,
-				 "if(lte(val/maxval,1/12),sqrt(3*(val/maxval))*maxval,(0.17883277*log(12*(val/maxval)-0.28466892)+0.55991073)*maxval)");
+			snprintf(
+				expression, expression_size,
+				"if(lte(val/maxval,1/12),sqrt(3*(val/maxval))*maxval,(0.17883277*log(12*(val/maxval)-0.28466892)+0.55991073)*maxval)");
 		} else {
-			snprintf(expression, expression_size,
-				 "if(lte(val/maxval,0.5),(val/maxval)*(val/maxval)/3*maxval,(exp(((val/maxval)-0.55991073)/0.17883277)+0.28466892)/12*maxval)");
+			snprintf(
+				expression, expression_size,
+				"if(lte(val/maxval,0.5),(val/maxval)*(val/maxval)/3*maxval,(exp(((val/maxval)-0.55991073)/0.17883277)+0.28466892)/12*maxval)");
 		}
 		return true;
 
 	case 6:
 		if (encode) {
-			snprintf(expression, expression_size,
-				 "pow((0.8359375+18.8515625*pow(val/maxval,0.1593017578))/(1+18.6875*pow(val/maxval,0.1593017578)),78.84375)*maxval");
+			snprintf(
+				expression, expression_size,
+				"pow((0.8359375+18.8515625*pow(val/maxval,0.1593017578))/(1+18.6875*pow(val/maxval,0.1593017578)),78.84375)*maxval");
 		} else {
-			snprintf(expression, expression_size,
-				 "pow(max(pow(val/maxval,1/78.84375)-0.8359375,0)/(18.8515625-18.6875*pow(val/maxval,1/78.84375)),1/0.1593017578)*maxval");
+			snprintf(
+				expression, expression_size,
+				"pow(max(pow(val/maxval,1/78.84375)-0.8359375,0)/(18.8515625-18.6875*pow(val/maxval,1/78.84375)),1/0.1593017578)*maxval");
 		}
 		return true;
 
@@ -405,8 +413,7 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 	const enum AVPixelFormat source_format = (enum AVPixelFormat)input->format;
 	const enum AVPixelFormat input_format = normalize_input_format(source_format);
 	const AVPixFmtDescriptor *source_desc = av_pix_fmt_desc_get(source_format);
-	const bool source_is_10bit =
-		source_desc && source_desc->nb_components >= 3 && source_desc->comp[0].depth >= 10;
+	const bool source_is_10bit = source_desc && source_desc->nb_components >= 3 && source_desc->comp[0].depth >= 10;
 	const char *rgb_pix_fmt_name = source_is_10bit ? "gbrp16le" : "gbrp";
 	const char *target_pix_fmt_name = av_get_pix_fmt_name(target.output_format);
 	const char *source_pix_fmt_name = av_get_pix_fmt_name(source_format);
@@ -418,9 +425,8 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 	const char *target_space = target.av_primaries == AVCOL_PRI_BT2020 ? "bt2020ncl" : "bt709";
 	const char *range_name = input_range == AVCOL_RANGE_JPEG ? "pc" : "tv";
 
-	snprintf(buffer_args, sizeof(buffer_args),
-		 "video_size=%dx%d:pix_fmt=%s:time_base=1/1000000:pixel_aspect=1/1", input->width, input->height,
-		 source_pix_fmt_name);
+	snprintf(buffer_args, sizeof(buffer_args), "video_size=%dx%d:pix_fmt=%s:time_base=1/1000000:pixel_aspect=1/1",
+		 input->width, input->height, source_pix_fmt_name);
 	if (!create_filter(transform->graph, "buffer", "in", buffer_args, &transform->buffer_src))
 		goto fail;
 	current = transform->buffer_src;
@@ -457,8 +463,7 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		 * linear light, tone-map in float, convert primaries in RGB, encode
 		 * the destination transfer, then return to explicit YUV420P.
 		 */
-		snprintf(filter_args, sizeof(filter_args),
-			 "in_range=%s:in_color_matrix=%s:out_range=full", range_name,
+		snprintf(filter_args, sizeof(filter_args), "in_range=%s:in_color_matrix=%s:out_range=full", range_name,
 			 source_space == "bt2020ncl" ? "bt2020" : "bt709");
 		if (!create_filter(transform->graph, "scale", "yuv-to-rgb", filter_args, &next))
 			goto fail;
@@ -485,8 +490,7 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 			goto fail;
 		current = next;
 
-		if (!create_filter(transform->graph, "tonemap", "tone-map",
-				   "tonemap=mobius:param=0.3:desat=2", &next))
+		if (!create_filter(transform->graph, "tonemap", "tone-map", "tonemap=mobius:param=0.3:desat=2", &next))
 			goto fail;
 		if (!link_filters(current, next, "tone map"))
 			goto fail;
@@ -508,8 +512,7 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 			goto fail;
 		current = next;
 
-		snprintf(filter_args, sizeof(filter_args),
-			 "in_range=full:out_range=limited:out_color_matrix=%s",
+		snprintf(filter_args, sizeof(filter_args), "in_range=full:out_range=limited:out_color_matrix=%s",
 			 target_space == "bt2020ncl" ? "bt2020" : "bt709");
 		if (!create_filter(transform->graph, "scale", "rgb-to-yuv", filter_args, &next))
 			goto fail;
@@ -598,8 +601,8 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		av_strerror(ret, error_string, sizeof(error_string));
 		obs_log(LOG_ERROR,
 			"scrcpy-color-transform: graph config failed: source=%s/%s/%s range=%s target=%s/%s/%s output=%s error=%s",
-			source.primaries, source.matrix, source.trc, range_name, target.primaries, target.matrix, target.trc,
-			target_pix_fmt_name, error_string);
+			source.primaries, source.matrix, source.trc, range_name, target.primaries, target.matrix,
+			target.trc, target_pix_fmt_name, error_string);
 		goto fail;
 	}
 
