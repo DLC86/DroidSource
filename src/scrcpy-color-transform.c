@@ -458,9 +458,21 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 			goto fail;
 		current = next;
 	} else if (source.hdr && !target.hdr) {
-		/* HDR -> SDR: perform the one unavoidable tone-map pass. The intermediate
-		 * is 8-bit RGB because the destination is 8-bit; the previous 16-bit RGB
-		 * pipeline was unnecessarily expensive at 4K. */
+		/*
+		 * HDR -> SDR:
+		 * 1) decode YUV to linear-light RGB at 16-bit precision,
+		 * 2) tone-map in float,
+		 * 3) return explicitly to 16-bit RGB because lutrgb/colorchannelmixer
+		 *    operate on the integer RGB format used by this graph,
+		 * 4) apply the target primaries and transfer,
+		 * 5) explicitly convert RGB -> YUV420P.
+		 *
+		 * The previous implementation fed gbrpf32le directly into the
+		 * colorspace filter. The ffmpeg CLI can hide this with an automatically
+		 * inserted scale/format converter, but the plugin builds the graph
+		 * explicitly through the libavfilter API. Keeping every format boundary
+		 * explicit avoids graph-configuration EINVAL on Windows.
+		 */
 		snprintf(filter_args, sizeof(filter_args), "in_range=%s:in_color_matrix=%s:out_range=full", range_name,
 			 source_space == "bt2020ncl" ? "bt2020" : "bt709");
 		if (!create_filter(transform->graph, "scale", "yuv-to-rgb", filter_args, &next))
@@ -469,9 +481,6 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 			goto fail;
 		current = next;
 
-		/* Keep the HDR signal at 16-bit precision until after transfer
-		 * decode and tone mapping. Converting to 8-bit here destroys highlight
-		 * precision and can make 10->8 CST appear ineffective. */
 		snprintf(filter_args, sizeof(filter_args), "pix_fmts=%s", rgb_pix_fmt_name);
 		if (!create_filter(transform->graph, "format", "rgb", filter_args, &next))
 			goto fail;
@@ -498,15 +507,42 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 			goto fail;
 		current = next;
 
-		snprintf(
-			filter_args, sizeof(filter_args),
-			"iprimaries=%s:ispace=gbr:itrc=linear:irange=pc:primaries=%s:space=%s:trc=%s:range=tv:format=yuv420p:dither=fsb:wpadapt=bradford",
-			source.primaries, target.primaries, target_space, target.trc);
-		if (!create_filter(transform->graph, "colorspace", "hdr-to-sdr", filter_args, &next))
+		/*
+		 * Make the float -> integer RGB transition explicit before the
+		 * remaining RGB-domain operations. The final output is 8-bit YUV,
+		 * so 16-bit RGB is more than sufficient as the conversion workspace.
+		 */
+		if (!create_filter(transform->graph, "format", "rgb-16bit",
+				   "pix_fmts=gbrp16le", &next))
 			goto fail;
-		if (!link_filters(current, next, "HDR to SDR colorspace"))
+		if (!link_filters(current, next, "RGB 16-bit after tone map"))
 			goto fail;
 		current = next;
+
+		if (!add_primary_matrix(transform->graph, current, &source, &target, &next))
+			goto fail;
+		current = next;
+
+		if (!get_transfer_expression(&target, true, expression, sizeof(expression)))
+			goto fail;
+		if (!add_lutrgb_filter(transform->graph, current, "encode-transfer", expression, &next))
+			goto fail;
+		current = next;
+
+		/*
+		 * scale performs the actual RGB -> YUV conversion. Keep the final
+		 * format constraint explicit so the OBS output can never accidentally
+		 * remain RGB or another YUV depth.
+		 */
+		snprintf(filter_args, sizeof(filter_args),
+			 "in_range=full:out_range=limited:out_color_matrix=%s",
+			 target_space == "bt2020ncl" ? "bt2020" : "bt709");
+		if (!create_filter(transform->graph, "scale", "rgb-to-yuv", filter_args, &next))
+			goto fail;
+		if (!link_filters(current, next, "RGB to YUV"))
+			goto fail;
+		current = next;
+
 	} else {
 		/* SDR -> HDR and HDR -> HDR. Preserve 10-bit precision for the destination.
 		 * This path is only used when an HDR destination is explicitly requested. */
