@@ -3,9 +3,7 @@
 #include <libavfilter/avfilter.h>
 #include <libavfilter/buffersink.h>
 #include <libavfilter/buffersrc.h>
-#include <libavutil/avstring.h>
 #include <libavutil/error.h>
-#include <libavutil/imgutils.h>
 #include <libavutil/pixdesc.h>
 
 #include <stdio.h>
@@ -17,7 +15,6 @@ struct scrcpy_color_transform {
 	AVFilterGraph *graph;
 	AVFilterContext *buffer_src;
 	AVFilterContext *buffer_sink;
-	AVFrame *frame;
 	enum AVPixelFormat input_format;
 	int input_width;
 	int input_height;
@@ -38,15 +35,10 @@ static bool profile_to_colorimetry(int profile, const char **primaries, const ch
 				   enum AVColorPrimaries *av_primaries, enum AVColorSpace *av_space,
 				   enum AVColorTransferCharacteristic *av_trc)
 {
-	int color_space;
-	int gamma;
+	const int color_space = profile / 10;
+	const int gamma = profile % 10;
 
-	if (profile <= 0)
-		return false;
-
-	color_space = profile / 10;
-	gamma = profile % 10;
-	if (color_space < 1 || color_space > 3 || gamma < 1 || gamma > 9)
+	if (profile <= 0 || color_space < 1 || color_space > 3 || gamma < 1 || gamma > 9)
 		return false;
 
 	if (color_space == 3) {
@@ -67,8 +59,11 @@ static bool profile_to_colorimetry(int profile, const char **primaries, const ch
 		*av_trc = AVCOL_TRC_GAMMA22;
 		break;
 	case 2:
-		/* The camera's Gamma 2.4 mode maps to the standard SMPTE 170M
-		 * transfer available in FFmpeg's color conversion filters. */
+		/*
+		 * FFmpeg does not expose a dedicated exact gamma-2.4 transfer in
+		 * colorspace/zscale; SMPTE 170M is the standard SDR transfer used
+		 * by the plugin's current Gamma 2.4 camera path.
+		 */
 		*trc = "smpte170m";
 		*av_trc = AVCOL_TRC_SMPTE170M;
 		break;
@@ -97,6 +92,7 @@ static bool profile_to_colorimetry(int profile, const char **primaries, const ch
 	default:
 		return false;
 	}
+
 	return true;
 }
 
@@ -109,7 +105,7 @@ static bool target_info(int profile, struct cst_target_info *info)
 	enum AVColorSpace av_space;
 	enum AVColorTransferCharacteristic av_trc;
 
-	if (!info || profile <= 0 ||
+	if (!info ||
 	    !profile_to_colorimetry(profile, &primaries, &matrix, &trc, &av_primaries, &av_space, &av_trc))
 		return false;
 
@@ -124,10 +120,10 @@ static bool target_info(int profile, struct cst_target_info *info)
 	return true;
 }
 
-static bool source_is_hdr(const struct scrcpy_color_transform *transform, const AVFrame *input)
+static bool source_is_hdr(const scrcpy_color_transform_t *transform, const AVFrame *input)
 {
 	if (transform->source_profile > 0) {
-		int gamma = transform->source_profile % 10;
+		const int gamma = transform->source_profile % 10;
 		return gamma == 5 || gamma == 6 || gamma == 7;
 	}
 
@@ -135,22 +131,71 @@ static bool source_is_hdr(const struct scrcpy_color_transform *transform, const 
 			 input->color_trc == AVCOL_TRC_BT2020_10 || input->color_trc == AVCOL_TRC_BT2020_12);
 }
 
-static const char *source_override_options(const scrcpy_color_transform_t *transform, char *buf, size_t size)
+static void frame_colorimetry(const AVFrame *input, const char **primaries, const char **matrix, const char **trc)
 {
-	const char *primaries = NULL;
-	const char *matrix = NULL;
-	const char *trc = NULL;
+	*primaries = input->color_primaries == AVCOL_PRI_BT2020 ? "bt2020" : "bt709";
+
+	switch (input->colorspace) {
+	case AVCOL_SPC_BT2020_CL:
+		*matrix = "2020_cl";
+		break;
+	case AVCOL_SPC_BT2020_NCL:
+		*matrix = "2020_ncl";
+		break;
+	case AVCOL_SPC_BT709:
+		*matrix = "709";
+		break;
+	default:
+		*matrix = input->color_primaries == AVCOL_PRI_BT2020 ? "2020_ncl" : "709";
+		break;
+	}
+
+	switch (input->color_trc) {
+	case AVCOL_TRC_BT709:
+		*trc = "bt709";
+		break;
+	case AVCOL_TRC_GAMMA22:
+		*trc = "gamma22";
+		break;
+	case AVCOL_TRC_SMPTE170M:
+		*trc = "smpte170m";
+		break;
+	case AVCOL_TRC_IEC61966_2_1:
+		*trc = "srgb";
+		break;
+	case AVCOL_TRC_LINEAR:
+		*trc = "linear";
+		break;
+	case AVCOL_TRC_ARIB_STD_B67:
+		*trc = "arib-std-b67";
+		break;
+	case AVCOL_TRC_SMPTE2084:
+		*trc = "smpte2084";
+		break;
+	case AVCOL_TRC_BT2020_10:
+		*trc = "bt2020-10";
+		break;
+	case AVCOL_TRC_BT2020_12:
+		*trc = "bt2020-12";
+		break;
+	default:
+		*trc = "srgb";
+		break;
+	}
+}
+
+static void source_colorimetry(const scrcpy_color_transform_t *transform, const AVFrame *input,
+			       const char **primaries, const char **matrix, const char **trc)
+{
 	enum AVColorPrimaries av_primaries;
 	enum AVColorSpace av_space;
 	enum AVColorTransferCharacteristic av_trc;
 
-	if (!transform || transform->source_profile <= 0 ||
-	    !profile_to_colorimetry(transform->source_profile, &primaries, &matrix, &trc, &av_primaries, &av_space,
-				    &av_trc))
-		return "";
+	if (transform->source_profile > 0 &&
+	    profile_to_colorimetry(transform->source_profile, primaries, matrix, trc, &av_primaries, &av_space, &av_trc))
+		return;
 
-	snprintf(buf, size, ":primariesin=%s:matrixin=%s:transferin=%s", primaries, matrix, trc);
-	return buf;
+	frame_colorimetry(input, primaries, matrix, trc);
 }
 
 static bool create_filter(AVFilterGraph *graph, const char *name, const char *instance, const char *args,
@@ -164,6 +209,13 @@ static bool create_filter(AVFilterGraph *graph, const char *name, const char *in
 
 	ret = avfilter_graph_create_filter(out, filter, instance, args, NULL, graph);
 	return ret >= 0;
+}
+
+static void log_filter_error(const char *stage, int error)
+{
+	char error_string[AV_ERROR_MAX_STRING_SIZE];
+	av_strerror(error, error_string, sizeof(error_string));
+	av_log(NULL, AV_LOG_WARNING, "scrcpy-color-transform: %s failed: %s\n", stage, error_string);
 }
 
 static enum AVPixelFormat normalize_input_format(enum AVPixelFormat format)
@@ -189,262 +241,191 @@ static enum AVPixelFormat normalize_input_format(enum AVPixelFormat format)
 static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *input)
 {
 	struct cst_target_info target;
+	AVFilterContext *current = NULL;
 	AVFilterContext *normalizer = NULL;
 	AVFilterContext *first = NULL;
-	AVFilterContext *tone_map = NULL;
 	AVFilterContext *second = NULL;
-	AVFilterContext *output_format = NULL;
+	AVFilterContext *third = NULL;
 	AVFilterContext *sink = NULL;
-	AVFilterContext *current = NULL;
 	char buffer_args[256];
 	char args[1024];
-	char source_override[512];
-	const enum AVPixelFormat normalized_format = normalize_input_format((enum AVPixelFormat)input->format);
-	const bool input_format_needs_normalization = normalized_format != (enum AVPixelFormat)input->format;
+	const enum AVPixelFormat input_format = normalize_input_format((enum AVPixelFormat)input->format);
+	const bool normalize = input_format != (enum AVPixelFormat)input->format;
 	int ret;
 
 	if (!target_info(transform->target_profile, &target))
 		return false;
 
-	if (transform->graph)
-		avfilter_graph_free(&transform->graph);
-
-	transform->graph = avfilter_graph_alloc();
+	avfilter_graph_free(&transform->graph);
 	transform->buffer_src = NULL;
 	transform->buffer_sink = NULL;
+
+	transform->graph = avfilter_graph_alloc();
 	if (!transform->graph)
 		return false;
 
-	const char *pix_fmt_name = av_get_pix_fmt_name(normalized_format);
+	const char *pix_fmt_name = av_get_pix_fmt_name(input_format);
 	if (!pix_fmt_name)
 		goto fail;
 
 	snprintf(buffer_args, sizeof(buffer_args), "video_size=%dx%d:pix_fmt=%s:time_base=1/1000000:pixel_aspect=1/1",
 		 input->width, input->height, pix_fmt_name);
+
 	if (!create_filter(transform->graph, "buffer", "in", buffer_args, &transform->buffer_src))
 		goto fail;
-
 	current = transform->buffer_src;
 
-	if (input_format_needs_normalization) {
+	if (normalize) {
 		snprintf(args, sizeof(args), "pix_fmts=%s", pix_fmt_name);
 		if (!create_filter(transform->graph, "format", "normalize", args, &normalizer))
 			goto fail;
-		if (avfilter_link(current, 0, normalizer, 0) < 0)
+		ret = avfilter_link(current, 0, normalizer, 0);
+		if (ret < 0) {
+			log_filter_error("link normalize", ret);
 			goto fail;
+		}
 		current = normalizer;
 	}
 
-	source_override_options(transform, source_override, sizeof(source_override));
+	const char *source_primaries;
+	const char *source_matrix;
+	const char *source_trc;
+	source_colorimetry(transform, input, &source_primaries, &source_matrix, &source_trc);
 
 	if (source_is_hdr(transform, input) && !target.hdr) {
+		/*
+		 * HDR -> SDR requires a real tone-map in linear light. A plain
+		 * colorspace conversion would clip highlights above the SDR range.
+		 */
 		snprintf(args, sizeof(args),
-			 "primariesin=%s:matrixin=%s:transferin=%s:primaries=%s:matrix=gbr:transfer=linear:range=pc%s",
-			 transform->source_profile > 0 ? strtok(source_override + 1, ":") : "bt2020",
-			 transform->source_profile > 0 ? strtok(NULL, ":") : "2020_ncl",
-			 transform->source_profile > 0 ? strtok(NULL, ":") : (input->color_trc == AVCOL_TRC_SMPTE2084 ? "smpte2084" : "arib-std-b67"),
-			 source_is_hdr(transform, input) ? "bt2020" : target.primaries, source_override);
-		/* The parser above is intentionally not used for explicit profiles below;
-		 * rebuild with a direct option string to avoid mutating source_override. */
-		{
-			const char *in_primaries = "bt2020";
-			const char *in_matrix = "2020_ncl";
-			const char *in_trc = input->color_trc == AVCOL_TRC_SMPTE2084 ? "smpte2084" : "arib-std-b67";
-			if (transform->source_profile > 0) {
-				static char p[32];
-				static char m[32];
-				static char t[32];
-				enum AVColorPrimaries ap;
-				enum AVColorSpace as;
-				enum AVColorTransferCharacteristic at;
-				profile_to_colorimetry(transform->source_profile, &in_primaries, &in_matrix, &in_trc, &ap, &as, &at);
-				(void)p;
-				(void)m;
-				(void)t;
-			}
-			snprintf(args, sizeof(args),
-				 "primariesin=%s:matrixin=%s:transferin=%s:primaries=%s:matrix=gbr:transfer=linear:range=pc",
-				 in_primaries, in_matrix, in_trc, in_primaries);
-		}
+			 "primariesin=%s:matrixin=%s:transferin=%s:primaries=%s:matrix=gbr:transfer=linear:range=pc",
+			 source_primaries, source_matrix, source_trc, source_primaries);
 		if (!create_filter(transform->graph, "zscale", "hdr-linearize", args, &first))
 			goto fail;
-		if (avfilter_link(current, 0, first, 0) < 0)
+		ret = avfilter_link(current, 0, first, 0);
+		if (ret < 0) {
+			log_filter_error("link HDR linearize", ret);
 			goto fail;
+		}
 		current = first;
 
-		if (!create_filter(transform->graph, "format", "float-rgb", "pix_fmts=gbrpf32le", &normalizer))
+		if (!create_filter(transform->graph, "format", "float-rgb", "pix_fmts=gbrpf32le", &second))
 			goto fail;
-		if (avfilter_link(current, 0, normalizer, 0) < 0)
+		ret = avfilter_link(current, 0, second, 0);
+		if (ret < 0) {
+			log_filter_error("link float RGB", ret);
 			goto fail;
-		current = normalizer;
-
-		if (!create_filter(transform->graph, "tonemap", "tone-map", "tonemap=mobius:param=0.3:desat=2", &tone_map))
-			goto fail;
-		if (avfilter_link(current, 0, tone_map, 0) < 0)
-			goto fail;
-		current = tone_map;
-
-		snprintf(args, sizeof(args),
-			 "primariesin=%s:matrixin=gbr:transferin=linear:primaries=%s:matrix=%s:transfer=linear:rangein=pc:range=tv",
-			 target.primaries == NULL ? "bt709" : "bt2020", target.primaries, target.matrix);
-		if (!create_filter(transform->graph, "zscale", "linear-target", args, &second))
-			goto fail;
-		if (avfilter_link(current, 0, second, 0) < 0)
-			goto fail;
+		}
 		current = second;
 
-		if (!create_filter(transform->graph, "format", "linear-yuv10", "pix_fmts=yuv420p10le", &output_format))
+		if (!create_filter(transform->graph, "tonemap", "tone-map", "tonemap=mobius:param=0.3:desat=2", &third))
 			goto fail;
-		if (avfilter_link(current, 0, output_format, 0) < 0)
+		ret = avfilter_link(current, 0, third, 0);
+		if (ret < 0) {
+			log_filter_error("link tone map", ret);
 			goto fail;
-		current = output_format;
+		}
+		current = third;
+
+		snprintf(args, sizeof(args),
+			 "matrixin=gbr:transferin=linear:primariesin=%s:matrix=%s:transfer=linear:primaries=%s:rangein=pc:range=tv",
+			 source_primaries, target.matrix, target.primaries);
+		if (!create_filter(transform->graph, "zscale", "linear-target", args, &first))
+			goto fail;
+		ret = avfilter_link(current, 0, first, 0);
+		if (ret < 0) {
+			log_filter_error("link linear target", ret);
+			goto fail;
+		}
+		current = first;
+
+		if (!create_filter(transform->graph, "format", "linear-yuv10", "pix_fmts=yuv420p10le", &second))
+			goto fail;
+		ret = avfilter_link(current, 0, second, 0);
+		if (ret < 0) {
+			log_filter_error("link linear YUV", ret);
+			goto fail;
+		}
+		current = second;
 
 		snprintf(args, sizeof(args),
 			 "iprimaries=%s:ispace=%s:itrc=linear:irange=tv:primaries=%s:space=%s:trc=%s:range=tv:format=yuv420p:dither=fsb",
 			 target.primaries, target.matrix, target.primaries, target.matrix, target.trc);
-		if (!create_filter(transform->graph, "colorspace", "target-trc", args, &first))
+		if (!create_filter(transform->graph, "colorspace", "target-transfer", args, &first))
 			goto fail;
-		if (avfilter_link(current, 0, first, 0) < 0)
+		ret = avfilter_link(current, 0, first, 0);
+		if (ret < 0) {
+			log_filter_error("link target transfer", ret);
 			goto fail;
+		}
 		current = first;
 	} else if (target.hdr) {
-		char in_primaries[32];
-		char in_matrix[32];
-		char in_trc[32];
-		const char *src_primaries;
-		const char *src_matrix;
-		const char *src_trc;
-		enum AVColorPrimaries ap;
-		enum AVColorSpace as;
-		enum AVColorTransferCharacteristic at;
-
-		src_primaries = "bt709";
-		src_matrix = "709";
-		src_trc = "srgb";
-		if (transform->source_profile > 0) {
-			profile_to_colorimetry(transform->source_profile, &src_primaries, &src_matrix, &src_trc, &ap, &as, &at);
-		} else {
-			if (input->color_primaries == AVCOL_PRI_BT2020)
-				src_primaries = "bt2020";
-			if (input->colorspace == AVCOL_SPC_BT2020_NCL || input->colorspace == AVCOL_SPC_BT2020_CL)
-				src_matrix = "2020_ncl";
-			else if (input->colorspace == AVCOL_SPC_BT709)
-				src_matrix = "709";
-			switch (input->color_trc) {
-			case AVCOL_TRC_BT709:
-				src_trc = "bt709";
-				break;
-			case AVCOL_TRC_GAMMA22:
-				src_trc = "gamma22";
-				break;
-			case AVCOL_TRC_SMPTE170M:
-				src_trc = "smpte170m";
-				break;
-			case AVCOL_TRC_IEC61966_2_1:
-				src_trc = "srgb";
-				break;
-			case AVCOL_TRC_LINEAR:
-				src_trc = "linear";
-				break;
-			case AVCOL_TRC_ARIB_STD_B67:
-				src_trc = "arib-std-b67";
-				break;
-			case AVCOL_TRC_SMPTE2084:
-				src_trc = "smpte2084";
-				break;
-			default:
-				break;
-			}
-		}
-		snprintf(in_primaries, sizeof(in_primaries), "%s", src_primaries);
-		snprintf(in_matrix, sizeof(in_matrix), "%s", src_matrix);
-		snprintf(in_trc, sizeof(in_trc), "%s", src_trc);
+		/*
+		 * SDR -> HDR and HDR -> HDR are handled by zscale because it can
+		 * represent HLG/PQ transfers as well as the 10-bit output format.
+		 */
 		snprintf(args, sizeof(args),
 			 "primariesin=%s:matrixin=%s:transferin=%s:primaries=%s:matrix=%s:transfer=%s:range=tv",
-			 in_primaries, in_matrix, in_trc, target.primaries, target.matrix, target.trc);
-		if (!create_filter(transform->graph, "zscale", "hdr-target", args, &first))
+			 source_primaries, source_matrix, source_trc, target.primaries, target.matrix, target.trc);
+		if (!create_filter(transform->graph, "zscale", "target-hdr", args, &first))
 			goto fail;
-		if (avfilter_link(current, 0, first, 0) < 0)
+		ret = avfilter_link(current, 0, first, 0);
+		if (ret < 0) {
+			log_filter_error("link target HDR", ret);
 			goto fail;
-		current = first;
-		if (!create_filter(transform->graph, "format", "target-format", "pix_fmts=yuv420p10le", &output_format))
-			goto fail;
-		if (avfilter_link(current, 0, output_format, 0) < 0)
-			goto fail;
-		current = output_format;
-	} else {
-		char src_primaries[32];
-		char src_matrix[32];
-		char src_trc[32];
-		const char *src_primaries_ptr = "bt709";
-		const char *src_matrix_ptr = "709";
-		const char *src_trc_ptr = "srgb";
-		enum AVColorPrimaries ap;
-		enum AVColorSpace as;
-		enum AVColorTransferCharacteristic at;
-
-		if (transform->source_profile > 0) {
-			profile_to_colorimetry(transform->source_profile, &src_primaries_ptr, &src_matrix_ptr, &src_trc_ptr, &ap,
-					       &as, &at);
-		} else {
-			if (input->color_primaries == AVCOL_PRI_BT2020)
-				src_primaries_ptr = "bt2020";
-			if (input->colorspace == AVCOL_SPC_BT2020_NCL || input->colorspace == AVCOL_SPC_BT2020_CL)
-				src_matrix_ptr = "2020_ncl";
-			else if (input->colorspace == AVCOL_SPC_BT709)
-				src_matrix_ptr = "709";
-			switch (input->color_trc) {
-			case AVCOL_TRC_BT709:
-				src_trc_ptr = "bt709";
-				break;
-			case AVCOL_TRC_GAMMA22:
-				src_trc_ptr = "gamma22";
-				break;
-			case AVCOL_TRC_SMPTE170M:
-				src_trc_ptr = "smpte170m";
-				break;
-			case AVCOL_TRC_IEC61966_2_1:
-				src_trc_ptr = "srgb";
-				break;
-			case AVCOL_TRC_LINEAR:
-				src_trc_ptr = "linear";
-				break;
-			default:
-				break;
-			}
 		}
-		snprintf(src_primaries, sizeof(src_primaries), "%s", src_primaries_ptr);
-		snprintf(src_matrix, sizeof(src_matrix), "%s", src_matrix_ptr);
-		snprintf(src_trc, sizeof(src_trc), "%s", src_trc_ptr);
+		current = first;
+
+		if (!create_filter(transform->graph, "format", "target-10bit", "pix_fmts=yuv420p10le", &second))
+			goto fail;
+		ret = avfilter_link(current, 0, second, 0);
+		if (ret < 0) {
+			log_filter_error("link target 10-bit", ret);
+			goto fail;
+		}
+		current = second;
+	} else {
+		/*
+		 * SDR -> SDR is handled by colorspace with fast=0 so primary and
+		 * transfer conversion is done mathematically rather than by
+		 * metadata substitution.
+		 */
 		snprintf(args, sizeof(args),
-			 "iprimaries=%s:ispace=%s:itrc=%s:irange=input:primaries=%s:space=%s:trc=%s:range=tv:format=%s:dither=fsb",
-			 src_primaries, src_matrix, src_trc, target.primaries, target.matrix, target.trc,
-			 target.output_format == AV_PIX_FMT_YUV420P10LE ? "yuv420p10le" : "yuv420p");
-		if (!create_filter(transform->graph, "colorspace", "sdr-target", args, &first))
+			 "iprimaries=%s:ispace=%s:itrc=%s:irange=input:primaries=%s:space=%s:trc=%s:range=tv:format=yuv420p:dither=fsb:fast=0:wpadapt=bradford",
+			 source_primaries, source_matrix, source_trc, target.primaries, target.matrix, target.trc);
+		if (!create_filter(transform->graph, "colorspace", "target-sdr", args, &first))
 			goto fail;
-		if (avfilter_link(current, 0, first, 0) < 0)
+		ret = avfilter_link(current, 0, first, 0);
+		if (ret < 0) {
+			log_filter_error("link target SDR", ret);
 			goto fail;
+		}
 		current = first;
 	}
 
 	if (!create_filter(transform->graph, "buffersink", "out", NULL, &sink))
 		goto fail;
-	if (avfilter_link(current, 0, sink, 0) < 0)
+
+	ret = avfilter_link(current, 0, sink, 0);
+	if (ret < 0) {
+		log_filter_error("link sink", ret);
 		goto fail;
+	}
 
 	ret = avfilter_graph_config(transform->graph, NULL);
-	if (ret < 0)
+	if (ret < 0) {
+		log_filter_error("configure graph", ret);
 		goto fail;
+	}
 
 	transform->buffer_sink = sink;
-	transform->input_format = normalized_format;
+	transform->input_format = (enum AVPixelFormat)input->format;
 	transform->input_width = input->width;
 	transform->input_height = input->height;
 	return true;
 
 fail:
 	avfilter_graph_free(&transform->graph);
-	transform->graph = NULL;
 	transform->buffer_src = NULL;
 	transform->buffer_sink = NULL;
 	return false;
@@ -464,49 +445,40 @@ scrcpy_color_transform_t *scrcpy_color_transform_create(int source_profile, int 
 	transform->source_profile = source_profile;
 	transform->target_profile = target_profile;
 	transform->input_format = AV_PIX_FMT_NONE;
-	transform->frame = av_frame_alloc();
-	if (!transform->frame) {
-		av_free(transform);
-		return NULL;
-	}
 	return transform;
 }
 
 bool scrcpy_color_transform_apply(scrcpy_color_transform_t *transform, AVFrame *input, AVFrame *output)
 {
-	const int input_format = input ? input->format : -1;
+	struct cst_target_info target;
 	int ret;
 
-	if (!transform || !input || !output)
+	if (!transform || !input || !output || !target_info(transform->target_profile, &target))
 		return false;
 
-	if (!transform->graph || transform->input_format != input_format || transform->input_width != input->width ||
-	    transform->input_height != input->height) {
+	if (!transform->graph || transform->input_format != (enum AVPixelFormat)input->format ||
+	    transform->input_width != input->width || transform->input_height != input->height) {
 		if (!build_graph(transform, input))
 			return false;
 	}
 
-	av_frame_unref(output);
 	ret = av_buffersrc_add_frame_flags(transform->buffer_src, input, AV_BUFFERSRC_FLAG_KEEP_REF);
-	if (ret < 0)
+	if (ret < 0) {
+		log_filter_error("push frame", ret);
 		return false;
-
-	ret = av_buffersink_get_frame(transform->buffer_sink, output);
-	if (ret < 0)
-		return false;
-
-	output->color_primaries = target_info(transform->target_profile, &(struct cst_target_info){0})
-				      ? ((struct cst_target_info){0}).av_primaries
-				      : output->color_primaries;
-	{
-		struct cst_target_info target;
-		if (target_info(transform->target_profile, &target)) {
-			output->color_primaries = target.av_primaries;
-			output->colorspace = target.av_space;
-			output->color_trc = target.av_trc;
-			output->color_range = AVCOL_RANGE_MPEG;
-		}
 	}
+
+	av_frame_unref(output);
+	ret = av_buffersink_get_frame(transform->buffer_sink, output);
+	if (ret < 0) {
+		log_filter_error("pull frame", ret);
+		return false;
+	}
+
+	output->color_primaries = target.av_primaries;
+	output->colorspace = target.av_space;
+	output->color_trc = target.av_trc;
+	output->color_range = AVCOL_RANGE_MPEG;
 	return true;
 }
 
@@ -522,6 +494,5 @@ void scrcpy_color_transform_destroy(scrcpy_color_transform_t *transform)
 		return;
 
 	avfilter_graph_free(&transform->graph);
-	av_frame_free(&transform->frame);
 	av_free(transform);
 }
