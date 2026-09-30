@@ -12,6 +12,7 @@ typedef int socklen_t;
 #endif
 
 #include "scrcpy-reader.h"
+#include "scrcpy-color-transform.h"
 
 #include <obs-module.h>
 #include <plugin-support.h>
@@ -78,6 +79,10 @@ struct scrcpy_reader {
 	int video_buffer_ms;
 	bool portrait_mode;
 	int color_range_override;
+	int source_color_profile;
+	int cst_target_profile;
+	scrcpy_color_transform_t *color_transform;
+	AVFrame *cst_frame;
 	bool logged_color_info;
 
 	AVBufferRef *hw_device_ctx;
@@ -534,6 +539,29 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 
 	log_frame_color_info(r, out, hardware_path);
 
+	/* The range selector describes the source stream. When a CST is active,
+	 * feed that resolved range to FFmpeg, then use the CST's target metadata. */
+	pthread_mutex_lock(&r->state_mutex);
+	int color_range_override = r->color_range_override;
+	pthread_mutex_unlock(&r->state_mutex);
+	enum video_range_type source_range = resolve_color_range(out, color_range_override);
+
+	if (r->color_transform && r->cst_frame) {
+		const enum AVColorRange original_range = out->color_range;
+		if (source_range == VIDEO_RANGE_FULL)
+			out->color_range = AVCOL_RANGE_JPEG;
+		else
+			out->color_range = AVCOL_RANGE_MPEG;
+
+		if (scrcpy_color_transform_apply(r->color_transform, out, r->cst_frame)) {
+			out = r->cst_frame;
+		} else {
+			obs_log(LOG_WARNING, "scrcpy-reader: CST failed; using source frame unchanged");
+		}
+		if (out != r->cst_frame)
+			out->color_range = original_range;
+	}
+
 	if (r->portrait_mode) {
 		if (!rotate_frame_90_ccw(r, out)) {
 			obs_log(LOG_WARNING, "scrcpy-reader: portrait mode unsupported for pixel format %d",
@@ -566,11 +594,10 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 
 	pthread_mutex_lock(&r->state_mutex);
 	r->last_frame_ns = os_gettime_ns();
-	int color_range_override = r->color_range_override;
 	pthread_mutex_unlock(&r->state_mutex);
 
 	enum video_colorspace cs = obs_colorspace_from_av(out);
-	enum video_range_type range = resolve_color_range(out, color_range_override);
+	enum video_range_type range = out->color_range == AVCOL_RANGE_JPEG ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
 	bool matrix_ok;
 	const bool bt2020_sdr = ((enum AVColorSpace)out->colorspace == AVCOL_SPC_BT2020_NCL ||
 				 (enum AVColorSpace)out->colorspace == AVCOL_SPC_BT2020_CL) &&
@@ -730,7 +757,8 @@ done:
 }
 
 scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port, bool hardware_decoding, bool flip_vertical,
-				      int video_buffer_ms, bool portrait_mode, int color_range_override)
+				      int video_buffer_ms, bool portrait_mode, int color_range_override, int source_color_profile,
+				      int cst_target_profile)
 {
 	struct scrcpy_reader *r = bzalloc(sizeof(*r));
 	r->source = source;
@@ -741,6 +769,10 @@ scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port, bool 
 	r->video_buffer_ms = video_buffer_ms > 0 ? video_buffer_ms : 0;
 	r->portrait_mode = portrait_mode;
 	r->color_range_override = color_range_override;
+	r->source_color_profile = source_color_profile;
+	r->cst_target_profile = cst_target_profile;
+	r->color_transform = scrcpy_color_transform_create(source_color_profile, cst_target_profile);
+	r->cst_frame = cst_target_profile != SCRCPY_CST_OFF ? av_frame_alloc() : NULL;
 	r->hw_pix_fmt = AV_PIX_FMT_NONE;
 	r->stop = false;
 	r->running = false;
@@ -824,6 +856,10 @@ void scrcpy_reader_destroy(scrcpy_reader_t *r)
 		av_frame_free(&r->transfer_frame);
 	if (r->portrait_frame)
 		av_frame_free(&r->portrait_frame);
+	if (r->cst_frame)
+		av_frame_free(&r->cst_frame);
+	if (r->color_transform)
+		scrcpy_color_transform_destroy(r->color_transform);
 	if (r->hw_device_ctx)
 		av_buffer_unref(&r->hw_device_ctx);
 	if (r->codec_ctx)
