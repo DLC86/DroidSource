@@ -539,27 +539,21 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 
 	log_frame_color_info(r, out, hardware_path);
 
-	/* The range selector describes the source stream. When a CST is active,
-	 * feed that resolved range to FFmpeg, then use the CST's target metadata. */
+	/* The range selector describes the source stream. Resolve it once and
+	 * pass the result explicitly to both OBS and the CST graph. */
 	pthread_mutex_lock(&r->state_mutex);
 	int color_range_override = r->color_range_override;
 	pthread_mutex_unlock(&r->state_mutex);
 	enum video_range_type source_range = resolve_color_range(out, color_range_override);
+	enum AVColorRange source_av_range =
+		source_range == VIDEO_RANGE_FULL ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
 
 	if (r->color_transform && r->cst_frame) {
-		const enum AVColorRange original_range = out->color_range;
-		if (source_range == VIDEO_RANGE_FULL)
-			out->color_range = AVCOL_RANGE_JPEG;
-		else
-			out->color_range = AVCOL_RANGE_MPEG;
-
-		if (scrcpy_color_transform_apply(r->color_transform, out, r->cst_frame)) {
+		if (scrcpy_color_transform_apply(r->color_transform, out, r->cst_frame, source_av_range)) {
 			out = r->cst_frame;
 		} else {
 			obs_log(LOG_WARNING, "scrcpy-reader: CST failed; using source frame unchanged");
 		}
-		if (out != r->cst_frame)
-			out->color_range = original_range;
 	}
 
 	if (r->portrait_mode) {
