@@ -226,6 +226,15 @@ static bool link_filters(AVFilterContext *src, AVFilterContext *dst, const char 
 	return false;
 }
 
+static bool get_source_color_info(const scrcpy_color_transform_t *transform, const AVFrame *input,
+				       struct cst_color_info *info)
+{
+	if (transform->source_profile > 0)
+		return profile_to_color_info(transform->source_profile, info);
+
+	return frame_color_info(input, info);
+}
+
 static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *input, enum AVColorRange input_range)
 {
 	struct cst_color_info source;
@@ -236,7 +245,7 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 	char zscale_args[1024];
 	int ret;
 
-	if (!frame_color_info(input, &source))
+	if (!get_source_color_info(transform, input, &source))
 		return false;
 
 	if (!profile_to_color_info(transform->target_profile, &target))
