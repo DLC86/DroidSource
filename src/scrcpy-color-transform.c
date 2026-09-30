@@ -264,7 +264,7 @@ static bool add_lutrgb_filter(AVFilterGraph *graph, AVFilterContext *current, co
 }
 
 static bool get_transfer_expression(const struct cst_color_info *info, bool encode, char *expression,
-					 size_t expression_size)
+				    size_t expression_size)
 {
 	if (!info || !expression || expression_size == 0)
 		return false;
@@ -286,41 +286,49 @@ static bool get_transfer_expression(const struct cst_color_info *info, bool enco
 
 	case 3:
 		if (encode) {
-			snprintf(expression, expression_size,
-				 "if(lte(val/maxval,0.018)\\,4.5*(val/maxval)*maxval\\,(1.099*pow(val/maxval,0.45)-0.099)*maxval)");
+			snprintf(
+				expression, expression_size,
+				"if(lte(val/maxval,0.018)\\,4.5*(val/maxval)*maxval\\,(1.099*pow(val/maxval,0.45)-0.099)*maxval)");
 		} else {
-			snprintf(expression, expression_size,
-				 "if(lte(val/maxval,0.081)\\,(val/maxval)/4.5*maxval\\,pow(((val/maxval)+0.099)/1.099,1/0.45)*maxval)");
+			snprintf(
+				expression, expression_size,
+				"if(lte(val/maxval,0.081)\\,(val/maxval)/4.5*maxval\\,pow(((val/maxval)+0.099)/1.099,1/0.45)*maxval)");
 		}
 		return true;
 
 	case 4:
 		if (encode) {
-			snprintf(expression, expression_size,
-				 "if(lte(val/maxval,0.0031308)\\,12.92*(val/maxval)*maxval\\,(1.055*pow(val/maxval,1/2.4)-0.055)*maxval)");
+			snprintf(
+				expression, expression_size,
+				"if(lte(val/maxval,0.0031308)\\,12.92*(val/maxval)*maxval\\,(1.055*pow(val/maxval,1/2.4)-0.055)*maxval)");
 		} else {
-			snprintf(expression, expression_size,
-				 "if(lte(val/maxval,0.04045)\\,(val/maxval)/12.92*maxval\\,pow(((val/maxval)+0.055)/1.055,2.4)*maxval)");
+			snprintf(
+				expression, expression_size,
+				"if(lte(val/maxval,0.04045)\\,(val/maxval)/12.92*maxval\\,pow(((val/maxval)+0.055)/1.055,2.4)*maxval)");
 		}
 		return true;
 
 	case 5:
 		if (encode) {
-			snprintf(expression, expression_size,
-				 "if(lte(val/maxval,1/12)\\,sqrt(3*(val/maxval))*maxval\\,(0.17883277*log(12*(val/maxval)-0.28466892)+0.55991073)*maxval)");
+			snprintf(
+				expression, expression_size,
+				"if(lte(val/maxval,1/12)\\,sqrt(3*(val/maxval))*maxval\\,(0.17883277*log(12*(val/maxval)-0.28466892)+0.55991073)*maxval)");
 		} else {
-			snprintf(expression, expression_size,
-				 "if(lte(val/maxval,0.5)\\,(val/maxval)*(val/maxval)/3*maxval\\,(exp(((val/maxval)-0.55991073)/0.17883277)+0.28466892)/12*maxval)");
+			snprintf(
+				expression, expression_size,
+				"if(lte(val/maxval,0.5)\\,(val/maxval)*(val/maxval)/3*maxval\\,(exp(((val/maxval)-0.55991073)/0.17883277)+0.28466892)/12*maxval)");
 		}
 		return true;
 
 	case 6:
 		if (encode) {
-			snprintf(expression, expression_size,
-				 "pow((0.8359375+18.8515625*pow(val/maxval,0.1593017578))/(1+18.6875*pow(val/maxval,0.1593017578)),78.84375)*maxval");
+			snprintf(
+				expression, expression_size,
+				"pow((0.8359375+18.8515625*pow(val/maxval,0.1593017578))/(1+18.6875*pow(val/maxval,0.1593017578)),78.84375)*maxval");
 		} else {
-			snprintf(expression, expression_size,
-				 "pow(max(pow(val/maxval,1/78.84375)-0.8359375\\,0)/(18.8515625-18.6875*pow(val/maxval,1/78.84375))\\,1/0.1593017578)*maxval");
+			snprintf(
+				expression, expression_size,
+				"pow(max(pow(val/maxval,1/78.84375)-0.8359375\\,0)/(18.8515625-18.6875*pow(val/maxval,1/78.84375))\\,1/0.1593017578)*maxval");
 		}
 		return true;
 
@@ -450,8 +458,8 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 				goto fail;
 			current = next;
 
-			if (!create_filter(transform->graph, "tonemap", "tone-map",
-					    "tonemap=mobius:param=0.3:desat=2", &next))
+			if (!create_filter(transform->graph, "tonemap", "tone-map", "tonemap=mobius:param=0.3:desat=2",
+					   &next))
 				goto fail;
 			if (!link_filters(current, next, "tone map"))
 				goto fail;
