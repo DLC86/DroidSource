@@ -111,7 +111,7 @@ static bool profile_to_color_info(int profile, struct cst_color_info *info)
 	 * from the actual AVFrame and must never be inferred from the profile. */
 	info->output_format = output_8bit ? AV_PIX_FMT_YUV420P
 			      : info->hdr ? AV_PIX_FMT_YUV420P10LE
-				      : AV_PIX_FMT_YUV420P;
+					  : AV_PIX_FMT_YUV420P;
 	return true;
 }
 
@@ -502,8 +502,7 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 			goto fail;
 		current = next;
 
-		if (!create_filter(transform->graph, "tonemap", "tone-map",
-				   "tonemap=mobius:param=0.3:desat=2", &next))
+		if (!create_filter(transform->graph, "tonemap", "tone-map", "tonemap=mobius:param=0.3:desat=2", &next))
 			goto fail;
 		if (!link_filters(current, next, "tone map"))
 			goto fail;
@@ -514,8 +513,7 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		 * remaining RGB-domain operations. The final output is 8-bit YUV,
 		 * so 16-bit RGB is more than sufficient as the conversion workspace.
 		 */
-		if (!create_filter(transform->graph, "format", "rgb-16bit",
-				   "pix_fmts=gbrp16le", &next))
+		if (!create_filter(transform->graph, "format", "rgb-16bit", "pix_fmts=gbrp16le", &next))
 			goto fail;
 		if (!link_filters(current, next, "RGB 16-bit after tone map"))
 			goto fail;
@@ -536,8 +534,7 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		 * format constraint explicit so the OBS output can never accidentally
 		 * remain RGB or another YUV depth.
 		 */
-		snprintf(filter_args, sizeof(filter_args),
-			 "in_range=full:out_range=limited:out_color_matrix=%s",
+		snprintf(filter_args, sizeof(filter_args), "in_range=full:out_range=limited:out_color_matrix=%s",
 			 target_space == "bt2020ncl" ? "bt2020" : "bt709");
 		if (!create_filter(transform->graph, "scale", "rgb-to-yuv", filter_args, &next))
 			goto fail;
@@ -548,9 +545,8 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 	} else {
 		/* SDR -> HDR and HDR -> HDR. Preserve 10-bit precision for the destination.
 		 * This path is only used when an HDR destination is explicitly requested. */
-		snprintf(filter_args, sizeof(filter_args),
-			 "in_range=%s:in_color_matrix=%s:out_range=full",
-			 range_name, source_space == "bt2020ncl" ? "bt2020" : "bt709");
+		snprintf(filter_args, sizeof(filter_args), "in_range=%s:in_color_matrix=%s:out_range=full", range_name,
+			 source_space == "bt2020ncl" ? "bt2020" : "bt709");
 		if (!create_filter(transform->graph, "scale", "yuv-to-rgb", filter_args, &next))
 			goto fail;
 		if (!link_filters(current, next, "YUV to RGB"))
