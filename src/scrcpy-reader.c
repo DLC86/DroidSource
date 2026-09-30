@@ -631,6 +631,17 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	if (r->color_transform && r->cst_frame) {
 		if (scrcpy_color_transform_apply(r->color_transform, out, r->cst_frame, source_av_range)) {
 			out = r->cst_frame;
+			/* An 8-bit CST target must remain 8-bit all the way to OBS,
+			 * even when the camera decoder itself is operating at 10-bit. */
+			if (scrcpy_color_transform_target_is_8bit(r->cst_target_profile) &&
+			    out->format != AV_PIX_FMT_YUV420P) {
+				AVFrame *converted = NULL;
+				if (!convert_frame_to_8bit(r, out, &converted)) {
+					obs_log(LOG_WARNING, "scrcpy-reader: final 8-bit CST output conversion failed");
+					return;
+				}
+				out = converted;
+			}
 		} else {
 			/* A CST failure is non-fatal: keep the live camera stream available
 			 * rather than dropping every frame until the watchdog restarts scrcpy. */
