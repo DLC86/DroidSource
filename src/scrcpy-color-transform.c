@@ -1,6 +1,7 @@
 #include "scrcpy-color-transform.h"
 
 #include <obs-module.h>
+#include <plugin-support.h>
 
 #include <libavfilter/avfilter.h>
 #include <libavfilter/buffersink.h>
