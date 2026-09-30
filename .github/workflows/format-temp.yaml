@@ -2,6 +2,8 @@ name: Format temporary source
 on:
   push:
     branches: [master]
+permissions:
+  contents: write
 jobs:
   format:
     if: ${{ !contains(github.event.head_commit.message, 'Format C source with clang-format') }}
