@@ -585,9 +585,10 @@ static void src_update(void *data, obs_data_t *settings)
 			runtime_color_space = CAMERA_COLOR_SPACE_REC2020;
 			runtime_gamma = CAMERA_GAMMA_HLG;
 		}
-		(void)scrcpy_camera_control_apply(ctx->camera_control, ctx->camera_zoom, ctx->camera_torch, ctx->camera_iso,
-						  ctx->camera_shutter_us, ctx->camera_focus_distance, ctx->camera_wb_kelvin,
-						  ctx->camera_wb_lock, runtime_color_space, runtime_gamma, ctx->camera_10bit,
+		(void)scrcpy_camera_control_apply(ctx->camera_control, ctx->camera_zoom, ctx->camera_torch,
+						  ctx->camera_iso, ctx->camera_shutter_us, ctx->camera_focus_distance,
+						  ctx->camera_wb_kelvin, ctx->camera_wb_lock, runtime_color_space,
+						  runtime_gamma, ctx->camera_10bit,
 						  camera_gamma_to_dynamic_range(runtime_gamma, ctx->camera_10bit));
 	}
 
