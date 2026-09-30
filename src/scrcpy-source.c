@@ -317,6 +317,7 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 							 ctx->camera_wb_kelvin, ctx->camera_wb_lock, startup_color_space,
 							 startup_gamma, ctx->camera_10bit)) {
 				obs_log(LOG_WARNING, "scrcpy-source: camera control connection not ready");
+			}
 		}
 	}
 
