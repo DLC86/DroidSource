@@ -447,7 +447,7 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 	 */
 	if (!source.hdr && !target.hdr) {
 		snprintf(filter_args, sizeof(filter_args),
-			 "iprimaries=%s:ispace=%s:itrc=%s:irange=%s:primaries=%s:space=%s:trc=%s:range=tv:"
+			 "iprimaries=%s:ispace=%s:itrc=%s:irange=%s:primaries=%s:space=%s:trc=%s:range=pc:"
 			 "format=yuv420p:dither=fsb:fast=0:wpadapt=bradford",
 			 source.primaries, source_space, source.trc, range_name, target.primaries, target_space,
 			 target.trc);
@@ -512,7 +512,7 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 			goto fail;
 		current = next;
 
-		snprintf(filter_args, sizeof(filter_args), "in_range=full:out_range=limited:out_color_matrix=%s",
+		snprintf(filter_args, sizeof(filter_args), "in_range=full:out_range=full:out_color_matrix=%s",
 			 target_space == "bt2020ncl" ? "bt2020" : "bt709");
 		if (!create_filter(transform->graph, "scale", "rgb-to-yuv", filter_args, &next))
 			goto fail;
@@ -572,7 +572,7 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 			current = next;
 		}
 
-		snprintf(filter_args, sizeof(filter_args), "in_range=full:out_range=limited:out_color_matrix=%s",
+		snprintf(filter_args, sizeof(filter_args), "in_range=full:out_range=full:out_color_matrix=%s",
 			 target_space == "bt2020ncl" ? "bt2020" : "bt709");
 		if (!create_filter(transform->graph, "scale", "rgb-to-yuv", filter_args, &next))
 			goto fail;
@@ -692,7 +692,7 @@ bool scrcpy_color_transform_apply(scrcpy_color_transform_t *transform, AVFrame *
 	output->color_primaries = target.av_primaries;
 	output->colorspace = target.av_space;
 	output->color_trc = target.av_trc;
-	output->color_range = AVCOL_RANGE_MPEG;
+	output->color_range = AVCOL_RANGE_JPEG;
 
 	if ((enum AVPixelFormat)output->format != target.output_format) {
 		obs_log(LOG_ERROR, "scrcpy-color-transform: graph produced %s, expected %s",

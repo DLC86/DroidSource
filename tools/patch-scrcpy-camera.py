@@ -642,6 +642,17 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
             return;
         }
 
+        int[] edgeModes = cameraCharacteristics.get(CameraCharacteristics.EDGE_AVAILABLE_EDGE_MODES);
+        if (contains(edgeModes, CaptureRequest.EDGE_MODE_OFF)) {
+            requestBuilder.set(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_OFF);
+        }
+
+        int[] noiseReductionModes =
+                cameraCharacteristics.get(CameraCharacteristics.NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES);
+        if (contains(noiseReductionModes, CaptureRequest.NOISE_REDUCTION_MODE_OFF)) {
+            requestBuilder.set(CaptureRequest.NOISE_REDUCTION_MODE, CaptureRequest.NOISE_REDUCTION_MODE_OFF);
+        }
+
         zoom = clampZoom(zoom);
         if (android.os.Build.VERSION.SDK_INT >= 30 && zoomRange != null) {
             requestBuilder.set(CaptureRequest.CONTROL_ZOOM_RATIO, zoom);

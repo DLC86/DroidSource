@@ -237,8 +237,14 @@ static enum AVPixelFormat get_hw_format(AVCodecContext *codec_ctx, const enum AV
 }
 #endif
 
-static enum video_colorspace obs_colorspace_from_av(const AVFrame *frame)
+static enum video_colorspace obs_colorspace_from_av(const AVFrame *frame, bool force_sdr_hlg)
 {
+	if (force_sdr_hlg) {
+		if (frame->colorspace == AVCOL_SPC_BT2020_NCL || frame->colorspace == AVCOL_SPC_BT2020_CL)
+			return VIDEO_CS_709;
+		return VIDEO_CS_SRGB;
+	}
+
 	switch ((enum AVColorSpace)frame->colorspace) {
 	case AVCOL_SPC_SMPTE170M:
 	case AVCOL_SPC_BT470BG:
@@ -371,13 +377,26 @@ static bool obs_bt2020_sdr_matrix(enum video_format format, enum video_range_typ
 	return true;
 }
 
-static uint8_t obs_trc_from_av(const AVFrame *frame)
+static uint8_t obs_trc_from_av(const AVFrame *frame, bool force_sdr_hlg)
 {
+	if (force_sdr_hlg)
+		return VIDEO_TRC_SRGB;
+
 	if (frame->color_trc == AVCOL_TRC_ARIB_STD_B67)
 		return VIDEO_TRC_HLG;
 	if (frame->color_trc == AVCOL_TRC_SMPTE2084)
 		return VIDEO_TRC_PQ;
 	return VIDEO_TRC_SRGB;
+}
+
+static bool source_profile_is_8bit_hlg_sdr(const struct scrcpy_reader *r, const AVFrame *frame)
+{
+	if (!r || !frame || r->cst_target_profile != SCRCPY_CST_OFF || r->source_color_profile <= 0 ||
+	    r->source_color_profile >= 1000 || (r->source_color_profile % 10) != 5)
+		return false;
+
+	const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get((enum AVPixelFormat)frame->format);
+	return desc && desc->nb_components >= 3 && desc->comp[0].depth < 10;
 }
 
 static void log_frame_color_info(struct scrcpy_reader *r, const AVFrame *frame, bool hardware_path)
@@ -618,6 +637,10 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	enum video_range_type source_range = resolve_color_range(out, color_range_override);
 	enum AVColorRange source_av_range = source_range == VIDEO_RANGE_FULL ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
 
+	/* Make the resolved source range authoritative before any 8-bit conversion or CST. */
+	out->color_range = source_av_range;
+	const bool force_sdr_hlg = source_profile_is_8bit_hlg_sdr(r, out);
+
 	if (r->force_8bit_output) {
 		AVFrame *converted = NULL;
 		if (!convert_frame_to_8bit(r, out, &converted)) {
@@ -684,12 +707,13 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	obs_frame.timestamp += (uint64_t)r->video_buffer_ms * UINT64_C(1000000);
 	obs_frame.flip = r->flip_vertical;
 
-	enum video_colorspace cs = obs_colorspace_from_av(out);
+	enum video_colorspace cs = obs_colorspace_from_av(out, force_sdr_hlg);
 	enum video_range_type range = out->color_range == AVCOL_RANGE_JPEG ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
 	bool matrix_ok;
 	const bool bt2020_sdr = ((enum AVColorSpace)out->colorspace == AVCOL_SPC_BT2020_NCL ||
 				 (enum AVColorSpace)out->colorspace == AVCOL_SPC_BT2020_CL) &&
-				out->color_trc != AVCOL_TRC_ARIB_STD_B67 && out->color_trc != AVCOL_TRC_SMPTE2084;
+				(force_sdr_hlg || (out->color_trc != AVCOL_TRC_ARIB_STD_B67 &&
+						   out->color_trc != AVCOL_TRC_SMPTE2084));
 
 	if (bt2020_sdr) {
 		matrix_ok = obs_bt2020_sdr_matrix(fmt, range, obs_frame.color_matrix, obs_frame.color_range_min,
@@ -706,7 +730,7 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 		return;
 	}
 	obs_frame.full_range = range == VIDEO_RANGE_FULL;
-	obs_frame.trc = obs_trc_from_av(out);
+	obs_frame.trc = obs_trc_from_av(out, force_sdr_hlg);
 
 	obs_source_output_video(r->source, &obs_frame);
 }
