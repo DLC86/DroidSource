@@ -492,7 +492,8 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 
 	const enum AVPixelFormat source_format = (enum AVPixelFormat)input->format;
 	const enum AVPixelFormat input_format = normalize_input_format(source_format);
-	const bool source_is_10bit = source_format == AV_PIX_FMT_YUV420P10LE || source_format == AV_PIX_FMT_P010LE;
+	const bool source_is_10bit =
+		source_format == AV_PIX_FMT_YUV420P10LE || source_format == AV_PIX_FMT_P010LE;
 	const char *rgb_pix_fmt_name = source_is_10bit ? "gbrp16le" : "gbrp";
 	const char *target_pix_fmt_name = av_get_pix_fmt_name(target.output_format);
 	const char *source_pix_fmt_name = av_get_pix_fmt_name(source_format);
@@ -640,7 +641,6 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 
 	if (!create_filter(transform->graph, "buffersink", "out", NULL, &sink))
 		goto fail;
-	av_buffersink_set_pix_fmt(sink, target.output_format);
 	if (!link_filters(current, sink, "sink"))
 		goto fail;
 
