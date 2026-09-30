@@ -539,9 +539,11 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 
 	log_frame_color_info(r, out, hardware_path);
 
-	/* The range selector describes the source stream. Resolve it once and
-	 * pass the result explicitly to both OBS and the CST graph. */
+	/* The watchdog must measure decoded-frame arrival, not the time spent in
+	 * an optional color transform or OBS output. A slow/failing CST must never
+	 * make an otherwise healthy decoder look stale. */
 	pthread_mutex_lock(&r->state_mutex);
+	r->last_frame_ns = os_gettime_ns();
 	int color_range_override = r->color_range_override;
 	pthread_mutex_unlock(&r->state_mutex);
 	enum video_range_type source_range = resolve_color_range(out, color_range_override);
@@ -551,12 +553,11 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 		if (scrcpy_color_transform_apply(r->color_transform, out, r->cst_frame, source_av_range)) {
 			out = r->cst_frame;
 		} else {
-			/* A selected CST is an explicit output-format contract. Never fall
-			 * back to the camera frame here, because doing so can silently send
-			 * 10-bit to OBS when an 8-bit target was selected (or vice versa). */
-			obs_log(LOG_WARNING,
-				"scrcpy-reader: CST failed; dropping frame instead of bypassing selected target");
-			return;
+			/* A CST failure is non-fatal: keep the live camera stream available
+			 * rather than dropping every frame until the watchdog restarts scrcpy. */
+			obs_log(LOG_WARNING, "scrcpy-reader: CST failed; passing source frame through unchanged");
+			if (color_range_override != SCRCPY_COLOR_RANGE_AUTO)
+				out->color_range = source_av_range;
 		}
 	} else if (color_range_override != SCRCPY_COLOR_RANGE_AUTO) {
 		/* CST bypass leaves camera samples and Auto metadata untouched. */
@@ -592,10 +593,6 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 		obs_frame.timestamp = (uint64_t)out->pts * 1000ULL;
 	obs_frame.timestamp += (uint64_t)r->video_buffer_ms * UINT64_C(1000000);
 	obs_frame.flip = r->flip_vertical;
-
-	pthread_mutex_lock(&r->state_mutex);
-	r->last_frame_ns = os_gettime_ns();
-	pthread_mutex_unlock(&r->state_mutex);
 
 	enum video_colorspace cs = obs_colorspace_from_av(out);
 	enum video_range_type range = out->color_range == AVCOL_RANGE_JPEG ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
