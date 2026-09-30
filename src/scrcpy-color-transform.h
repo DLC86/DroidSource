@@ -27,6 +27,7 @@ bool scrcpy_color_transform_apply(scrcpy_color_transform_t *transform, AVFrame *
 void scrcpy_color_transform_destroy(scrcpy_color_transform_t *transform);
 
 bool scrcpy_color_transform_target_is_hdr(int target_profile);
+bool scrcpy_color_transform_target_is_8bit(int target_profile);
 
 #ifdef __cplusplus
 }
