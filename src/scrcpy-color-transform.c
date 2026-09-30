@@ -19,7 +19,6 @@ struct scrcpy_color_transform {
 	AVFilterGraph *graph;
 	AVFilterContext *buffer_src;
 	AVFilterContext *buffer_sink;
-	AVFrame *conversion_frame;
 	enum AVPixelFormat input_format;
 	enum AVColorRange input_range;
 	int input_width;
@@ -37,82 +36,6 @@ struct cst_color_info {
 	int transfer_id;
 	enum AVPixelFormat output_format;
 };
-
-static bool convert_yuv420_bit_depth(const AVFrame *src, AVFrame *dst, enum AVPixelFormat target_format)
-{
-	const enum AVPixelFormat source_format = (enum AVPixelFormat)src->format;
-	const bool source_8 = source_format == AV_PIX_FMT_YUV420P || source_format == AV_PIX_FMT_YUVJ420P ||
-			      source_format == AV_PIX_FMT_NV12;
-	const bool source_10 = source_format == AV_PIX_FMT_YUV420P10LE || source_format == AV_PIX_FMT_P010LE;
-	const bool target_8 = target_format == AV_PIX_FMT_YUV420P;
-	const bool target_10 = target_format == AV_PIX_FMT_YUV420P10LE;
-
-	if (!src || !dst || (!source_8 && !source_10) || (!target_8 && !target_10) ||
-	    (source_format == target_format))
-		return false;
-
-	av_frame_unref(dst);
-	dst->format = target_format;
-	dst->width = src->width;
-	dst->height = src->height;
-	if (av_frame_copy_props(dst, src) < 0 || av_frame_get_buffer(dst, 32) < 0)
-		return false;
-
-	const int chroma_width = (src->width + 1) / 2;
-	const int chroma_height = (src->height + 1) / 2;
-
-	/* Luma plane. */
-	for (int y = 0; y < src->height; ++y) {
-		const uint8_t *src_row = src->data[0] + (size_t)y * src->linesize[0];
-		uint8_t *dst_row = dst->data[0] + (size_t)y * dst->linesize[0];
-		for (int x = 0; x < src->width; ++x) {
-			uint16_t value;
-			if (source_format == AV_PIX_FMT_P010LE)
-				value = ((const uint16_t *)src_row)[x] >> 6;
-			else if (source_10)
-				value = ((const uint16_t *)src_row)[x];
-			else
-				value = src_row[x];
-
-			if (target_10)
-				((uint16_t *)dst_row)[x] = source_10 ? value : (uint16_t)value << 2;
-			else
-				dst_row[x] = (uint8_t)((value + 2) >> 2);
-		}
-	}
-
-	/* Chroma planes. */
-	for (int plane = 0; plane < 2; ++plane) {
-		for (int y = 0; y < chroma_height; ++y) {
-			uint8_t *dst_row = dst->data[plane + 1] + (size_t)y * dst->linesize[plane + 1];
-
-			for (int x = 0; x < chroma_width; ++x) {
-				uint16_t value;
-				if (source_format == AV_PIX_FMT_NV12) {
-					const uint8_t *src_row = src->data[1] + (size_t)y * src->linesize[1];
-					value = src_row[2 * x + plane];
-				} else if (source_format == AV_PIX_FMT_P010LE) {
-					const uint16_t *src_row = (const uint16_t *)(src->data[1] + (size_t)y * src->linesize[1]);
-					value = src_row[2 * x + plane] >> 6;
-				} else if (source_10) {
-					const uint16_t *src_row =
-						(const uint16_t *)(src->data[plane + 1] + (size_t)y * src->linesize[plane + 1]);
-					value = src_row[x];
-				} else {
-					const uint8_t *src_row = src->data[plane + 1] + (size_t)y * src->linesize[plane + 1];
-					value = src_row[x];
-				}
-
-				if (target_10)
-					((uint16_t *)dst_row)[x] = source_8 ? (uint16_t)value << 2 : value;
-				else
-					dst_row[x] = (uint8_t)((value + 2) >> 2);
-			}
-		}
-	}
-
-	return true;
-}
 
 static bool profile_to_color_info(int profile, struct cst_color_info *info)
 {
@@ -492,8 +415,9 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 
 	const enum AVPixelFormat source_format = (enum AVPixelFormat)input->format;
 	const enum AVPixelFormat input_format = normalize_input_format(source_format);
+	const AVPixFmtDescriptor *source_desc = av_pix_fmt_desc_get(source_format);
 	const bool source_is_10bit =
-		source_format == AV_PIX_FMT_YUV420P10LE || source_format == AV_PIX_FMT_P010LE;
+		source_desc && source_desc->nb_components >= 3 && source_desc->comp[0].depth >= 10;
 	const char *rgb_pix_fmt_name = source_is_10bit ? "gbrp16le" : "gbrp";
 	const char *target_pix_fmt_name = av_get_pix_fmt_name(target.output_format);
 	const char *source_pix_fmt_name = av_get_pix_fmt_name(source_format);
@@ -538,8 +462,8 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		 * is 8-bit RGB because the destination is 8-bit; the previous 16-bit RGB
 		 * pipeline was unnecessarily expensive at 4K. */
 		snprintf(filter_args, sizeof(filter_args),
-			 "in_range=%s:in_color_matrix=%s:out_range=full:dst_format=%s",
-			 range_name, source_space == "bt2020ncl" ? "bt2020" : "bt709", rgb_pix_fmt_name);
+			 "in_range=%s:in_color_matrix=%s:out_range=full",
+			 range_name, source_space == "bt2020ncl" ? "bt2020" : "bt709");
 		if (!create_filter(transform->graph, "scale", "yuv-to-rgb", filter_args, &next))
 			goto fail;
 		if (!link_filters(current, next, "YUV to RGB"))
@@ -623,8 +547,8 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		}
 
 		snprintf(filter_args, sizeof(filter_args),
-			 "in_range=full:out_range=limited:out_color_matrix=%s:dst_format=%s",
-			 target_space == "bt2020ncl" ? "bt2020" : "bt709", target_pix_fmt_name);
+			 "in_range=full:out_range=limited:out_color_matrix=%s",
+			 target_space == "bt2020ncl" ? "bt2020" : "bt709");
 		if (!create_filter(transform->graph, "scale", "rgb-to-yuv", filter_args, &next))
 			goto fail;
 		if (!link_filters(current, next, "RGB to YUV"))
@@ -678,11 +602,6 @@ scrcpy_color_transform_t *scrcpy_color_transform_create(int source_profile, int 
 
 	transform->source_profile = source_profile;
 	transform->target_profile = target_profile;
-	transform->conversion_frame = av_frame_alloc();
-	if (!transform->conversion_frame) {
-		av_free(transform);
-		return NULL;
-	}
 	transform->input_format = AV_PIX_FMT_NONE;
 	transform->input_range = AVCOL_RANGE_UNSPECIFIED;
 	return transform;
@@ -699,25 +618,18 @@ bool scrcpy_color_transform_apply(scrcpy_color_transform_t *transform, AVFrame *
 
 	if (input_range != AVCOL_RANGE_JPEG && input_range != AVCOL_RANGE_MPEG)
 		input_range = input->color_range == AVCOL_RANGE_JPEG ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
-	if (transform->source_profile > 0 && transform->source_profile == transform->target_profile) {
-		if ((enum AVPixelFormat)input->format == target.output_format) {
-			av_frame_unref(output);
-			if (av_frame_ref(output, input) < 0)
-				return false;
-		} else if (!convert_yuv420_bit_depth(input, output, target.output_format)) {
-			obs_log(LOG_ERROR,
-				"scrcpy-color-transform: same-profile bit-depth conversion failed: source=%s target=%s",
-				av_get_pix_fmt_name((enum AVPixelFormat)input->format),
-				av_get_pix_fmt_name(target.output_format));
+	if (transform->source_profile > 0 && transform->source_profile == transform->target_profile &&
+	    (enum AVPixelFormat)input->format == target.output_format) {
+		av_frame_unref(output);
+		if (av_frame_ref(output, input) < 0)
 			return false;
-		}
 		output->color_primaries = target.av_primaries;
 		output->colorspace = target.av_space;
 		output->color_trc = target.av_trc;
 		output->color_range = input_range;
-		obs_log(LOG_DEBUG, "scrcpy-color-transform: target format=%s (same-profile path)",
+		obs_log(LOG_DEBUG, "scrcpy-color-transform: target format=%s (exact-profile bypass)",
 			av_get_pix_fmt_name((enum AVPixelFormat)output->format));
-		return (enum AVPixelFormat)output->format == target.output_format;
+		return true;
 	}
 
 	if (!transform->graph || transform->input_format != (enum AVPixelFormat)input->format ||
@@ -750,22 +662,11 @@ bool scrcpy_color_transform_apply(scrcpy_color_transform_t *transform, AVFrame *
 	output->color_range = AVCOL_RANGE_MPEG;
 
 	if ((enum AVPixelFormat)output->format != target.output_format) {
-		const enum AVPixelFormat graph_format = (enum AVPixelFormat)output->format;
-		obs_log(LOG_WARNING,
-			"scrcpy-color-transform: graph returned %s, forcing target format %s with explicit bit-depth conversion",
-			av_get_pix_fmt_name(graph_format), av_get_pix_fmt_name(target.output_format));
-		if (!convert_yuv420_bit_depth(output, transform->conversion_frame, target.output_format)) {
-			obs_log(LOG_ERROR, "scrcpy-color-transform: cannot force target format %s from %s",
-			av_get_pix_fmt_name(target.output_format), av_get_pix_fmt_name(graph_format));
-			av_frame_unref(output);
-			return false;
-		}
+		obs_log(LOG_ERROR, "scrcpy-color-transform: graph produced %s, expected %s",
+			av_get_pix_fmt_name((enum AVPixelFormat)output->format),
+			av_get_pix_fmt_name(target.output_format));
 		av_frame_unref(output);
-		av_frame_move_ref(output, transform->conversion_frame);
-		output->color_primaries = target.av_primaries;
-		output->colorspace = target.av_space;
-		output->color_trc = target.av_trc;
-		output->color_range = AVCOL_RANGE_MPEG;
+		return false;
 	}
 
 	obs_log(LOG_DEBUG, "scrcpy-color-transform: target format=%s",
@@ -785,6 +686,5 @@ void scrcpy_color_transform_destroy(scrcpy_color_transform_t *transform)
 		return;
 
 	avfilter_graph_free(&transform->graph);
-	av_frame_free(&transform->conversion_frame);
 	av_free(transform);
 }
