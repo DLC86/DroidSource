@@ -1770,6 +1770,14 @@ import android.hardware.camera2.params.TonemapCurve;
                     requestedColorSpace = (requestedDynamicRange == DynamicRangeProfiles.HLG10)
                             ? android.graphics.ColorSpace.Named.BT2020_HLG
                             : android.graphics.ColorSpace.Named.BT2020_PQ;
+                } else if (cameraGamma == 9 && (cameraColorSpace == 1 || cameraColorSpace == 2)) {
+                    /*
+                     * LINEAR_SRGB has the same primaries as sRGB/BT.709 but an
+                     * identity transfer. Use it when the device advertises it;
+                     * otherwise the existing unspecified-space fallback below
+                     * keeps Linear usable on devices with narrower camera profiles.
+                     */
+                    requestedColorSpace = android.graphics.ColorSpace.Named.LINEAR_SRGB;
                 } else if (cameraGamma != 9) {
                     /*
                      * Android's named SRGB/BT709/BT2020 spaces already imply a
