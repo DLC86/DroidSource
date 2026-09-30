@@ -549,7 +549,8 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 		source_range == VIDEO_RANGE_FULL ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
 
 	if (r->color_transform && r->cst_frame) {
-		if (scrcpy_color_transform_apply(r->color_transform, out, r->cst_frame, source_av_range)) {
+		if (scrcpy_color_transform_apply(r->color_transform, out, r->cst_frame,
+						       source_av_range)) {
 			out = r->cst_frame;
 		} else {
 			obs_log(LOG_WARNING, "scrcpy-reader: CST failed; using source frame unchanged");
