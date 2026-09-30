@@ -24,6 +24,7 @@ typedef int socklen_t;
 #include <libavutil/avutil.h>
 #include <libavutil/pixfmt.h>
 #include <libavutil/hwcontext.h>
+#include <libswscale/swscale.h>
 
 #include <stdint.h>
 #include <string.h>
@@ -81,6 +82,7 @@ struct scrcpy_reader {
 	int color_range_override;
 	int source_color_profile;
 	int cst_target_profile;
+	bool force_8bit_output;
 	scrcpy_color_transform_t *color_transform;
 	AVFrame *cst_frame;
 	bool logged_color_info;
@@ -89,6 +91,8 @@ struct scrcpy_reader {
 	enum AVPixelFormat hw_pix_fmt;
 	AVFrame *transfer_frame;
 	AVFrame *portrait_frame;
+	AVFrame *eight_bit_frame;
+	SwsContext *eight_bit_sws;
 
 	AVCodecContext *codec_ctx;
 	AVPacket *packet;
@@ -506,10 +510,74 @@ static bool open_decoder(struct scrcpy_reader *r, uint32_t codec_id, uint32_t wi
 	r->frame = av_frame_alloc();
 	r->transfer_frame = av_frame_alloc();
 	r->portrait_frame = av_frame_alloc();
-	if (!r->packet || !r->frame || !r->transfer_frame || !r->portrait_frame) {
+	r->eight_bit_frame = av_frame_alloc();
+	if (!r->packet || !r->frame || !r->transfer_frame || !r->portrait_frame || !r->eight_bit_frame) {
 		obs_log(LOG_ERROR, "scrcpy-reader: av alloc failed");
 		return false;
 	}
+	return true;
+}
+
+static int sws_colorspace_for_frame(const AVFrame *frame)
+{
+	if (!frame)
+		return SWS_CS_DEFAULT;
+
+	switch (frame->colorspace) {
+	case AVCOL_SPC_BT709:
+		return SWS_CS_ITU709;
+	case AVCOL_SPC_BT2020_NCL:
+	case AVCOL_SPC_BT2020_CL:
+		return SWS_CS_BT2020;
+	case AVCOL_SPC_SMPTE170M:
+		return SWS_CS_SMPTE170M;
+	default:
+		return SWS_CS_DEFAULT;
+	}
+}
+
+static bool convert_frame_to_8bit(struct scrcpy_reader *r, AVFrame *input, AVFrame **output)
+{
+	const enum AVPixelFormat input_format = (enum AVPixelFormat)input->format;
+
+	if (input_format == AV_PIX_FMT_YUV420P) {
+		*output = input;
+		return true;
+	}
+
+	if (!sws_isSupportedInput(input_format) || !sws_isSupportedOutput(AV_PIX_FMT_YUV420P)) {
+		obs_log(LOG_WARNING, "scrcpy-reader: cannot convert pixel format %s to 8-bit YUV420P",
+			av_get_pix_fmt_name(input_format));
+		return false;
+	}
+
+	r->eight_bit_sws = sws_getCachedContext(r->eight_bit_sws, input->width, input->height, input_format,
+					       input->width, input->height, AV_PIX_FMT_YUV420P,
+					       SWS_BILINEAR | SWS_ACCURATE_RND, NULL, NULL, NULL);
+	if (!r->eight_bit_sws)
+		return false;
+
+	const int src_range = input->color_range == AVCOL_RANGE_JPEG ? 1 : 0;
+	const int colorspace = sws_colorspace_for_frame(input);
+	const int *coefficients = sws_getCoefficients(colorspace);
+	if (sws_setColorspaceDetails(r->eight_bit_sws, coefficients, src_range, coefficients, src_range, 0,
+				     1 << 16, 1 << 16) < 0)
+		return false;
+
+	av_frame_unref(r->eight_bit_frame);
+	r->eight_bit_frame->format = AV_PIX_FMT_YUV420P;
+	r->eight_bit_frame->width = input->width;
+	r->eight_bit_frame->height = input->height;
+	if (av_frame_copy_props(r->eight_bit_frame, input) < 0)
+		return false;
+	if (av_frame_get_buffer(r->eight_bit_frame, 32) < 0)
+		return false;
+
+	if (sws_scale(r->eight_bit_sws, (const uint8_t *const *)input->data, input->linesize, 0, input->height,
+		      r->eight_bit_frame->data, r->eight_bit_frame->linesize) <= 0)
+		return false;
+
+	*output = r->eight_bit_frame;
 	return true;
 }
 
@@ -548,6 +616,16 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	pthread_mutex_unlock(&r->state_mutex);
 	enum video_range_type source_range = resolve_color_range(out, color_range_override);
 	enum AVColorRange source_av_range = source_range == VIDEO_RANGE_FULL ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
+
+
+	if (r->force_8bit_output) {
+		AVFrame *converted = NULL;
+		if (!convert_frame_to_8bit(r, out, &converted)) {
+			obs_log(LOG_WARNING, "scrcpy-reader: 8-bit output conversion failed for pixel format %d", out->format);
+			return;
+		}
+		out = converted;
+	}
 
 	if (r->color_transform && r->cst_frame) {
 		if (scrcpy_color_transform_apply(r->color_transform, out, r->cst_frame, source_av_range)) {
@@ -755,8 +833,8 @@ done:
 }
 
 scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port, bool hardware_decoding, bool flip_vertical,
-				      int video_buffer_ms, bool portrait_mode, int color_range_override,
-				      int source_color_profile, int cst_target_profile)
+				      int video_buffer_ms, bool portrait_mode, int color_range_override, int source_color_profile,
+				      int cst_target_profile, bool force_8bit_output)
 {
 	struct scrcpy_reader *r = bzalloc(sizeof(*r));
 	r->source = source;
@@ -769,6 +847,7 @@ scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port, bool 
 	r->color_range_override = color_range_override;
 	r->source_color_profile = source_color_profile;
 	r->cst_target_profile = cst_target_profile;
+	r->force_8bit_output = force_8bit_output;
 	r->color_transform = scrcpy_color_transform_create(source_color_profile, cst_target_profile);
 	r->cst_frame = cst_target_profile != SCRCPY_CST_OFF ? av_frame_alloc() : NULL;
 
@@ -855,6 +934,10 @@ void scrcpy_reader_destroy(scrcpy_reader_t *r)
 		av_frame_free(&r->transfer_frame);
 	if (r->portrait_frame)
 		av_frame_free(&r->portrait_frame);
+	if (r->eight_bit_frame)
+		av_frame_free(&r->eight_bit_frame);
+	if (r->eight_bit_sws)
+		sws_freeContext(r->eight_bit_sws);
 	if (r->cst_frame)
 		av_frame_free(&r->cst_frame);
 	if (r->color_transform)
