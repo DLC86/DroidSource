@@ -206,8 +206,9 @@ static bool frame_color_info(const AVFrame *frame, struct cst_color_info *info)
 		break;
 	}
 
-	info->hdr = frame->color_trc == AVCOL_TRC_ARIB_STD_B67 || frame->color_trc == AVCOL_TRC_SMPTE2084 ||
-		    frame->color_trc == AVCOL_TRC_BT2020_10 || frame->color_trc == AVCOL_TRC_BT2020_12;
+	/* BT.2020-10/12 are SDR transfer characteristics. Only HLG and PQ
+	 * enter the HDR/tone-mapping paths. */
+	info->hdr = frame->color_trc == AVCOL_TRC_ARIB_STD_B67 || frame->color_trc == AVCOL_TRC_SMPTE2084;
 	info->output_format = AV_PIX_FMT_YUV420P;
 	return true;
 }
