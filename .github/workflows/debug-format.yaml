@@ -15,7 +15,7 @@ jobs:
       - name: Show formatted diff
         shell: bash
         run: |
-          formatter=$(find /home/linuxbrew/.linuxbrew/Cellar/clang-format@19 -type f -name clang-format | head -1)
+          formatter=$(brew --prefix clang-format@19)/bin/clang-format
           echo "formatter=$formatter"
           "$formatter" --version
           "$formatter" --style=file --fallback-style=none src/scrcpy-reader.c > /tmp/scrcpy-reader.c
