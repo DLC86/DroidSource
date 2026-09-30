@@ -116,8 +116,22 @@ static bool convert_yuv420_bit_depth(const AVFrame *src, AVFrame *dst, enum AVPi
 
 static bool profile_to_color_info(int profile, struct cst_color_info *info)
 {
-	const int color_space = profile / 10;
-	const int gamma = profile % 10;
+	int encoded_profile = profile;
+	bool output_8bit = false;
+	int color_space;
+	int gamma;
+
+	/*
+	 * Camera profiles keep their original compact IDs. CST-only 8-bit HLG
+	 * profiles use the 1000 range so the bit depth is encoded explicitly.
+	 */
+	if (profile >= 1000 && profile < 1100) {
+		encoded_profile = profile - 1000;
+		output_8bit = true;
+	}
+
+	color_space = encoded_profile / 10;
+	gamma = encoded_profile % 10;
 
 	if (!info || profile <= 0 || color_space < 1 || color_space > 3 || gamma < 1 || gamma > 9)
 		return false;
@@ -172,7 +186,8 @@ static bool profile_to_color_info(int profile, struct cst_color_info *info)
 	info->hdr = gamma == 5 || gamma == 6 || gamma == 7;
 	/* This field is used for the CST destination. Source precision is taken
 	 * from the actual AVFrame and must never be inferred from the profile. */
-	info->output_format = info->hdr ? AV_PIX_FMT_YUV420P10LE : AV_PIX_FMT_YUV420P;
+	info->output_format = output_8bit ? AV_PIX_FMT_YUV420P
+				  : info->hdr ? AV_PIX_FMT_YUV420P10LE : AV_PIX_FMT_YUV420P;
 	return true;
 }
 
@@ -623,6 +638,7 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 
 	if (!create_filter(transform->graph, "buffersink", "out", NULL, &sink))
 		goto fail;
+	av_buffersink_set_pix_fmt(sink, target.output_format);
 	if (!link_filters(current, sink, "sink"))
 		goto fail;
 
