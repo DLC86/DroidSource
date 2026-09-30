@@ -548,8 +548,7 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	enum AVColorRange source_av_range = source_range == VIDEO_RANGE_FULL ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
 
 	if (r->color_transform && r->cst_frame) {
-		if (scrcpy_color_transform_apply(r->color_transform, out, r->cst_frame,
-						       source_av_range)) {
+		if (scrcpy_color_transform_apply(r->color_transform, out, r->cst_frame, source_av_range)) {
 			out = r->cst_frame;
 		} else {
 			/* A selected CST is an explicit output-format contract. Never fall
@@ -562,7 +561,6 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 		/* CST bypass leaves camera samples and Auto metadata untouched. */
 		out->color_range = source_av_range;
 	}
-
 
 	if (r->portrait_mode) {
 		if (!rotate_frame_90_ccw(r, out)) {
