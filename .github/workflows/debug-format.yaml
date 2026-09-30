@@ -15,5 +15,8 @@ jobs:
       - name: Show formatted diff
         shell: bash
         run: |
-          /home/linuxbrew/.linuxbrew/opt/clang-format@19/bin/clang-format --style=file --fallback-style=none src/scrcpy-reader.c > /tmp/scrcpy-reader.c
+          formatter=$(find /home/linuxbrew/.linuxbrew/Cellar/clang-format@19 -type f -name clang-format | head -1)
+          echo "formatter=$formatter"
+          "$formatter" --version
+          "$formatter" --style=file --fallback-style=none src/scrcpy-reader.c > /tmp/scrcpy-reader.c
           diff -u src/scrcpy-reader.c /tmp/scrcpy-reader.c || true
