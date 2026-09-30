@@ -47,7 +47,7 @@ static bool profile_to_color_info(int profile, struct cst_color_info *info)
 
 	switch (gamma) {
 	case 1:
-		info->trc = "gamma22";
+		info->trc = "bt470m";
 		info->av_trc = AVCOL_TRC_GAMMA22;
 		break;
 	case 2:
@@ -60,7 +60,7 @@ static bool profile_to_color_info(int profile, struct cst_color_info *info)
 		break;
 	case 4:
 	case 8:
-		info->trc = "srgb";
+		info->trc = "iec61966-2-1";
 		info->av_trc = AVCOL_TRC_IEC61966_2_1;
 		break;
 	case 5:
@@ -123,7 +123,7 @@ static bool frame_color_info(const AVFrame *frame, struct cst_color_info *info)
 
 	switch (frame->color_trc) {
 	case AVCOL_TRC_GAMMA22:
-		info->trc = "gamma22";
+		info->trc = "bt470m";
 		info->av_trc = AVCOL_TRC_GAMMA22;
 		break;
 	case AVCOL_TRC_SMPTE170M:
@@ -136,7 +136,7 @@ static bool frame_color_info(const AVFrame *frame, struct cst_color_info *info)
 		info->av_trc = AVCOL_TRC_BT709;
 		break;
 	case AVCOL_TRC_IEC61966_2_1:
-		info->trc = "srgb";
+		info->trc = "iec61966-2-1";
 		info->av_trc = AVCOL_TRC_IEC61966_2_1;
 		break;
 	case AVCOL_TRC_LINEAR:
