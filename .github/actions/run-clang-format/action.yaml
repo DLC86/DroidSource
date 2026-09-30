@@ -56,6 +56,11 @@ runs:
 
         print ::group::Run clang-format-19
         local -a changes=(${(s:,:)CHANGED_FILES//[\[\]\'\"]/})
-        ./build-aux/run-clang-format --fail-${{ inputs.failCondition }} --check ${changes}
+        ./build-aux/run-clang-format --fail-never --check ${changes}
+        for file (${changes}); do
+          print ::group::clang-format diff ${file}
+          clang-format-19 -style=file -fallback-style=none "${file}" | diff -u "${file}" - || true
+          print ::endgroup::
+        done
         print ::endgroup::
 
