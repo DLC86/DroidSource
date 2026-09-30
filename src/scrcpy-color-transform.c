@@ -711,6 +711,12 @@ bool scrcpy_color_transform_target_is_hdr(int target_profile)
 	return profile_to_color_info(target_profile, &target) && target.hdr;
 }
 
+bool scrcpy_color_transform_target_is_8bit(int target_profile)
+{
+	struct cst_color_info target;
+	return profile_to_color_info(target_profile, &target) && target.output_format == AV_PIX_FMT_YUV420P;
+}
+
 void scrcpy_color_transform_destroy(scrcpy_color_transform_t *transform)
 {
 	if (!transform)
