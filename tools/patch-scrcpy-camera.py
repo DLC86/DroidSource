@@ -1503,16 +1503,19 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/video/SurfaceEncoder
 
                 int transfer = 0;
                 if (cameraGamma == 1) {
-                    // MediaFormat transfer id 4 = Gamma 2.2.
+                    // H.264/HEVC transfer_characteristics value 4 = Gamma 2.2.
                     transfer = 4;
                 } else if (cameraGamma == 2 || cameraGamma == 3) {
                     transfer = MediaFormat.COLOR_TRANSFER_SDR_VIDEO;
-                } else if (cameraGamma == 4) {
-                    // Rec.709-A is not a standard video transfer; sRGB id 2
-                    // is the closest standardized metadata representation.
+                } else if (cameraGamma == 4 || cameraGamma == 8) {
+                    // sRGB and Rec.709-A are both represented by the sRGB
+                    // transfer id here; Rec.709-A has no dedicated MediaFormat
+                    // transfer constant.
                     transfer = 2;
                 } else if (cameraGamma == 5) {
                     transfer = MediaFormat.COLOR_TRANSFER_HLG;
+                } else if (cameraGamma == 9) {
+                    transfer = MediaFormat.COLOR_TRANSFER_LINEAR;
                 } else if (cameraColorSpace == 3) {
                     // Android's BT.2020 named space uses a 2.2 OETF.
                     transfer = 4;
@@ -1831,10 +1834,15 @@ import android.hardware.camera2.params.TonemapCurve;
                     Ln.i("Camera session color space set to " + requestedColorSpace.name()
                             + " with " + (cameraTenBit ? String.valueOf(requestedDynamicRange) : "STANDARD") + " profile");
                 } else if (cameraTenBit) {
-                    throw new IOException("Camera does not support the requested 10-bit HDR color space profile");
+                    // The dynamic-range profile itself remains authoritative for HDR.
+                    // Some devices do not expose a ColorSpaceProfiles entry for the
+                    // corresponding named BT.2020_HLG/PQ space.
+                    Ln.i("Using camera HDR dynamic range profile without an explicit named color space: "
+                            + requestedDynamicRange);
                 } else if (requestedColorSpace != null) {
                     Ln.w("Requested camera color space is not supported for the "
-                            + (cameraTenBit ? String.valueOf(requestedDynamicRange) : "STANDARD") + " profile: " + requestedColorSpace);
+                            + (cameraTenBit ? String.valueOf(requestedDynamicRange) : "STANDARD")
+                            + " profile: " + requestedColorSpace);
                 }
             } else if (cameraTenBit) {
                 throw new IOException("Camera 10-bit requires Android 14 or newer");
