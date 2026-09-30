@@ -1772,11 +1772,11 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_list_add_int(camera_color_range, "Auto (from stream)", SCRCPY_COLOR_RANGE_AUTO);
 
 	obs_property_t *camera_cst = obs_properties_add_list(props, "camera_cst", obs_module_text("CameraCST"),
-							     OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+			     OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(camera_cst, "Off / Bypass", CAMERA_CST_OFF);
 	obs_property_list_add_int(camera_cst, "Rec.709 / sRGB (8-bit)", CAMERA_COLOR_PROFILE_REC709_SRGB);
 	obs_property_list_add_int(camera_cst, "Rec.709 / Rec.709 (Scene) (8-bit)",
-					  CAMERA_COLOR_PROFILE_REC709_REC709_SCENE);
+		  CAMERA_COLOR_PROFILE_REC709_REC709_SCENE);
 	obs_property_list_add_int(camera_cst, "Rec.709 / Gamma 2.2 (8-bit)", CAMERA_COLOR_PROFILE_REC709_22);
 	obs_property_list_add_int(camera_cst, "Rec.709 / Gamma 2.4 (8-bit)", CAMERA_COLOR_PROFILE_REC709_24);
 	obs_property_list_add_int(camera_cst, "sRGB / sRGB (8-bit)", CAMERA_COLOR_PROFILE_SRGB_SRGB);
@@ -1784,7 +1784,7 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_list_add_int(camera_cst, "sRGB / Gamma 2.2 (8-bit)", CAMERA_COLOR_PROFILE_SRGB_22);
 	obs_property_list_add_int(camera_cst, "Rec.2020 / sRGB (8-bit)", CAMERA_COLOR_PROFILE_REC2020_SRGB);
 	obs_property_list_add_int(camera_cst, "Rec.2020 / Rec.709 (Scene) (8-bit)",
-					  CAMERA_COLOR_PROFILE_REC2020_REC709_SCENE);
+		  CAMERA_COLOR_PROFILE_REC2020_REC709_SCENE);
 	obs_property_list_add_int(camera_cst, "Rec.2020 / Gamma 2.2 (8-bit)", CAMERA_COLOR_PROFILE_REC2020_22);
 	obs_property_list_add_int(camera_cst, "sRGB / HLG (8-bit)", CAMERA_CST_PROFILE_SRGB_HLG_8BIT);
 	obs_property_list_add_int(camera_cst, "Rec.709 / HLG (8-bit)", CAMERA_CST_PROFILE_REC709_HLG_8BIT);
