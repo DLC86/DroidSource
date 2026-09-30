@@ -310,8 +310,10 @@ patch("server/src/main/java/com/genymobile/scrcpy/util/LogUtils.java", [
                         if (colorSpaceProfiles != null) {
                             try {
                                 java.util.Set<android.graphics.ColorSpace.Named> colorSpaces =
-                                        colorSpaceProfiles.getSupportedColorSpaces(android.graphics.ImageFormat.UNKNOWN);
-                                builder.append(", color-spaces=[");
+                                        colorSpaceProfiles.getSupportedColorSpacesForDynamicRange(
+                                                android.graphics.ImageFormat.PRIVATE,
+                                                android.hardware.camera2.params.DynamicRangeProfiles.STANDARD);
+                                builder.append(", standard-color-spaces=[");
                                 boolean firstColorSpace = true;
                                 for (android.graphics.ColorSpace.Named colorSpace : colorSpaces) {
                                     if (!firstColorSpace) {
@@ -322,11 +324,29 @@ patch("server/src/main/java/com/genymobile/scrcpy/util/LogUtils.java", [
                                 }
                                 builder.append(']');
                             } catch (IllegalArgumentException e) {
-                                Ln.w("Could not get supported camera color spaces for " + id, e);
+                                Ln.w("Could not get supported standard camera color spaces for " + id, e);
                             }
                         }
                     }
 
+                    int[] tonemapModes = characteristics.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES);
+                    boolean toneMapGamma = false;
+                    boolean toneMapRec709 = false;
+                    if (tonemapModes != null) {
+                        for (int mode : tonemapModes) {
+                            if (mode == android.hardware.camera2.CaptureRequest.TONEMAP_MODE_GAMMA_VALUE) {
+                                toneMapGamma = true;
+                            } else if (mode == android.hardware.camera2.CaptureRequest.TONEMAP_MODE_PRESET_CURVE) {
+                                toneMapRec709 = true;
+                            }
+                        }
+                    }
+                    if (toneMapGamma) {
+                        builder.append(", tonemap-gamma=true");
+                    }
+                    if (toneMapRec709) {
+                        builder.append(", tonemap-rec709=true");
+                    }
 
                     builder.append(')');
 """,
