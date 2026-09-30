@@ -589,10 +589,10 @@ static void src_update(void *data, obs_data_t *settings)
 						  ctx->camera_shutter_us, ctx->camera_focus_distance, ctx->camera_wb_kelvin,
 						  ctx->camera_wb_lock, runtime_color_space, runtime_gamma, ctx->camera_10bit,
 						  camera_gamma_to_dynamic_range(runtime_gamma, ctx->camera_10bit));
-}
+	}
 
-os_atomic_set_bool(&ctx->updating, false);
-pthread_mutex_unlock(&ctx->state_mutex);
+	os_atomic_set_bool(&ctx->updating, false);
+	pthread_mutex_unlock(&ctx->state_mutex);
 }
 
 static void src_get_defaults(obs_data_t *settings)
