@@ -338,8 +338,7 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 	if (!source_pix_fmt_name || !input_pix_fmt_name || !target_format_name)
 		goto fail;
 
-	snprintf(buffer_args, sizeof(buffer_args),
-		 "video_size=%dx%d:pix_fmt=%s:time_base=1/1000000:pixel_aspect=1/1",
+	snprintf(buffer_args, sizeof(buffer_args), "video_size=%dx%d:pix_fmt=%s:time_base=1/1000000:pixel_aspect=1/1",
 		 input->width, input->height, source_pix_fmt_name);
 	if (!create_filter(transform->graph, "buffer", "in", buffer_args, &transform->buffer_src))
 		goto fail;
@@ -365,9 +364,10 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		AVFilterContext *tone_map = NULL;
 		AVFilterContext *target_filter = NULL;
 
-		snprintf(zscale_args, sizeof(zscale_args),
-			 "primariesin=%s:matrixin=%s:transferin=%s:rangein=%s:primaries=%s:matrix=gbr:transfer=linear:range=full",
-			 source.primaries, source.matrix, source.trc, range_name, source.primaries);
+		snprintf(
+			zscale_args, sizeof(zscale_args),
+			"primariesin=%s:matrixin=%s:transferin=%s:rangein=%s:primaries=%s:matrix=gbr:transfer=linear:range=full",
+			source.primaries, source.matrix, source.trc, range_name, source.primaries);
 		if (!create_filter(transform->graph, "zscale", "to-linear-rgb", zscale_args, &linear))
 			goto fail;
 		if (!link_filters(current, linear, "HDR to linear RGB"))
@@ -380,15 +380,17 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 			goto fail;
 		current = float_format;
 
-		if (!create_filter(transform->graph, "tonemap", "tone-map", "tonemap=mobius:param=0.3:desat=2", &tone_map))
+		if (!create_filter(transform->graph, "tonemap", "tone-map", "tonemap=mobius:param=0.3:desat=2",
+				   &tone_map))
 			goto fail;
 		if (!link_filters(current, tone_map, "tone map"))
 			goto fail;
 		current = tone_map;
 
-		snprintf(zscale_args, sizeof(zscale_args),
-			 "primariesin=%s:matrixin=gbr:transferin=linear:rangein=full:primaries=%s:matrix=%s:transfer=%s:range=limited",
-			 source.primaries, target.primaries, target.matrix, target.trc);
+		snprintf(
+			zscale_args, sizeof(zscale_args),
+			"primariesin=%s:matrixin=gbr:transferin=linear:rangein=full:primaries=%s:matrix=%s:transfer=%s:range=limited",
+			source.primaries, target.primaries, target.matrix, target.trc);
 		if (!create_filter(transform->graph, "zscale", "to-target-sdr", zscale_args, &target_filter))
 			goto fail;
 		if (!link_filters(current, target_filter, "linear RGB to target SDR"))
@@ -401,9 +403,11 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		 * This single stage handles SDR -> SDR, SDR -> HDR and HDR -> HDR.
 		 * The final format filter below is the actual 8/10-bit output contract.
 		 */
-		snprintf(zscale_args, sizeof(zscale_args),
-			 "primariesin=%s:matrixin=%s:transferin=%s:rangein=%s:primaries=%s:matrix=%s:transfer=%s:range=limited",
-			 source.primaries, source.matrix, source.trc, range_name, target.primaries, target.matrix, target.trc);
+		snprintf(
+			zscale_args, sizeof(zscale_args),
+			"primariesin=%s:matrixin=%s:transferin=%s:rangein=%s:primaries=%s:matrix=%s:transfer=%s:range=limited",
+			source.primaries, source.matrix, source.trc, range_name, target.primaries, target.matrix,
+			target.trc);
 		if (!create_filter(transform->graph, "zscale", "color-transform", zscale_args, &zscale))
 			goto fail;
 		if (!link_filters(current, zscale, "color transform"))
@@ -429,8 +433,8 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		av_strerror(ret, error_string, sizeof(error_string));
 		obs_log(LOG_ERROR,
 			"scrcpy-color-transform: graph config failed: source=%s/%s/%s range=%s target=%s/%s/%s output=%s error=%s",
-			source.primaries, source.matrix, source.trc, range_name, target.primaries, target.matrix, target.trc,
-			target_format_name, error_string);
+			source.primaries, source.matrix, source.trc, range_name, target.primaries, target.matrix,
+			target.trc, target_format_name, error_string);
 		goto fail;
 	}
 
@@ -440,8 +444,7 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 	transform->input_width = input->width;
 	transform->input_height = input->height;
 
-	obs_log(LOG_INFO,
-		"scrcpy-color-transform: source=%s/%s/%s %s -> target=%s/%s/%s %s, input=%s, output=%s",
+	obs_log(LOG_INFO, "scrcpy-color-transform: source=%s/%s/%s %s -> target=%s/%s/%s %s, input=%s, output=%s",
 		source.primaries, source.matrix, source.trc, range_name, target.primaries, target.matrix, target.trc,
 		target.hdr ? "10-bit" : "8-bit", source_pix_fmt_name, target_format_name);
 	return true;
