@@ -772,7 +772,6 @@ scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port, bool 
 	r->color_transform = scrcpy_color_transform_create(source_color_profile, cst_target_profile);
 	r->cst_frame = cst_target_profile != SCRCPY_CST_OFF ? av_frame_alloc() : NULL;
 
-
 	r->hw_pix_fmt = AV_PIX_FMT_NONE;
 	r->stop = false;
 	r->running = false;
