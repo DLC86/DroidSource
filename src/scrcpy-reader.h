@@ -28,7 +28,8 @@ enum scrcpy_color_range_override {
 };
 
 scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port, bool hardware_decoding, bool flip_vertical,
-				      int video_buffer_ms, bool portrait_mode, int color_range_override);
+				      int video_buffer_ms, bool portrait_mode, int color_range_override, int source_color_profile,
+				      int cst_target_profile);
 
 void scrcpy_reader_set_color_range(scrcpy_reader_t *r, int color_range_override);
 
