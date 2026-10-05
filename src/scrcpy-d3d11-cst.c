@@ -552,10 +552,8 @@ scrcpy_d3d11_cst_t *scrcpy_d3d11_cst_create(AVBufferRef *hw_device_ctx, int sour
 	cst->logical_target_8bit = target.output_8bit || !target.hdr;
 	cst->disabled = false;
 
-	if (!cst->hw_device_ref ||
-	    !compile_shader(cst->device, d3d11_cst_shader, false, &cst->shader_8bit) ||
-	    !compile_shader(cst->device, d3d11_cst_shader, true, &cst->shader_10bit) ||
-	    !create_params_buffer(cst)) {
+	if (!cst->hw_device_ref || !compile_shader(cst->device, d3d11_cst_shader, false, &cst->shader_8bit) ||
+	    !compile_shader(cst->device, d3d11_cst_shader, true, &cst->shader_10bit) || !create_params_buffer(cst)) {
 		obs_log(LOG_WARNING, "scrcpy-d3d11-cst: initialization failed; using CPU CST fallback");
 		scrcpy_d3d11_cst_destroy(cst);
 		return NULL;
