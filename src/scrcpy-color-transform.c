@@ -8,6 +8,7 @@
 #include <libavfilter/buffersrc.h>
 #include <libavutil/error.h>
 #include <libavutil/frame.h>
+#include <libavutil/opt.h>
 #include <libavutil/pixdesc.h>
 
 #include <stdint.h>
