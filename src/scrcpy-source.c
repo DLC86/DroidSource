@@ -157,7 +157,7 @@ struct scrcpy_src {
 static const char *src_get_name(void *unused)
 {
 	UNUSED_PARAMETER(unused);
-	return obs_module_text("DroidSource");
+	return "DroidSource";
 }
 
 static bool pick_ephemeral_port(uint16_t *out)

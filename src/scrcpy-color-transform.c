@@ -414,6 +414,12 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 	const enum AVPixelFormat input_format = normalize_input_format(source_format);
 	const AVPixFmtDescriptor *source_desc = av_pix_fmt_desc_get(source_format);
 	const bool source_is_10bit = source_desc && source_desc->nb_components >= 3 && source_desc->comp[0].depth >= 10;
+	if (source_is_10bit) {
+		/* The HDR CST path is CPU-intensive. libavfilter otherwise defaults to
+		 * a single worker in this direct API usage, which can starve the reader
+		 * thread and make the live stream visibly stutter. */
+		avfilter_graph_set_threads(transform->graph, 2);
+	}
 	const char *rgb_pix_fmt_name = source_is_10bit ? "gbrp16le" : "gbrp";
 	const char *target_pix_fmt_name = av_get_pix_fmt_name(target.output_format);
 	const char *source_pix_fmt_name = av_get_pix_fmt_name(source_format);
