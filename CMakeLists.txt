@@ -51,11 +51,12 @@ target_sources(
     src/scrcpy-process.c
     src/scrcpy-reader.c
     src/scrcpy-color-transform.c
+    src/scrcpy-d3d11-cst.c
     src/scrcpy-camera-control.c
 )
 
 if(WIN32)
-  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ws2_32)
+  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ws2_32 d3d11 d3dcompiler)
 endif()
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})

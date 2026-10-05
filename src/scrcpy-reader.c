@@ -13,6 +13,7 @@ typedef int socklen_t;
 
 #include "scrcpy-reader.h"
 #include "scrcpy-color-transform.h"
+#include "scrcpy-d3d11-cst.h"
 
 #include <obs-module.h>
 #include <plugin-support.h>
@@ -25,6 +26,7 @@ typedef int socklen_t;
 #include <libavutil/pixfmt.h>
 #include <libavutil/pixdesc.h>
 #include <libavutil/hwcontext.h>
+#include <libavutil/dict.h>
 #include <libswscale/swscale.h>
 
 #include <stdint.h>
@@ -85,6 +87,7 @@ struct scrcpy_reader {
 	int cst_target_profile;
 	bool force_8bit_output;
 	scrcpy_color_transform_t *color_transform;
+	scrcpy_d3d11_cst_t *d3d11_cst;
 	AVFrame *cst_frame;
 	bool logged_color_info;
 
@@ -498,10 +501,20 @@ static bool open_decoder(struct scrcpy_reader *r, uint32_t codec_id, uint32_t wi
 			}
 		}
 		if (r->hw_pix_fmt != AV_PIX_FMT_NONE) {
-			if (av_hwdevice_ctx_create(&r->hw_device_ctx, AV_HWDEVICE_TYPE_D3D11VA, NULL, NULL, 0) == 0) {
+			AVDictionary *device_options = NULL;
+			if (r->cst_target_profile != SCRCPY_CST_OFF)
+				av_dict_set(&device_options, "SHADER", "1", 0);
+			int hw_ret = av_hwdevice_ctx_create(&r->hw_device_ctx, AV_HWDEVICE_TYPE_D3D11VA, NULL,
+									  device_options, 0);
+			av_dict_free(&device_options);
+			if (hw_ret == 0) {
 				r->codec_ctx->get_format = get_hw_format;
 				r->codec_ctx->hw_device_ctx = av_buffer_ref(r->hw_device_ctx);
 				obs_log(LOG_INFO, "scrcpy-reader: using D3D11VA hardware decoding");
+				if (r->cst_target_profile != SCRCPY_CST_OFF) {
+					r->d3d11_cst = scrcpy_d3d11_cst_create(r->hw_device_ctx, r->source_color_profile,
+									  r->cst_target_profile);
+				}
 			} else {
 				r->hw_pix_fmt = AV_PIX_FMT_NONE;
 				obs_log(LOG_INFO, "scrcpy-reader: D3D11VA unavailable; using software decoding");
@@ -604,20 +617,33 @@ static bool convert_frame_to_8bit(struct scrcpy_reader *r, AVFrame *input, AVFra
 static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 {
 	AVFrame *out = f;
-	bool hardware_path = false;
+	const bool hardware_path = r->hw_pix_fmt != AV_PIX_FMT_NONE && f->format == r->hw_pix_fmt;
+	const bool cst_enabled = r->color_transform && r->cst_frame && r->cst_target_profile != SCRCPY_CST_OFF;
+	bool gpu_cst = false;
+	int color_range_override;
 
-	if (r->hw_pix_fmt != AV_PIX_FMT_NONE && f->format == r->hw_pix_fmt) {
-		hardware_path = true;
+	pthread_mutex_lock(&r->state_mutex);
+	r->last_frame_ns = os_gettime_ns();
+	color_range_override = r->color_range_override;
+	pthread_mutex_unlock(&r->state_mutex);
+
+	enum video_range_type source_range = resolve_color_range(f, color_range_override);
+	enum AVColorRange source_av_range =
+		source_range == VIDEO_RANGE_FULL ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
+
+	if (hardware_path && cst_enabled && r->d3d11_cst) {
+		if (scrcpy_d3d11_cst_apply(r->d3d11_cst, f, r->cst_frame, source_av_range)) {
+			out = r->cst_frame;
+			gpu_cst = true;
+		}
+	}
+
+	if (hardware_path && !gpu_cst) {
 		av_frame_unref(r->transfer_frame);
 		if (av_hwframe_transfer_data(r->transfer_frame, f, 0) < 0) {
 			obs_log(LOG_WARNING, "scrcpy-reader: hardware frame transfer failed");
 			return;
 		}
-		/*
-		 * The generic hardware->software transfer copies the pixel data but
-		 * does not guarantee AVFrame color properties are preserved. Restore
-		 * the exact decoder metadata before passing the frame to OBS.
-		 */
 		if (av_frame_copy_props(r->transfer_frame, f) < 0) {
 			obs_log(LOG_WARNING, "scrcpy-reader: could not preserve hardware frame color metadata");
 			return;
@@ -627,54 +653,46 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 
 	log_frame_color_info(r, out, hardware_path);
 
-	/* The watchdog must measure decoded-frame arrival, not the time spent in
-	 * an optional color transform or OBS output. A slow/failing CST must never
-	 * make an otherwise healthy decoder look stale. */
-	pthread_mutex_lock(&r->state_mutex);
-	r->last_frame_ns = os_gettime_ns();
-	int color_range_override = r->color_range_override;
-	pthread_mutex_unlock(&r->state_mutex);
-	enum video_range_type source_range = resolve_color_range(out, color_range_override);
-	enum AVColorRange source_av_range = source_range == VIDEO_RANGE_FULL ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
-
-	/* Make the resolved source range authoritative before any 8-bit conversion or CST. */
-	out->color_range = source_av_range;
 	const bool force_sdr_hlg = source_profile_is_8bit_hlg_sdr(r, out);
 
-	if (r->force_8bit_output) {
+	if (!gpu_cst) {
+		out->color_range = source_av_range;
+
+		if (r->force_8bit_output) {
+			AVFrame *converted = NULL;
+			if (!convert_frame_to_8bit(r, out, &converted)) {
+				obs_log(LOG_WARNING, "scrcpy-reader: 8-bit output conversion failed for pixel format %d",
+					out->format);
+				return;
+			}
+			out = converted;
+		}
+
+		if (cst_enabled) {
+			if (scrcpy_color_transform_apply(r->color_transform, out, r->cst_frame, source_av_range)) {
+				out = r->cst_frame;
+				if (scrcpy_color_transform_target_is_8bit(r->cst_target_profile) &&
+				    out->format != AV_PIX_FMT_YUV420P && out->format != AV_PIX_FMT_NV12) {
+					AVFrame *converted = NULL;
+					if (!convert_frame_to_8bit(r, out, &converted)) {
+						obs_log(LOG_WARNING, "scrcpy-reader: final 8-bit CST output conversion failed");
+						return;
+					}
+					out = converted;
+				}
+			} else {
+				obs_log(LOG_WARNING, "scrcpy-reader: CST failed; passing source frame through unchanged");
+				if (color_range_override != SCRCPY_COLOR_RANGE_AUTO)
+					out->color_range = source_av_range;
+			}
+		}
+	} else if (r->force_8bit_output && out->format != AV_PIX_FMT_YUV420P && out->format != AV_PIX_FMT_NV12) {
 		AVFrame *converted = NULL;
 		if (!convert_frame_to_8bit(r, out, &converted)) {
-			obs_log(LOG_WARNING, "scrcpy-reader: 8-bit output conversion failed for pixel format %d",
-				out->format);
+			obs_log(LOG_WARNING, "scrcpy-reader: 8-bit output conversion failed after GPU CST");
 			return;
 		}
 		out = converted;
-	}
-
-	if (r->color_transform && r->cst_frame) {
-		if (scrcpy_color_transform_apply(r->color_transform, out, r->cst_frame, source_av_range)) {
-			out = r->cst_frame;
-			/* An 8-bit CST target must remain 8-bit all the way to OBS,
-			 * even when the camera decoder itself is operating at 10-bit. */
-			if (scrcpy_color_transform_target_is_8bit(r->cst_target_profile) &&
-			    out->format != AV_PIX_FMT_YUV420P) {
-				AVFrame *converted = NULL;
-				if (!convert_frame_to_8bit(r, out, &converted)) {
-					obs_log(LOG_WARNING, "scrcpy-reader: final 8-bit CST output conversion failed");
-					return;
-				}
-				out = converted;
-			}
-		} else {
-			/* A CST failure is non-fatal: keep the live camera stream available
-			 * rather than dropping every frame until the watchdog restarts scrcpy. */
-			obs_log(LOG_WARNING, "scrcpy-reader: CST failed; passing source frame through unchanged");
-			if (color_range_override != SCRCPY_COLOR_RANGE_AUTO)
-				out->color_range = source_av_range;
-		}
-	} else if (color_range_override != SCRCPY_COLOR_RANGE_AUTO) {
-		/* CST bypass leaves camera samples and Auto metadata untouched. */
-		out->color_range = source_av_range;
 	}
 
 	if (r->portrait_mode) {
@@ -708,7 +726,8 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	obs_frame.flip = r->flip_vertical;
 
 	enum video_colorspace cs = obs_colorspace_from_av(out, force_sdr_hlg);
-	enum video_range_type range = out->color_range == AVCOL_RANGE_JPEG ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
+	enum video_range_type range =
+		out->color_range == AVCOL_RANGE_JPEG ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
 	bool matrix_ok;
 	const bool bt2020_sdr =
 		((enum AVColorSpace)out->colorspace == AVCOL_SPC_BT2020_NCL ||
@@ -717,7 +736,7 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 
 	if (bt2020_sdr) {
 		matrix_ok = obs_bt2020_sdr_matrix(fmt, range, obs_frame.color_matrix, obs_frame.color_range_min,
-						  obs_frame.color_range_max);
+							  obs_frame.color_range_max);
 		obs_log(LOG_DEBUG, "scrcpy-reader: using explicit BT.2020-SDR YUV matrix");
 	} else {
 		matrix_ok = video_format_get_parameters_for_format(
@@ -976,6 +995,8 @@ void scrcpy_reader_destroy(scrcpy_reader_t *r)
 		sws_freeContext(r->eight_bit_sws);
 	if (r->cst_frame)
 		av_frame_free(&r->cst_frame);
+	if (r->d3d11_cst)
+		scrcpy_d3d11_cst_destroy(r->d3d11_cst);
 	if (r->color_transform)
 		scrcpy_color_transform_destroy(r->color_transform);
 	if (r->hw_device_ctx)
