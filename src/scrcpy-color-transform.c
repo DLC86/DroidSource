@@ -419,7 +419,8 @@ static bool build_graph(scrcpy_color_transform_t *transform, const AVFrame *inpu
 		/* The HDR CST path is CPU-intensive. libavfilter otherwise defaults to
 		 * a single worker in this direct API usage, which can starve the reader
 		 * thread and make the live stream visibly stutter. */
-		avfilter_graph_set_threads(transform->graph, 2);
+		if (av_opt_set_int(transform->graph, "threads", 2, 0) < 0)
+			obs_log(LOG_WARNING, "scrcpy-color-transform: could not set graph thread count");
 	}
 	const char *rgb_pix_fmt_name = source_is_10bit ? "gbrp16le" : "gbrp";
 	const char *target_pix_fmt_name = av_get_pix_fmt_name(target.output_format);
