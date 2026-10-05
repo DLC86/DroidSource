@@ -26,7 +26,9 @@ typedef int socklen_t;
 #include <libavutil/pixfmt.h>
 #include <libavutil/pixdesc.h>
 #include <libavutil/hwcontext.h>
-#include <libavutil/dict.h>
+#ifdef _WIN32
+#include <libavutil/hwcontext_d3d11va.h>
+#endif
 #include <libswscale/swscale.h>
 
 #include <stdint.h>
@@ -501,13 +503,15 @@ static bool open_decoder(struct scrcpy_reader *r, uint32_t codec_id, uint32_t wi
 			}
 		}
 		if (r->hw_pix_fmt != AV_PIX_FMT_NONE) {
-			AVDictionary *device_options = NULL;
-			if (r->cst_target_profile != SCRCPY_CST_OFF)
-				av_dict_set(&device_options, "SHADER", "1", 0);
-			int hw_ret = av_hwdevice_ctx_create(&r->hw_device_ctx, AV_HWDEVICE_TYPE_D3D11VA, NULL,
-							    device_options, 0);
-			av_dict_free(&device_options);
+			int hw_ret = av_hwdevice_ctx_create(&r->hw_device_ctx, AV_HWDEVICE_TYPE_D3D11VA, NULL, NULL, 0);
 			if (hw_ret == 0) {
+				if (r->cst_target_profile != SCRCPY_CST_OFF) {
+					AVHWDeviceContext *av_device = (AVHWDeviceContext *)r->hw_device_ctx->data;
+					if (av_device && av_device->hwctx) {
+						AVD3D11VADeviceContext *d3d = (AVD3D11VADeviceContext *)av_device->hwctx;
+						d3d->BindFlags |= D3D11_BIND_SHADER_RESOURCE;
+					}
+				}
 				r->codec_ctx->get_format = get_hw_format;
 				r->codec_ctx->hw_device_ctx = av_buffer_ref(r->hw_device_ctx);
 				obs_log(LOG_INFO, "scrcpy-reader: using D3D11VA hardware decoding");
