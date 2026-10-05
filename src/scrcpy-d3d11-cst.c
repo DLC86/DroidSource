@@ -468,7 +468,7 @@ static bool compile_shader(ID3D11Device *device, const char *source_code, bool o
 	}
 
 	hr = ID3D11Device_CreateComputeShader(device, ID3D10Blob_GetBufferPointer(code), ID3D10Blob_GetBufferSize(code),
-						      NULL, shader);
+					      NULL, shader);
 	SAFE_RELEASE(errors);
 	SAFE_RELEASE(code);
 	if (FAILED(hr)) {
@@ -599,8 +599,7 @@ bool scrcpy_d3d11_cst_apply(scrcpy_d3d11_cst_t *cst, const AVFrame *input, AVFra
 	ID3D11DeviceContext_CSSetShaderResources(cst->context, 0, 2, srvs);
 	ID3D11DeviceContext_CSSetUnorderedAccessViews(cst->context, 0, 2, uavs, NULL);
 
-	ID3D11DeviceContext_Dispatch(cst->context, ((UINT)cst->width + 15U) / 16U,
-				     ((UINT)cst->height + 15U) / 16U, 1);
+	ID3D11DeviceContext_Dispatch(cst->context, ((UINT)cst->width + 15U) / 16U, ((UINT)cst->height + 15U) / 16U, 1);
 
 	ID3D11DeviceContext_CSSetShaderResources(cst->context, 0, 2, null_srvs);
 	ID3D11DeviceContext_CSSetUnorderedAccessViews(cst->context, 0, 2, null_uavs, NULL);
