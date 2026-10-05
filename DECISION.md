@@ -1,8 +1,8 @@
-# Architecture Decision Record — scrcpy-obs
+# Architecture Decision Record — DroidSource
 
 ## Problem
 
-Integrate scrcpy's Android screen capture into OBS Studio without the user having to run scrcpy as a separate window and use a lossy screen capture source. Target UX: pick "Android (scrcpy)" in OBS → Add Source → stream appears.
+Integrate scrcpy's Android screen capture into OBS Studio without the user having to run scrcpy as a separate window and use a lossy screen capture source. Target UX: pick "DroidSource" in OBS → Add Source → stream appears.
 
 ## Reference: how DistroAV does it
 

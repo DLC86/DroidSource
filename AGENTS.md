@@ -1,8 +1,8 @@
-# scrcpy-obs — Agent Context
+# DroidSource — Agent Context
 
 ## What this repo is
 
-OBS Studio plugin that adds "Android (scrcpy)" as a native OBS source. Plugin spawns a patched [scrcpy](https://github.com/Genymobile/scrcpy) subprocess; subprocess tees the server→client raw H.264 packet stream (`[pts:u64 BE | flags:u8 | size:u32 BE | NAL]`) to a loopback TCP port. Plugin parses the packets, feeds NAL units to `libavcodec`, emits decoded frames via `obs_source_output_video()`.
+OBS Studio plugin that adds "DroidSource" as a native OBS source. Plugin spawns a patched [scrcpy](https://github.com/Genymobile/scrcpy) subprocess; subprocess tees the server→client raw H.264 packet stream (`[pts:u64 BE | flags:u8 | size:u32 BE | NAL]`) to a loopback TCP port. Plugin parses the packets, feeds NAL units to `libavcodec`, emits decoded frames via `obs_source_output_video()`.
 
 Target platform: Windows first (user's primary OS). Linux/macOS later.
 
@@ -48,7 +48,7 @@ Target platform: Windows first (user's primary OS). Linux/macOS later.
   cd scrcpy && meson setup builddir --buildtype=release -Dcompile_server=false -Dportable=true \
     && ninja -C builddir
   ```
-- OBS plugin install dir on dev machine: `C:\ProgramData\obs-studio\plugins\scrcpy-obs\`. OBS ignores the AppData copy if the ProgramData one exists.
+- OBS plugin install dir on dev machine: `C:\ProgramData\obs-studio\plugins\droidsource\`. OBS ignores the AppData copy if the ProgramData one exists.
 - Format, build, and ADB details: [CONTRIBUTING.md](CONTRIBUTING.md)
 - Tests: [tests/README.md](tests/README.md)
 - User-facing install/usage: [README.md](README.md)
@@ -65,5 +65,5 @@ Target platform: Windows first (user's primary OS). Linux/macOS later.
 - Don't touch files under `scrcpy/` — submodule, pinned tag. Changes go through the fork.
 - One OBS source type per file in `src/`.
 - Active dev branch: `dev/rawstream`. PRs target `dev/rawstream` for now.
-- Remote: `git@github.com:wtarit/scrcpy-obs.git` (SSH).
+- Remote: `git@github.com:DLC86/DroidSource.git` (SSH).
 - MSVC doesn't enable C11 atomics — use OBS `os_atomic_*` helpers on `volatile bool`.

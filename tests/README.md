@@ -1,6 +1,6 @@
 # Tests
 
-pytest suite for scrcpy-obs, managed by [uv](https://docs.astral.sh/uv/).
+pytest suite for DroidSource, managed by [uv](https://docs.astral.sh/uv/).
 
 ## Setup
 

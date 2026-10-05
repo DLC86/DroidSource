@@ -1,6 +1,6 @@
 # Contributing
 
-Developer guide for building, formatting, and testing scrcpy-obs.
+Developer guide for building, formatting, and testing DroidSource.
 
 ## Architecture
 
@@ -31,8 +31,8 @@ See
 ### 1. Clone
 
 ```bash
-git clone git@github.com:wtarit/scrcpy-obs.git
-cd scrcpy-obs
+git clone git@github.com:DLC86/DroidSource.git
+cd DroidSource
 git submodule update --init --recursive
 ```
 
@@ -99,10 +99,10 @@ See [tests/README.md](tests/README.md).
 cmake --build --preset windows-x64 --config RelWithDebInfo
 cmake --install build_x64 --prefix "$PWD/release/RelWithDebInfo" --config RelWithDebInfo
 
-# flatten scrcpy-obs/ into Package (what iscc expects)
+# flatten droidsource/ into Package (what iscc expects)
 New-Item -ItemType Directory -Force -Path release/Package | Out-Null
 
-Copy-Item -Path release/RelWithDebInfo/scrcpy-obs/* -Destination release/Package -Recurse -Force
+Copy-Item -Path release/RelWithDebInfo/droidsource/* -Destination release/Package -Recurse -Force
 
 # compile the installer
 iscc .\build_x64\installer-windows.iss /O"$PWD\release"

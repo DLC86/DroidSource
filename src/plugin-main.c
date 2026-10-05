@@ -1,5 +1,5 @@
 /*
-scrcpy-obs
+DroidSource
 Copyright (C) 2026 wtarit <tarit@wtarit.me>
 
 This program is free software; you can redistribute it and/or modify
@@ -27,11 +27,11 @@ OBS_MODULE_USE_DEFAULT_LOCALE(PLUGIN_NAME, "en-US")
 bool obs_module_load(void)
 {
 	obs_register_source(&scrcpy_source_info);
-	obs_log(LOG_INFO, "scrcpy-obs loaded (version %s)", PLUGIN_VERSION);
+	obs_log(LOG_INFO, "DroidSource loaded (version %s)", PLUGIN_VERSION);
 	return true;
 }
 
 void obs_module_unload(void)
 {
-	obs_log(LOG_INFO, "scrcpy-obs unloaded");
+	obs_log(LOG_INFO, "DroidSource unloaded");
 }

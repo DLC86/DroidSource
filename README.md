@@ -1,6 +1,6 @@
-# scrcpy Source for OBS
+# DroidSource
 
-Android screen and camera mirroring for OBS Studio, powered by [scrcpy](https://github.com/Genymobile/scrcpy). Each source captures a connected Android device without requiring scrcpy desktop window capture. Allow you to stream/record your Android device at native source resolution.
+Android screen and camera source for OBS Studio, powered by [scrcpy](https://github.com/Genymobile/scrcpy). Each source captures a connected Android device without requiring scrcpy desktop window capture. Allow you to stream/record your Android device at native source resolution.
 
 <img width="500" alt="scrcpy Source settings" src="https://github.com/user-attachments/assets/37bec7d2-c4f6-47ee-ae51-52c76e143af1" />
 
@@ -13,17 +13,17 @@ Android screen and camera mirroring for OBS Studio, powered by [scrcpy](https://
 
 ## Install
 
-1. Download the latest **Windows installer** from [Releases](https://github.com/wtarit/scrcpy-obs/releases).
+1. Download the latest **Windows installer** from [Releases](https://github.com/DLC86/DroidSource/releases).
 2. Run the installer and restart OBS.
 
-The source appears as **Android (scrcpy)** in the Add Source menu.
+The source appears as **DroidSource** in the Add Source menu.
 
 > Note: You can also use the zipped version of the plugin directly by unzipping it and place the plugin in obs plugins folder.
 
 ## Usage
 
 1. Connect your Android device.
-2. In OBS, click **+** → **Android (scrcpy)** → create the source.
+2. In OBS, click **+** → **DroidSource** → create the source.
 3. Approve the USB debugging prompt on the phone.
 
 You can add multiple sources for multiple devices (one source per device).

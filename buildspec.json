@@ -33,14 +33,14 @@
   },
   "platformConfig": {
     "macos": {
-      "bundleId": "me.wtarit.scrcpy-obs"
+      "bundleId": "me.wtarit.droidsource"
     }
   },
-  "name": "scrcpy-obs",
-  "displayName": "scrcpy Source for OBS",
-  "version": "0.0.1",
+  "name": "droidsource",
+  "displayName": "DroidSource",
+  "version": "0.1.0",
   "author": "wtarit",
-  "website": "https://github.com/wtarit/scrcpy-obs",
+  "website": "https://github.com/DLC86/DroidSource",
   "email": "tarit@wtarit.me",
   "uuids": {
     "windowsApp": "1d13e592-1632-40db-ba33-b63c974a623b"
