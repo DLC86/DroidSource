@@ -280,7 +280,7 @@ static bool create_output_resources(struct scrcpy_d3d11_cst *cst, bool output_10
 	uav.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
 	uav.Texture2D.MipSlice = 0;
 	hr = ID3D11Device_CreateUnorderedAccessView(cst->device, (ID3D11Resource *)cst->output_y_texture, &uav,
-	                           &cst->output_y_uav);
+	                            &cst->output_y_uav);
 	if (FAILED(hr)) {
 		log_hresult("CreateUnorderedAccessView(Y)", hr);
 		goto fail;
@@ -288,7 +288,7 @@ static bool create_output_resources(struct scrcpy_d3d11_cst *cst, bool output_10
 
 	uav.Format = uv_format;
 	hr = ID3D11Device_CreateUnorderedAccessView(cst->device, (ID3D11Resource *)cst->output_uv_texture, &uav,
-	                           &cst->output_uv_uav);
+	                            &cst->output_uv_uav);
 	if (FAILED(hr)) {
 		log_hresult("CreateUnorderedAccessView(UV)", hr);
 		goto fail;
