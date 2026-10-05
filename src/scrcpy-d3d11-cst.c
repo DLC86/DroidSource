@@ -86,8 +86,7 @@ struct scrcpy_d3d11_cst {
 
 static const char d3d11_cst_shader[] =
 #include "scrcpy-d3d11-cst-shader.inc"
-;
-
+	;
 
 
 static void log_hresult(const char *op, HRESULT hr)
