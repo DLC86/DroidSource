@@ -79,9 +79,9 @@ struct scrcpy_reader {
 	sock_t sock;
 
 	bool hardware_decoding; /* clang-format sync */
-	bool flip_vertical;
+	int rotate;
+	bool mirror;
 	int video_buffer_ms;
-	bool portrait_mode;
 	int color_range_override;
 	bool force_8bit_output;
 	bool logged_color_info;
@@ -89,14 +89,9 @@ struct scrcpy_reader {
 	AVBufferRef *hw_device_ctx;
 	enum AVPixelFormat hw_pix_fmt;
 	AVFrame *transfer_frame;
-	AVFrame *portrait_frame;
+	AVFrame *transform_frame;
 	AVFrame *eight_bit_frame;
 	SwsContext *eight_bit_sws;
-	AVFilterGraph *gpu_8bit_graph;
-	AVFilterContext *gpu_8bit_src;
-	AVFilterContext *gpu_8bit_sink;
-	int gpu_8bit_width;
-	int gpu_8bit_height;
 
 	AVCodecContext *codec_ctx;
 	AVPacket *packet;
@@ -405,57 +400,66 @@ static void log_frame_color_info(struct scrcpy_reader *r, const AVFrame *frame, 
 	r->logged_color_info = true;
 }
 
-static void rotate_plane_90_ccw(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize, int src_width,
-				int src_height, int bytes_per_pixel)
+static void transform_plane(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize,
+			      int src_width, int src_height, int bytes_per_pixel, int rotate, bool mirror)
 {
+	int dst_width = (rotate == 90 || rotate == 270) ? src_height : src_width;
+
 	for (int sy = 0; sy < src_height; ++sy) {
 		for (int sx = 0; sx < src_width; ++sx) {
-			int dx = sy;
-			int dy = src_width - 1 - sx;
+			int dx;
+			int dy;
+			switch (rotate) {
+			case 90: dx = sy; dy = src_width - 1 - sx; break;
+			case 180: dx = src_width - 1 - sx; dy = src_height - 1 - sy; break;
+			case 270: dx = src_height - 1 - sy; dy = sx; break;
+			default: dx = sx; dy = sy; break;
+			}
+			if (mirror) dx = dst_width - 1 - dx;
 			memcpy(dst + (size_t)dy * dst_linesize + (size_t)dx * bytes_per_pixel,
 			       src + (size_t)sy * src_linesize + (size_t)sx * bytes_per_pixel, (size_t)bytes_per_pixel);
 		}
 	}
 }
 
-static bool rotate_frame_90_ccw(struct scrcpy_reader *r, const AVFrame *src)
+static bool transform_frame(struct scrcpy_reader *r, const AVFrame *src)
 {
-	enum AVPixelFormat format;
+	int rotate;
+	bool mirror;
+	if (!r || !src || !r->transform_frame) return false;
+	pthread_mutex_lock(&r->state_mutex);
+	rotate = r->rotate;
+	mirror = r->mirror;
+	pthread_mutex_unlock(&r->state_mutex);
+	if (rotate != 0 && rotate != 90 && rotate != 180 && rotate != 270) rotate = 0;
+	if (rotate == 0 && !mirror) return false;
 
-	if (!r || !src || !r->portrait_frame)
-		return false;
-
-	format = (enum AVPixelFormat)src->format;
+	enum AVPixelFormat format = (enum AVPixelFormat)src->format;
 	bool high_bit_depth = format == AV_PIX_FMT_YUV420P10LE || format == AV_PIX_FMT_P010LE;
-	if (format != AV_PIX_FMT_YUV420P && format != AV_PIX_FMT_YUVJ420P && format != AV_PIX_FMT_NV12 &&
-	    !high_bit_depth)
+	if (format != AV_PIX_FMT_YUV420P && format != AV_PIX_FMT_YUVJ420P && format != AV_PIX_FMT_NV12 && !high_bit_depth)
 		return false;
 
-	av_frame_unref(r->portrait_frame);
-	r->portrait_frame->format = src->format;
-	r->portrait_frame->width = src->height;
-	r->portrait_frame->height = src->width;
-	if (av_frame_copy_props(r->portrait_frame, src) < 0)
-		return false;
-	if (av_frame_get_buffer(r->portrait_frame, 32) < 0)
+	av_frame_unref(r->transform_frame);
+	r->transform_frame->format = src->format;
+	r->transform_frame->width = (rotate == 90 || rotate == 270) ? src->height : src->width;
+	r->transform_frame->height = (rotate == 90 || rotate == 270) ? src->width : src->height;
+	if (av_frame_copy_props(r->transform_frame, src) < 0 || av_frame_get_buffer(r->transform_frame, 32) < 0)
 		return false;
 
 	int bytes_per_luma = high_bit_depth ? 2 : 1;
-	rotate_plane_90_ccw(r->portrait_frame->data[0], r->portrait_frame->linesize[0], src->data[0], src->linesize[0],
-			    src->width, src->height, bytes_per_luma);
-
+	transform_plane(r->transform_frame->data[0], r->transform_frame->linesize[0], src->data[0], src->linesize[0],
+			       src->width, src->height, bytes_per_luma, rotate, mirror);
 	int src_width = src->width / 2;
 	int src_height = src->height / 2;
 	if (format == AV_PIX_FMT_NV12 || format == AV_PIX_FMT_P010LE) {
-		rotate_plane_90_ccw(r->portrait_frame->data[1], r->portrait_frame->linesize[1], src->data[1],
-				    src->linesize[1], src_width, src_height, format == AV_PIX_FMT_P010LE ? 4 : 2);
+		transform_plane(r->transform_frame->data[1], r->transform_frame->linesize[1], src->data[1], src->linesize[1],
+			       src_width, src_height, format == AV_PIX_FMT_P010LE ? 4 : 2, rotate, mirror);
 	} else {
-		rotate_plane_90_ccw(r->portrait_frame->data[1], r->portrait_frame->linesize[1], src->data[1],
-				    src->linesize[1], src_width, src_height, bytes_per_luma);
-		rotate_plane_90_ccw(r->portrait_frame->data[2], r->portrait_frame->linesize[2], src->data[2],
-				    src->linesize[2], src_width, src_height, bytes_per_luma);
+		transform_plane(r->transform_frame->data[1], r->transform_frame->linesize[1], src->data[1], src->linesize[1],
+			       src_width, src_height, bytes_per_luma, rotate, mirror);
+		transform_plane(r->transform_frame->data[2], r->transform_frame->linesize[2], src->data[2], src->linesize[2],
+			       src_width, src_height, bytes_per_luma, rotate, mirror);
 	}
-
 	return true;
 }
 
@@ -523,9 +527,9 @@ static bool open_decoder(struct scrcpy_reader *r, uint32_t codec_id, uint32_t wi
 	r->packet = av_packet_alloc();
 	r->frame = av_frame_alloc();
 	r->transfer_frame = av_frame_alloc();
-	r->portrait_frame = av_frame_alloc();
+	r->transform_frame = av_frame_alloc();
 	r->eight_bit_frame = av_frame_alloc();
-	if (!r->packet || !r->frame || !r->transfer_frame || !r->portrait_frame || !r->eight_bit_frame) {
+	if (!r->packet || !r->frame || !r->transfer_frame || !r->transform_frame || !r->eight_bit_frame) {
 		obs_log(LOG_ERROR, "scrcpy-reader: av alloc failed");
 		return false;
 	}
@@ -548,122 +552,6 @@ static int sws_colorspace_for_frame(const AVFrame *frame)
 	default:
 		return SWS_CS_DEFAULT;
 	}
-}
-
-static void destroy_gpu_8bit_filter(struct scrcpy_reader *r)
-{
-	if (!r)
-		return;
-
-	if (r->gpu_8bit_graph)
-		avfilter_graph_free(&r->gpu_8bit_graph);
-
-	r->gpu_8bit_src = NULL;
-	r->gpu_8bit_sink = NULL;
-	r->gpu_8bit_width = 0;
-	r->gpu_8bit_height = 0;
-}
-
-static bool init_gpu_8bit_filter(struct scrcpy_reader *r, const AVFrame *input)
-{
-	AVFilterContext *scale = NULL;
-	AVFilterContext *download = NULL;
-	AVFilterContext *format = NULL;
-	AVBufferSrcParameters *params = NULL;
-	char args[128];
-	int ret;
-
-	if (!r || !input || input->format != AV_PIX_FMT_D3D11 || !input->hw_frames_ctx)
-		return false;
-
-	if (r->gpu_8bit_graph && (r->gpu_8bit_width != input->width || r->gpu_8bit_height != input->height))
-		destroy_gpu_8bit_filter(r);
-
-	if (r->gpu_8bit_graph)
-		return true;
-
-	r->gpu_8bit_graph = avfilter_graph_alloc();
-	if (!r->gpu_8bit_graph)
-		return false;
-
-	snprintf(args, sizeof(args), "video_size=%dx%d:pix_fmt=d3d11:time_base=1/1000000", input->width, input->height);
-	ret = avfilter_graph_create_filter(&r->gpu_8bit_src, avfilter_get_by_name("buffer"), "droidsource_gpu_in", args,
-					   NULL, r->gpu_8bit_graph);
-	if (ret < 0)
-		goto fail;
-
-	params = av_buffersrc_parameters_alloc();
-	if (!params)
-		goto fail;
-	params->format = AV_PIX_FMT_D3D11;
-	params->width = input->width;
-	params->height = input->height;
-	params->time_base = (AVRational){1, 1000000};
-	params->hw_frames_ctx = av_buffer_ref(input->hw_frames_ctx);
-	params->color_space = input->colorspace;
-	params->color_range = input->color_range;
-	if (!params->hw_frames_ctx || av_buffersrc_parameters_set(r->gpu_8bit_src, params) < 0)
-		goto fail;
-	av_free(params);
-	params = NULL;
-
-	ret = avfilter_graph_create_filter(&scale, avfilter_get_by_name("scale_d3d11"), "droidsource_gpu_scale",
-					   "format=nv12", NULL, r->gpu_8bit_graph);
-	if (ret < 0)
-		goto fail;
-
-	ret = avfilter_graph_create_filter(&download, avfilter_get_by_name("hwdownload"), "droidsource_gpu_download",
-					   NULL, NULL, r->gpu_8bit_graph);
-	if (ret < 0)
-		goto fail;
-
-	ret = avfilter_graph_create_filter(&format, avfilter_get_by_name("format"), "droidsource_gpu_format",
-					   "pix_fmts=nv12", NULL, r->gpu_8bit_graph);
-	if (ret < 0)
-		goto fail;
-
-	ret = avfilter_graph_create_filter(&r->gpu_8bit_sink, avfilter_get_by_name("buffersink"), "droidsource_gpu_out",
-					   NULL, NULL, r->gpu_8bit_graph);
-	if (ret < 0)
-		goto fail;
-
-	if (avfilter_link(r->gpu_8bit_src, 0, scale, 0) < 0 || avfilter_link(scale, 0, download, 0) < 0 ||
-	    avfilter_link(download, 0, format, 0) < 0 || avfilter_link(format, 0, r->gpu_8bit_sink, 0) < 0)
-		goto fail;
-
-	if (avfilter_graph_config(r->gpu_8bit_graph, NULL) < 0)
-		goto fail;
-
-	r->gpu_8bit_width = input->width;
-	r->gpu_8bit_height = input->height;
-	obs_log(LOG_INFO, "scrcpy-reader: using D3D11 GPU conversion P010 -> NV12 for 10-bit to 8-bit output");
-	return true;
-
-fail:
-	if (params)
-		av_free(params);
-	destroy_gpu_8bit_filter(r);
-	return false;
-}
-
-static bool convert_frame_to_8bit_gpu(struct scrcpy_reader *r, AVFrame *input, AVFrame **output)
-{
-	int ret;
-
-	if (!init_gpu_8bit_filter(r, input))
-		return false;
-
-	av_frame_unref(r->eight_bit_frame);
-	ret = av_buffersrc_add_frame_flags(r->gpu_8bit_src, input, AV_BUFFERSRC_FLAG_KEEP_REF | AV_BUFFERSRC_FLAG_PUSH);
-	if (ret < 0)
-		return false;
-
-	ret = av_buffersink_get_frame(r->gpu_8bit_sink, r->eight_bit_frame);
-	if (ret < 0)
-		return false;
-
-	*output = r->eight_bit_frame;
-	return true;
 }
 
 static bool convert_frame_to_8bit_cpu(struct scrcpy_reader *r, AVFrame *input, AVFrame **output)
@@ -730,49 +618,40 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	pthread_mutex_unlock(&r->state_mutex);
 	enum video_range_type source_range = resolve_color_range(f, color_range_override);
 	enum AVColorRange source_av_range = source_range == VIDEO_RANGE_FULL ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
-	if (hardware_path && r->force_8bit_output) {
-		/* Keep the D3D11 frame on the GPU while converting P010 -> NV12. */
+	if (hardware_path) {
+		av_frame_unref(r->transfer_frame);
+		if (av_hwframe_transfer_data(r->transfer_frame, f, 0) < 0) {
+			obs_log(LOG_WARNING, "scrcpy-reader: hardware frame transfer failed");
+			return;
+		}
+		if (av_frame_copy_props(r->transfer_frame, f) < 0) {
+			obs_log(LOG_WARNING, "scrcpy-reader: could not preserve hardware frame color metadata");
+			return;
+		}
+		out = r->transfer_frame;
+	}
+	out->color_range = source_av_range;
+	if (r->force_8bit_output) {
 		AVFrame *converted = NULL;
-		if (!convert_frame_to_8bit(r, f, &converted)) {
-			obs_log(LOG_WARNING, "scrcpy-reader: GPU 8-bit output conversion failed for pixel format %d",
-				f->format);
+		if (!convert_frame_to_8bit_cpu(r, out, &converted)) {
+			obs_log(LOG_WARNING, "scrcpy-reader: 8-bit output conversion failed for pixel format %d", out->format);
 			return;
 		}
 		out = converted;
-		out->color_range = source_av_range;
-	} else {
-		if (hardware_path) {
-			av_frame_unref(r->transfer_frame);
-			if (av_hwframe_transfer_data(r->transfer_frame, f, 0) < 0) {
-				obs_log(LOG_WARNING, "scrcpy-reader: hardware frame transfer failed");
-				return;
-			}
-			if (av_frame_copy_props(r->transfer_frame, f) < 0) {
-				obs_log(LOG_WARNING, "scrcpy-reader: could not preserve hardware frame color metadata");
-				return;
-			}
-			out = r->transfer_frame;
-		}
-		out->color_range = source_av_range;
-		if (r->force_8bit_output) {
-			AVFrame *converted = NULL;
-			if (!convert_frame_to_8bit(r, out, &converted)) {
-				obs_log(LOG_WARNING,
-					"scrcpy-reader: 8-bit output conversion failed for pixel format %d",
-					out->format);
-				return;
-			}
-			out = converted;
-		}
 	}
 	log_frame_color_info(r, out, hardware_path);
-	if (r->portrait_mode) {
-		if (!rotate_frame_90_ccw(r, out)) {
-			obs_log(LOG_WARNING, "scrcpy-reader: portrait mode unsupported for pixel format %d",
-				out->format);
+	int rotate;
+	bool mirror;
+	pthread_mutex_lock(&r->state_mutex);
+	rotate = r->rotate;
+	mirror = r->mirror;
+	pthread_mutex_unlock(&r->state_mutex);
+	if (rotate != 0 || mirror) {
+		if (!transform_frame(r, out)) {
+			obs_log(LOG_WARNING, "scrcpy-reader: image transform unsupported for pixel format %d", out->format);
 			return;
 		}
-		out = r->portrait_frame;
+		out = r->transform_frame;
 	}
 	enum video_format fmt = av_to_obs_format((enum AVPixelFormat)out->format);
 	if (fmt == VIDEO_FORMAT_NONE) {
@@ -789,7 +668,7 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	}
 	obs_frame.timestamp = out->pts == AV_NOPTS_VALUE ? (uint64_t)os_gettime_ns() : (uint64_t)out->pts * 1000ULL;
 	obs_frame.timestamp += (uint64_t)r->video_buffer_ms * UINT64_C(1000000);
-	obs_frame.flip = r->flip_vertical;
+	obs_frame.flip = false;
 	enum video_colorspace cs = obs_colorspace_from_av(out, false);
 	enum video_range_type range = out->color_range == AVCOL_RANGE_JPEG ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
 	const bool color_params_ok = video_format_get_parameters_for_format(
@@ -937,8 +816,8 @@ done:
 	return NULL;
 }
 
-scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port, bool hardware_decoding, bool flip_vertical,
-				      int video_buffer_ms, bool portrait_mode, int color_range_override,
+scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port, bool hardware_decoding, int rotate,
+				      bool mirror, int video_buffer_ms, int color_range_override,
 				      bool force_8bit_output)
 {
 	struct scrcpy_reader *r = bzalloc(sizeof(*r));
@@ -946,9 +825,9 @@ scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port, bool 
 	r->port = port;
 	r->sock = INVALID_SOCK;
 	r->hardware_decoding = hardware_decoding;
-	r->flip_vertical = flip_vertical;
+	r->rotate = rotate;
+	r->mirror = mirror;
 	r->video_buffer_ms = video_buffer_ms > 0 ? video_buffer_ms : 0;
-	r->portrait_mode = portrait_mode;
 	r->color_range_override = color_range_override;
 	r->force_8bit_output = force_8bit_output;
 
@@ -1033,13 +912,12 @@ void scrcpy_reader_destroy(scrcpy_reader_t *r)
 		av_frame_free(&r->frame);
 	if (r->transfer_frame)
 		av_frame_free(&r->transfer_frame);
-	if (r->portrait_frame)
-		av_frame_free(&r->portrait_frame);
+	if (r->transform_frame)
+		av_frame_free(&r->transform_frame);
 	if (r->eight_bit_frame)
 		av_frame_free(&r->eight_bit_frame);
 	if (r->eight_bit_sws)
 		sws_freeContext(r->eight_bit_sws);
-	destroy_gpu_8bit_filter(r);
 	if (r->hw_device_ctx)
 		av_buffer_unref(&r->hw_device_ctx);
 	if (r->codec_ctx)
