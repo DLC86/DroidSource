@@ -131,8 +131,7 @@ struct scrcpy_src {
 	bool camera_wb_lock;
 	int camera_color_profile;
 	int camera_color_range;
-	bool camera_10bit_to_8bit;
-	bool camera_10bit;
+	int camera_bit_depth;
 	bool portrait_mode;
 
 	pthread_mutex_t state_mutex;
@@ -236,7 +235,7 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 	if (ctx->max_size > 0)
 		snprintf(max_size_arg, sizeof(max_size_arg), "--max-size=%d", ctx->max_size);
 	char codec_arg[64] = {0};
-	const char *effective_codec = ctx->camera_10bit ? "h265" : ctx->codec;
+	const char *effective_codec = ctx->camera_bit_depth != 0 ? "h265" : ctx->codec;
 	if (effective_codec && *effective_codec)
 		snprintf(codec_arg, sizeof(codec_arg), "--video-codec=%s", effective_codec);
 	char source_arg[64] = {0};
@@ -262,7 +261,7 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 			startup_color_space = 0;
 			startup_gamma = 0;
 		}
-		if (ctx->camera_10bit &&
+		if (ctx->camera_bit_depth != 0 &&
 		    (startup_gamma < CAMERA_GAMMA_HLG || startup_gamma > CAMERA_GAMMA_HDR10_PLUS)) {
 			startup_color_space = CAMERA_COLOR_SPACE_REC2020;
 			startup_gamma = CAMERA_GAMMA_HLG;
@@ -272,7 +271,7 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 			"--video-codec-options=__scrcpy_obs_camera_control_port:int=%u,__scrcpy_obs_camera_iso:int=%d,__scrcpy_obs_camera_shutter_us:int=%d,__scrcpy_obs_camera_focus_distance:float=%.6f,__scrcpy_obs_camera_wb_kelvin:int=%d,__scrcpy_obs_camera_wb_lock:int=%d,__scrcpy_obs_camera_color_space:int=%d,__scrcpy_obs_camera_gamma:int=%d,color-range:int=%d%s",
 			(unsigned)control_port, ctx->camera_iso, ctx->camera_shutter_us, ctx->camera_focus_distance,
 			ctx->camera_wb_kelvin, ctx->camera_wb_lock ? 1 : 0, startup_color_space, startup_gamma,
-			ctx->camera_10bit ? 2 : 1, ctx->camera_10bit ? ",__scrcpy_obs_camera_10bit:int=1" : "");
+			ctx->camera_bit_depth != 0 ? 2 : 1, ctx->camera_bit_depth != 0 ? ",__scrcpy_obs_camera_10bit:int=1" : "");
 	}
 
 	char serial_arg[128] = {0};
@@ -332,7 +331,7 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 	const bool camera_source = ctx->video_source && strcmp(ctx->video_source, "camera") == 0;
 	ctx->reader = scrcpy_reader_create(ctx->source, port, ctx->hardware_decoding, ctx->flip_vertical,
 					   ctx->video_buffer_ms, ctx->portrait_mode, ctx->camera_color_range,
-					   camera_source && ctx->camera_10bit_to_8bit);
+					   camera_source && ctx->camera_bit_depth == 2);
 
 	if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0 && control_port != 0 && ctx->serial &&
 	    *ctx->serial) {
@@ -345,7 +344,7 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 				startup_color_space = 0;
 				startup_gamma = 0;
 			}
-			if (ctx->camera_10bit &&
+			if (ctx->camera_bit_depth != 0 &&
 			    (startup_gamma < CAMERA_GAMMA_HLG || startup_gamma > CAMERA_GAMMA_HDR10_PLUS)) {
 				startup_color_space = CAMERA_COLOR_SPACE_REC2020;
 				startup_gamma = CAMERA_GAMMA_HLG;
@@ -353,8 +352,8 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 			if (!scrcpy_camera_control_apply(
 				    ctx->camera_control, ctx->camera_zoom, ctx->camera_torch, ctx->camera_iso,
 				    ctx->camera_shutter_us, ctx->camera_focus_distance, ctx->camera_wb_kelvin,
-				    ctx->camera_wb_lock, startup_color_space, startup_gamma, ctx->camera_10bit,
-				    camera_gamma_to_dynamic_range(startup_gamma, ctx->camera_10bit))) {
+				    ctx->camera_wb_lock, startup_color_space, startup_gamma, ctx->camera_bit_depth != 0,
+				    camera_gamma_to_dynamic_range(startup_gamma, ctx->camera_bit_depth != 0))) {
 				obs_log(LOG_WARNING, "scrcpy-source: camera control connection not ready");
 			}
 		}
@@ -414,8 +413,8 @@ static void load_settings(struct scrcpy_src *ctx, obs_data_t *settings)
 	ctx->camera_wb_lock = obs_data_get_bool(settings, "camera_wb_lock");
 	ctx->camera_color_profile = (int)obs_data_get_int(settings, "camera_color_profile");
 	ctx->camera_color_range = (int)obs_data_get_int(settings, "camera_color_range");
-	ctx->camera_10bit = obs_data_get_bool(settings, "camera_10bit");
-	ctx->camera_10bit_to_8bit = obs_data_get_bool(settings, "camera_10bit_to_8bit");
+	ctx->camera_bit_depth = (int)obs_data_get_int(settings, "camera_bit_depth");
+	
 	ctx->portrait_mode = obs_data_get_bool(settings, "portrait_mode");
 	ctx->max_size = (int)obs_data_get_int(settings, "max_size");
 	ctx->bitrate_kbps = (int)obs_data_get_int(settings, "bitrate_kbps");
@@ -547,8 +546,7 @@ static bool camera_restart_required(const struct scrcpy_src *ctx, obs_data_t *se
 	       ctx->portrait_mode != obs_data_get_bool(settings, "portrait_mode") ||
 	       ctx->video_buffer_ms != (int)obs_data_get_int(settings, "video_buffer_ms") ||
 	       ctx->camera_color_profile != (int)obs_data_get_int(settings, "camera_color_profile") ||
-	       ctx->camera_10bit != obs_data_get_bool(settings, "camera_10bit") ||
-	       ctx->camera_10bit_to_8bit != obs_data_get_bool(settings, "camera_10bit_to_8bit");
+	       ctx->camera_bit_depth != (int)obs_data_get_int(settings, "camera_bit_depth");
 }
 
 static void src_update(void *data, obs_data_t *settings)
@@ -584,7 +582,7 @@ static void src_update(void *data, obs_data_t *settings)
 			runtime_color_space = 0;
 			runtime_gamma = 0;
 		}
-		if (ctx->camera_10bit &&
+		if (ctx->camera_bit_depth != 0 &&
 		    (runtime_gamma < CAMERA_GAMMA_HLG || runtime_gamma > CAMERA_GAMMA_HDR10_PLUS)) {
 			runtime_color_space = CAMERA_COLOR_SPACE_REC2020;
 			runtime_gamma = CAMERA_GAMMA_HLG;
@@ -592,8 +590,8 @@ static void src_update(void *data, obs_data_t *settings)
 		(void)scrcpy_camera_control_apply(ctx->camera_control, ctx->camera_zoom, ctx->camera_torch,
 						  ctx->camera_iso, ctx->camera_shutter_us, ctx->camera_focus_distance,
 						  ctx->camera_wb_kelvin, ctx->camera_wb_lock, runtime_color_space,
-						  runtime_gamma, ctx->camera_10bit,
-						  camera_gamma_to_dynamic_range(runtime_gamma, ctx->camera_10bit));
+						  runtime_gamma, ctx->camera_bit_depth != 0,
+						  camera_gamma_to_dynamic_range(runtime_gamma, ctx->camera_bit_depth != 0));
 	}
 
 	os_atomic_set_bool(&ctx->updating, false);
@@ -615,8 +613,7 @@ static void src_get_defaults(obs_data_t *settings)
 	obs_data_set_default_bool(settings, "camera_wb_lock", false);
 	obs_data_set_default_int(settings, "camera_color_profile", CAMERA_COLOR_PROFILE_AUTO);
 	obs_data_set_default_int(settings, "camera_color_range", SCRCPY_COLOR_RANGE_AUTO);
-	obs_data_set_default_bool(settings, "camera_10bit", false);
-	obs_data_set_default_bool(settings, "camera_10bit_to_8bit", false);
+	obs_data_set_default_int(settings, "camera_bit_depth", 0);
 	obs_data_set_default_bool(settings, "portrait_mode", false);
 	obs_data_set_default_int(settings, "max_size", 0);
 	obs_data_set_default_int(settings, "bitrate_kbps", 8000);
@@ -1332,7 +1329,7 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 		obs_property_list_add_int(fps_prop, label, selected_fps[i]);
 	}
 
-	const bool camera_10bit = obs_data_get_bool(settings, "camera_10bit");
+	const bool camera_10bit = obs_data_get_int(settings, "camera_bit_depth") != 0;
 	obs_property_list_add_int(color_profile_prop, "Camera-provided / Auto (default)", CAMERA_COLOR_PROFILE_AUTO);
 	if (camera_10bit) {
 
@@ -1606,9 +1603,9 @@ static bool refresh_cameras_clicked(obs_properties_t *props, obs_property_t *p, 
 	obs_data_t *settings = obs_source_get_settings(ctx->source);
 	bool ok = refresh_camera_capabilities(props, settings, true);
 	obs_data_release(settings);
-	obs_property_t *camera_10bit = obs_properties_get(props, "camera_10bit");
+	obs_property_t *camera_bit_depth = obs_properties_get(props, "camera_bit_depth");
 	if (camera_10bit)
-		obs_property_set_enabled(camera_10bit, camera_10bit_supported(ctx));
+		obs_property_set_enabled(camera_bit_depth, camera_10bit_supported(ctx));
 	return ok;
 }
 
@@ -1639,10 +1636,11 @@ static bool camera_wb_lock_modified(obs_properties_t *props, obs_property_t *p, 
 	return false;
 }
 
-static bool camera_10bit_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
+static bool camera_bit_depth_modified(obs_properties_t *props, obs_property_t *p, obs_data_t *settings)
 {
 	UNUSED_PARAMETER(p);
-	bool enabled = obs_data_get_bool(settings, "camera_10bit");
+	const int bit_depth = (int)obs_data_get_int(settings, "camera_bit_depth");
+	bool enabled = bit_depth != 0;
 	if (enabled)
 		obs_data_set_string(settings, "codec", "h265");
 
@@ -1667,7 +1665,7 @@ static bool video_source_modified(obs_properties_t *props, obs_property_t *p, ob
 	const char *keys[] = {"camera_id",        "camera_size",    "camera_fps",           "camera_zoom",
 			      "camera_torch",     "camera_iso",     "camera_shutter_us",    "camera_focus_distance",
 			      "camera_wb_kelvin", "camera_wb_lock", "camera_color_profile", "camera_color_range",
-			      "camera_10bit",     "portrait_mode",  "flip_vertical",        "hardware_decoding",
+			      "camera_bit_depth",  "portrait_mode",  "flip_vertical",        "hardware_decoding",
 			      "refresh_cameras",  "video_buffer_ms"};
 
 	for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
@@ -1751,11 +1749,13 @@ static obs_properties_t *src_get_properties(void *data)
 								     OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(camera_color_range, "Auto (from stream)", SCRCPY_COLOR_RANGE_AUTO);
 
-	obs_property_t *camera_10bit_to_8bit =
-		obs_properties_add_bool(props, "camera_10bit_to_8bit", obs_module_text("Camera10BitTo8Bit"));
-
-	obs_property_t *camera_10bit = obs_properties_add_bool(props, "camera_10bit", obs_module_text("Camera10Bit"));
-	obs_property_set_modified_callback(camera_10bit, camera_10bit_modified);
+	obs_property_t *camera_bit_depth = obs_properties_add_list(props, "camera_bit_depth",
+								      obs_module_text("CameraBitDepth"), OBS_COMBO_TYPE_LIST,
+								      OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(camera_bit_depth, "8-bit", 0);
+	obs_property_list_add_int(camera_bit_depth, "10-bit", 1);
+	obs_property_list_add_int(camera_bit_depth, "10-bit to 8-bit", 2);
+	obs_property_set_modified_callback(camera_bit_depth, camera_bit_depth_modified);
 
 	obs_property_t *portrait_mode =
 		obs_properties_add_bool(props, "portrait_mode", obs_module_text("PortraitMode"));
@@ -1790,9 +1790,7 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_set_enabled(camera_wb, true);
 	obs_property_set_enabled(camera_wb_lock, !wb_manual);
 	obs_property_set_enabled(camera_color_profile, true);
-	obs_property_set_visible(camera_10bit, is_camera);
-	obs_property_set_visible(camera_10bit_to_8bit, is_camera);
-	obs_property_set_enabled(camera_10bit_to_8bit, is_camera && ten_bit_enabled);
+	obs_property_set_visible(camera_bit_depth, is_camera);
 	obs_property_set_visible(portrait_mode, is_camera);
 	obs_property_set_visible(refresh_cameras, is_camera);
 	obs_property_set_visible(flip_vertical, is_camera);
