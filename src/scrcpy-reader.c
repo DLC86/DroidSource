@@ -546,8 +546,7 @@ static bool convert_frame_to_8bit_cpu(struct scrcpy_reader *r, AVFrame *input, A
 
 	for (int y = 0; y < input->height; ++y) {
 		const uint8_t *src_row = input->data[0] + (size_t)y * input->linesize[0];
-		uint8_t *dst =
-			r->eight_bit_frame->data[0] + (size_t)y * r->eight_bit_frame->linesize[0];
+		uint8_t *dst = r->eight_bit_frame->data[0] + (size_t)y * r->eight_bit_frame->linesize[0];
 		for (int x = 0; x < input->width; ++x) {
 			uint16_t sample;
 			memcpy(&sample, src_row + (size_t)x * 2, sizeof(sample));
@@ -561,10 +560,8 @@ static bool convert_frame_to_8bit_cpu(struct scrcpy_reader *r, AVFrame *input, A
 	const int chroma_width = input->width / 2;
 	for (int y = 0; y < chroma_height; ++y) {
 		const uint8_t *src_row = input->data[1] + (size_t)y * input->linesize[1];
-		uint8_t *dst_u =
-			r->eight_bit_frame->data[1] + (size_t)y * r->eight_bit_frame->linesize[1];
-		uint8_t *dst_v =
-			r->eight_bit_frame->data[2] + (size_t)y * r->eight_bit_frame->linesize[2];
+		uint8_t *dst_u = r->eight_bit_frame->data[1] + (size_t)y * r->eight_bit_frame->linesize[1];
+		uint8_t *dst_v = r->eight_bit_frame->data[2] + (size_t)y * r->eight_bit_frame->linesize[2];
 
 		for (int x = 0; x < chroma_width; ++x) {
 			uint16_t u;
@@ -607,8 +604,7 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	pthread_mutex_unlock(&r->state_mutex);
 
 	enum video_range_type source_range = resolve_color_range(f, color_range_override);
-	enum AVColorRange source_av_range =
-		source_range == VIDEO_RANGE_FULL ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
+	enum AVColorRange source_av_range = source_range == VIDEO_RANGE_FULL ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
 
 	if (hardware_path) {
 		av_frame_unref(r->transfer_frame);
@@ -629,7 +625,7 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 		AVFrame *converted = NULL;
 		if (!convert_frame_to_8bit_cpu(r, out, &converted)) {
 			obs_log(LOG_WARNING, "scrcpy-reader: 10-bit-to-8-bit conversion failed for pixel format %s",
-			av_get_pix_fmt_name((enum AVPixelFormat)out->format));
+				av_get_pix_fmt_name((enum AVPixelFormat)out->format));
 			return;
 		}
 		out = converted;
@@ -647,9 +643,8 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	 * Every 8-bit frame is explicitly SDR metadata, including an 8-bit HLG
 	 * camera profile and the 10-bit-to-8-bit reduction path.
 	 */
-	const bool native_10bit_output =
-		!r->force_8bit_output &&
-		(fmt == VIDEO_FORMAT_I010 || fmt == VIDEO_FORMAT_P010);
+	const bool native_10bit_output = !r->force_8bit_output &&
+					 (fmt == VIDEO_FORMAT_I010 || fmt == VIDEO_FORMAT_P010);
 
 	if (r->force_8bit_output || !native_10bit_output) {
 		out->colorspace = AVCOL_SPC_BT709;
@@ -662,9 +657,8 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 			"scrcpy-reader: frame format decode=%s output=%s OBS=%d native-10bit=%s "
 			"colorspace=%d primaries=%d transfer=%d range=%d",
 			av_get_pix_fmt_name((enum AVPixelFormat)f->format),
-			av_get_pix_fmt_name((enum AVPixelFormat)out->format),
-			fmt, native_10bit_output ? "yes" : "no", out->colorspace,
-			out->color_primaries, out->color_trc, out->color_range);
+			av_get_pix_fmt_name((enum AVPixelFormat)out->format), fmt, native_10bit_output ? "yes" : "no",
+			out->colorspace, out->color_primaries, out->color_trc, out->color_range);
 		r->logged_color_info = true;
 	}
 
@@ -677,19 +671,16 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 		obs_frame.linesize[i] = (uint32_t)out->linesize[i];
 	}
 
-	obs_frame.timestamp =
-		out->pts == AV_NOPTS_VALUE ? (uint64_t)os_gettime_ns() : (uint64_t)out->pts * 1000ULL;
+	obs_frame.timestamp = out->pts == AV_NOPTS_VALUE ? (uint64_t)os_gettime_ns() : (uint64_t)out->pts * 1000ULL;
 	obs_frame.timestamp += (uint64_t)r->video_buffer_ms * UINT64_C(1000000);
 	obs_frame.flip = false;
 
 	enum video_colorspace cs = obs_colorspace_from_av(out, native_10bit_output);
-	enum video_range_type range =
-		out->color_range == AVCOL_RANGE_JPEG ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
+	enum video_range_type range = out->color_range == AVCOL_RANGE_JPEG ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
 	const bool color_params_ok = video_format_get_parameters_for_format(
 		cs, range, fmt, obs_frame.color_matrix, obs_frame.color_range_min, obs_frame.color_range_max);
 	if (!color_params_ok) {
-		obs_log(LOG_WARNING,
-			"scrcpy-reader: could not build color matrix for colorspace=%d format=%d range=%d",
+		obs_log(LOG_WARNING, "scrcpy-reader: could not build color matrix for colorspace=%d format=%d range=%d",
 			out->colorspace, fmt, range);
 		return;
 	}
