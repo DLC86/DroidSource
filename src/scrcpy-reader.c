@@ -24,6 +24,9 @@ typedef int socklen_t;
 #include <libavutil/pixfmt.h>
 #include <libavutil/pixdesc.h>
 #include <libavutil/hwcontext.h>
+#include <libavfilter/avfilter.h>
+#include <libavfilter/buffersink.h>
+#include <libavfilter/buffersrc.h>
 #include <libswscale/swscale.h>
 
 #include <stdint.h>
@@ -89,6 +92,11 @@ struct scrcpy_reader {
 	AVFrame *portrait_frame;
 	AVFrame *eight_bit_frame;
 	SwsContext *eight_bit_sws;
+	AVFilterGraph *gpu_8bit_graph;
+	AVFilterContext *gpu_8bit_src;
+	AVFilterContext *gpu_8bit_sink;
+	int gpu_8bit_width;
+	int gpu_8bit_height;
 
 	AVCodecContext *codec_ctx;
 	AVPacket *packet;
@@ -542,11 +550,130 @@ static int sws_colorspace_for_frame(const AVFrame *frame)
 	}
 }
 
-static bool convert_frame_to_8bit(struct scrcpy_reader *r, AVFrame *input, AVFrame **output)
+static void destroy_gpu_8bit_filter(struct scrcpy_reader *r)
+{
+	if (!r)
+		return;
+
+	if (r->gpu_8bit_graph)
+		avfilter_graph_free(&r->gpu_8bit_graph);
+
+	r->gpu_8bit_src = NULL;
+	r->gpu_8bit_sink = NULL;
+	r->gpu_8bit_width = 0;
+	r->gpu_8bit_height = 0;
+}
+
+static bool init_gpu_8bit_filter(struct scrcpy_reader *r, const AVFrame *input)
+{
+	AVFilterContext *scale = NULL;
+	AVFilterContext *download = NULL;
+	AVFilterContext *format = NULL;
+	AVBufferSrcParameters *params = NULL;
+	char args[128];
+	int ret;
+
+	if (!r || !input || input->format != AV_PIX_FMT_D3D11 || !input->hw_frames_ctx)
+		return false;
+
+	if (r->gpu_8bit_graph && (r->gpu_8bit_width != input->width || r->gpu_8bit_height != input->height))
+		destroy_gpu_8bit_filter(r);
+
+	if (r->gpu_8bit_graph)
+		return true;
+
+	r->gpu_8bit_graph = avfilter_graph_alloc();
+	if (!r->gpu_8bit_graph)
+		return false;
+
+	snprintf(args, sizeof(args), "video_size=%dx%d:pix_fmt=d3d11:time_base=1/1000000", input->width,
+		 input->height);
+	ret = avfilter_graph_create_filter(&r->gpu_8bit_src, avfilter_get_by_name("buffer"), "droidsource_gpu_in",
+					   args, NULL, r->gpu_8bit_graph);
+	if (ret < 0)
+		goto fail;
+
+	params = av_buffersrc_parameters_alloc();
+	if (!params)
+		goto fail;
+	params->format = AV_PIX_FMT_D3D11;
+	params->width = input->width;
+	params->height = input->height;
+	params->time_base = (AVRational){1, 1000000};
+	params->hw_frames_ctx = av_buffer_ref(input->hw_frames_ctx);
+	params->color_space = input->colorspace;
+	params->color_range = input->color_range;
+	if (!params->hw_frames_ctx || av_buffersrc_parameters_set(r->gpu_8bit_src, params) < 0)
+		goto fail;
+	av_free(params);
+	params = NULL;
+
+	ret = avfilter_graph_create_filter(&scale, avfilter_get_by_name("scale_d3d11"), "droidsource_gpu_scale",
+					   "format=nv12", NULL, r->gpu_8bit_graph);
+	if (ret < 0)
+		goto fail;
+
+	ret = avfilter_graph_create_filter(&download, avfilter_get_by_name("hwdownload"), "droidsource_gpu_download",
+					   NULL, NULL, r->gpu_8bit_graph);
+	if (ret < 0)
+		goto fail;
+
+	ret = avfilter_graph_create_filter(&format, avfilter_get_by_name("format"), "droidsource_gpu_format",
+					   "pix_fmts=nv12", NULL, r->gpu_8bit_graph);
+	if (ret < 0)
+		goto fail;
+
+	ret = avfilter_graph_create_filter(&r->gpu_8bit_sink, avfilter_get_by_name("buffersink"),
+					   "droidsource_gpu_out", NULL, NULL, r->gpu_8bit_graph);
+	if (ret < 0)
+		goto fail;
+
+	if (avfilter_link(r->gpu_8bit_src, 0, scale, 0) < 0 ||
+	    avfilter_link(scale, 0, download, 0) < 0 ||
+	    avfilter_link(download, 0, format, 0) < 0 ||
+	    avfilter_link(format, 0, r->gpu_8bit_sink, 0) < 0)
+		goto fail;
+
+	if (avfilter_graph_config(r->gpu_8bit_graph, NULL) < 0)
+		goto fail;
+
+	r->gpu_8bit_width = input->width;
+	r->gpu_8bit_height = input->height;
+	obs_log(LOG_INFO, "scrcpy-reader: using D3D11 GPU conversion P010 -> NV12 for 10-bit to 8-bit output");
+	return true;
+
+fail:
+	if (params)
+		av_free(params);
+	destroy_gpu_8bit_filter(r);
+	return false;
+}
+
+static bool convert_frame_to_8bit_gpu(struct scrcpy_reader *r, AVFrame *input, AVFrame **output)
+{
+	int ret;
+
+	if (!init_gpu_8bit_filter(r, input))
+		return false;
+
+	av_frame_unref(r->eight_bit_frame);
+	ret = av_buffersrc_add_frame_flags(r->gpu_8bit_src, input, AV_BUFFERSRC_FLAG_KEEP_REF | AV_BUFFERSRC_FLAG_PUSH);
+	if (ret < 0)
+		return false;
+
+	ret = av_buffersink_get_frame(r->gpu_8bit_sink, r->eight_bit_frame);
+	if (ret < 0)
+		return false;
+
+	*output = r->eight_bit_frame;
+	return true;
+}
+
+static bool convert_frame_to_8bit_cpu(struct scrcpy_reader *r, AVFrame *input, AVFrame **output)
 {
 	const enum AVPixelFormat input_format = (enum AVPixelFormat)input->format;
 
-	if (input_format == AV_PIX_FMT_YUV420P) {
+	if (input_format == AV_PIX_FMT_YUV420P || input_format == AV_PIX_FMT_NV12) {
 		*output = input;
 		return true;
 	}
@@ -585,6 +712,14 @@ static bool convert_frame_to_8bit(struct scrcpy_reader *r, AVFrame *input, AVFra
 
 	*output = r->eight_bit_frame;
 	return true;
+}
+
+static bool convert_frame_to_8bit(struct scrcpy_reader *r, AVFrame *input, AVFrame **output)
+{
+	if (input->format == AV_PIX_FMT_D3D11)
+		return convert_frame_to_8bit_gpu(r, input, output);
+
+	return convert_frame_to_8bit_cpu(r, input, output);
 }
 
 static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
@@ -889,6 +1024,7 @@ void scrcpy_reader_destroy(scrcpy_reader_t *r)
 		av_frame_free(&r->eight_bit_frame);
 	if (r->eight_bit_sws)
 		sws_freeContext(r->eight_bit_sws);
+	destroy_gpu_8bit_filter(r);
 	if (r->hw_device_ctx)
 		av_buffer_unref(&r->hw_device_ctx);
 	if (r->codec_ctx)
