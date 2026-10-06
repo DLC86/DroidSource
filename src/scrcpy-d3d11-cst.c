@@ -42,6 +42,7 @@ struct d3d11_cst_params {
 	uint32_t srcPrimaries;
 	uint32_t targetPrimaries;
 	uint32_t srcSlice;
+	uint32_t src10bit;
 	uint32_t width;
 	uint32_t height;
 	uint32_t reserved0;
@@ -87,6 +88,7 @@ struct scrcpy_d3d11_cst {
 	ID3D11Texture2D *input_texture;
 	ID3D11ShaderResourceView *input_y_srv;
 	ID3D11ShaderResourceView *input_uv_srv;
+	bool input_10bit;
 
 	struct d3d11_cst_readback_slot slots[D3D11_CST_READBACK_SLOTS];
 
@@ -340,7 +342,8 @@ fail:
 	return false;
 }
 
-static bool create_input_views(struct scrcpy_d3d11_cst *cst, ID3D11Texture2D *texture, UINT array_size)
+static bool create_input_views(struct scrcpy_d3d11_cst *cst, ID3D11Texture2D *texture, DXGI_FORMAT format,
+				      UINT array_size)
 {
 	D3D11_SHADER_RESOURCE_VIEW_DESC srv = {0};
 	HRESULT hr;
@@ -349,12 +352,12 @@ static bool create_input_views(struct scrcpy_d3d11_cst *cst, ID3D11Texture2D *te
 	ID3D11Texture2D_AddRef(texture);
 	cst->input_texture = texture;
 
-	srv.Format = DXGI_FORMAT_R16_UNORM;
 	srv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
 	srv.Texture2DArray.MostDetailedMip = 0;
 	srv.Texture2DArray.MipLevels = 1;
 	srv.Texture2DArray.FirstArraySlice = 0;
 	srv.Texture2DArray.ArraySize = array_size;
+	srv.Format = format == DXGI_FORMAT_P010 ? DXGI_FORMAT_R16_UNORM : DXGI_FORMAT_R8_UNORM;
 	hr = ID3D11Device_CreateShaderResourceView(cst->device, (ID3D11Resource *)texture, &srv, &cst->input_y_srv);
 	if (FAILED(hr)) {
 		log_hresult("CreateShaderResourceView(Y)", hr);
@@ -362,7 +365,7 @@ static bool create_input_views(struct scrcpy_d3d11_cst *cst, ID3D11Texture2D *te
 		return false;
 	}
 
-	srv.Format = DXGI_FORMAT_R16G16_UNORM;
+	srv.Format = format == DXGI_FORMAT_P010 ? DXGI_FORMAT_R16G16_UNORM : DXGI_FORMAT_R8G8_UNORM;
 	hr = ID3D11Device_CreateShaderResourceView(cst->device, (ID3D11Resource *)texture, &srv, &cst->input_uv_srv);
 	if (FAILED(hr)) {
 		log_hresult("CreateShaderResourceView(UV)", hr);
@@ -370,6 +373,7 @@ static bool create_input_views(struct scrcpy_d3d11_cst *cst, ID3D11Texture2D *te
 		return false;
 	}
 
+	cst->input_10bit = format == DXGI_FORMAT_P010;
 	return true;
 }
 
@@ -386,7 +390,7 @@ static bool ensure_resources(struct scrcpy_d3d11_cst *cst, const AVFrame *input)
 
 	texture = (ID3D11Texture2D *)input->data[0];
 	ID3D11Texture2D_GetDesc(texture, &desc);
-	if (desc.Format != DXGI_FORMAT_P010 || desc.ArraySize == 0) {
+	if ((desc.Format != DXGI_FORMAT_P010 && desc.Format != DXGI_FORMAT_NV12) || desc.ArraySize == 0) {
 		obs_log(LOG_WARNING, "scrcpy-d3d11-cst: unsupported decoder texture format=%u array=%u",
 			(unsigned)desc.Format, (unsigned)desc.ArraySize);
 		return false;
@@ -412,13 +416,13 @@ static bool ensure_resources(struct scrcpy_d3d11_cst *cst, const AVFrame *input)
 		return false;
 
 	if (cst->input_texture != texture || !cst->input_y_srv || !cst->input_uv_srv) {
-		if (!create_input_views(cst, texture, array_size))
+		if (!create_input_views(cst, texture, desc.Format, array_size))
 			return false;
 	} else {
 		D3D11_TEXTURE2D_DESC cached_desc = {0};
 		ID3D11Texture2D_GetDesc(cst->input_texture, &cached_desc);
 		if (cached_desc.ArraySize != desc.ArraySize || cached_desc.Format != desc.Format) {
-			if (!create_input_views(cst, texture, array_size))
+			if (!create_input_views(cst, texture, desc.Format, array_size))
 				return false;
 		}
 	}
@@ -504,6 +508,7 @@ static bool update_params(struct scrcpy_d3d11_cst *cst, const struct gpu_profile
 	params->srcPrimaries = source->primaries;
 	params->targetPrimaries = target->primaries;
 	params->srcSlice = (UINT)(uintptr_t)input->data[1];
+	params->src10bit = cst->input_10bit ? 1U : 0U;
 	params->width = (UINT)input->width;
 	params->height = (UINT)input->height;
 	params->srcFullRange = input_range == AVCOL_RANGE_JPEG ? 1.0f : 0.0f;
