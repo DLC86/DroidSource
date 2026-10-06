@@ -12,8 +12,6 @@ typedef int socklen_t;
 #endif
 
 #include "scrcpy-reader.h"
-#include "scrcpy-color-transform.h"
-#include "scrcpy-d3d11-cst.h"
 
 #include <obs-module.h>
 #include <plugin-support.h>
@@ -26,9 +24,6 @@ typedef int socklen_t;
 #include <libavutil/pixfmt.h>
 #include <libavutil/pixdesc.h>
 #include <libavutil/hwcontext.h>
-#ifdef _WIN32
-#include <libavutil/hwcontext_d3d11va.h>
-#endif
 #include <libswscale/swscale.h>
 
 #include <stdint.h>
@@ -85,12 +80,7 @@ struct scrcpy_reader {
 	int video_buffer_ms;
 	bool portrait_mode;
 	int color_range_override;
-	int source_color_profile;
-	int cst_target_profile;
 	bool force_8bit_output;
-	scrcpy_color_transform_t *color_transform;
-	scrcpy_d3d11_cst_t *d3d11_cst;
-	AVFrame *cst_frame;
 	bool logged_color_info;
 
 	AVBufferRef *hw_device_ctx;
@@ -394,16 +384,6 @@ static uint8_t obs_trc_from_av(const AVFrame *frame, bool force_sdr_hlg)
 	return VIDEO_TRC_SRGB;
 }
 
-static bool source_profile_is_8bit_hlg_sdr(const struct scrcpy_reader *r, const AVFrame *frame)
-{
-	if (!r || !frame || r->cst_target_profile != SCRCPY_CST_OFF || r->source_color_profile <= 0 ||
-	    r->source_color_profile >= 1000 || (r->source_color_profile % 10) != 5)
-		return false;
-
-	const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get((enum AVPixelFormat)frame->format);
-	return desc && desc->nb_components >= 3 && desc->comp[0].depth < 10;
-}
-
 static void log_frame_color_info(struct scrcpy_reader *r, const AVFrame *frame, bool hardware_path)
 {
 	if (r->logged_color_info || !frame)
@@ -505,21 +485,9 @@ static bool open_decoder(struct scrcpy_reader *r, uint32_t codec_id, uint32_t wi
 		if (r->hw_pix_fmt != AV_PIX_FMT_NONE) {
 			int hw_ret = av_hwdevice_ctx_create(&r->hw_device_ctx, AV_HWDEVICE_TYPE_D3D11VA, NULL, NULL, 0);
 			if (hw_ret == 0) {
-				if (r->cst_target_profile != SCRCPY_CST_OFF) {
-					AVHWDeviceContext *av_device = (AVHWDeviceContext *)r->hw_device_ctx->data;
-					if (av_device && av_device->hwctx) {
-						AVD3D11VADeviceContext *d3d =
-							(AVD3D11VADeviceContext *)av_device->hwctx;
-						d3d->BindFlags |= D3D11_BIND_SHADER_RESOURCE;
-					}
-				}
 				r->codec_ctx->get_format = get_hw_format;
 				r->codec_ctx->hw_device_ctx = av_buffer_ref(r->hw_device_ctx);
 				obs_log(LOG_INFO, "scrcpy-reader: using D3D11VA hardware decoding");
-				if (r->cst_target_profile != SCRCPY_CST_OFF) {
-					r->d3d11_cst = scrcpy_d3d11_cst_create(
-						r->hw_device_ctx, r->source_color_profile, r->cst_target_profile);
-				}
 			} else {
 				r->hw_pix_fmt = AV_PIX_FMT_NONE;
 				obs_log(LOG_INFO, "scrcpy-reader: D3D11VA unavailable; using software decoding");
@@ -623,30 +591,14 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 {
 	AVFrame *out = f;
 	const bool hardware_path = r->hw_pix_fmt != AV_PIX_FMT_NONE && f->format == r->hw_pix_fmt;
-	const bool cst_enabled = r->color_transform && r->cst_frame && r->cst_target_profile != SCRCPY_CST_OFF;
-	bool gpu_cst = false;
 	int color_range_override;
-
 	pthread_mutex_lock(&r->state_mutex);
 	r->last_frame_ns = os_gettime_ns();
 	color_range_override = r->color_range_override;
 	pthread_mutex_unlock(&r->state_mutex);
-
 	enum video_range_type source_range = resolve_color_range(f, color_range_override);
 	enum AVColorRange source_av_range = source_range == VIDEO_RANGE_FULL ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
-
-	if (hardware_path && cst_enabled && r->d3d11_cst) {
-		scrcpy_d3d11_cst_result cst_result =
-			scrcpy_d3d11_cst_apply(r->d3d11_cst, f, r->cst_frame, source_av_range);
-		if (cst_result == SCRCPY_D3D11_CST_FRAME) {
-			out = r->cst_frame;
-			gpu_cst = true;
-		} else if (cst_result == SCRCPY_D3D11_CST_NO_FRAME) {
-			return;
-		}
-	}
-
-	if (hardware_path && !gpu_cst) {
+	if (hardware_path) {
 		av_frame_unref(r->transfer_frame);
 		if (av_hwframe_transfer_data(r->transfer_frame, f, 0) < 0) {
 			obs_log(LOG_WARNING, "scrcpy-reader: hardware frame transfer failed");
@@ -658,69 +610,28 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 		}
 		out = r->transfer_frame;
 	}
-
 	log_frame_color_info(r, out, hardware_path);
-
-	const bool force_sdr_hlg = source_profile_is_8bit_hlg_sdr(r, out);
-
-	if (!gpu_cst) {
-		out->color_range = source_av_range;
-
-		if (r->force_8bit_output) {
-			AVFrame *converted = NULL;
-			if (!convert_frame_to_8bit(r, out, &converted)) {
-				obs_log(LOG_WARNING,
-					"scrcpy-reader: 8-bit output conversion failed for pixel format %d",
-					out->format);
-				return;
-			}
-			out = converted;
-		}
-
-		if (cst_enabled) {
-			if (scrcpy_color_transform_apply(r->color_transform, out, r->cst_frame, source_av_range)) {
-				out = r->cst_frame;
-				if (scrcpy_color_transform_target_is_8bit(r->cst_target_profile) &&
-				    out->format != AV_PIX_FMT_YUV420P && out->format != AV_PIX_FMT_NV12) {
-					AVFrame *converted = NULL;
-					if (!convert_frame_to_8bit(r, out, &converted)) {
-						obs_log(LOG_WARNING,
-							"scrcpy-reader: final 8-bit CST output conversion failed");
-						return;
-					}
-					out = converted;
-				}
-			} else {
-				obs_log(LOG_WARNING,
-					"scrcpy-reader: CST failed; passing source frame through unchanged");
-				if (color_range_override != SCRCPY_COLOR_RANGE_AUTO)
-					out->color_range = source_av_range;
-			}
-		}
-	} else if (r->force_8bit_output && out->format != AV_PIX_FMT_YUV420P && out->format != AV_PIX_FMT_NV12) {
+	out->color_range = source_av_range;
+	if (r->force_8bit_output) {
 		AVFrame *converted = NULL;
 		if (!convert_frame_to_8bit(r, out, &converted)) {
-			obs_log(LOG_WARNING, "scrcpy-reader: 8-bit output conversion failed after GPU CST");
+			obs_log(LOG_WARNING, "scrcpy-reader: 8-bit output conversion failed for pixel format %d", out->format);
 			return;
 		}
 		out = converted;
 	}
-
 	if (r->portrait_mode) {
 		if (!rotate_frame_90_ccw(r, out)) {
-			obs_log(LOG_WARNING, "scrcpy-reader: portrait mode unsupported for pixel format %d",
-				out->format);
+			obs_log(LOG_WARNING, "scrcpy-reader: portrait mode unsupported for pixel format %d", out->format);
 			return;
 		}
 		out = r->portrait_frame;
 	}
-
 	enum video_format fmt = av_to_obs_format((enum AVPixelFormat)out->format);
 	if (fmt == VIDEO_FORMAT_NONE) {
 		obs_log(LOG_WARNING, "scrcpy-reader: unsupported pix fmt %d", out->format);
 		return;
 	}
-
 	struct obs_source_frame obs_frame = {0};
 	obs_frame.format = fmt;
 	obs_frame.width = (uint32_t)out->width;
@@ -729,38 +640,17 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 		obs_frame.data[i] = out->data[i];
 		obs_frame.linesize[i] = (uint32_t)out->linesize[i];
 	}
-	if (out->pts == AV_NOPTS_VALUE)
-		obs_frame.timestamp = (uint64_t)os_gettime_ns();
-	else
-		obs_frame.timestamp = (uint64_t)out->pts * 1000ULL;
+	obs_frame.timestamp = out->pts == AV_NOPTS_VALUE ? (uint64_t)os_gettime_ns() : (uint64_t)out->pts * 1000ULL;
 	obs_frame.timestamp += (uint64_t)r->video_buffer_ms * UINT64_C(1000000);
 	obs_frame.flip = r->flip_vertical;
-
-	enum video_colorspace cs = obs_colorspace_from_av(out, force_sdr_hlg);
+	enum video_colorspace cs = obs_colorspace_from_av(out, false);
 	enum video_range_type range = out->color_range == AVCOL_RANGE_JPEG ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
-	bool matrix_ok;
-	const bool bt2020_sdr =
-		((enum AVColorSpace)out->colorspace == AVCOL_SPC_BT2020_NCL ||
-		 (enum AVColorSpace)out->colorspace == AVCOL_SPC_BT2020_CL) &&
-		(force_sdr_hlg || (out->color_trc != AVCOL_TRC_ARIB_STD_B67 && out->color_trc != AVCOL_TRC_SMPTE2084));
-
-	if (bt2020_sdr) {
-		matrix_ok = obs_bt2020_sdr_matrix(fmt, range, obs_frame.color_matrix, obs_frame.color_range_min,
-						  obs_frame.color_range_max);
-		obs_log(LOG_DEBUG, "scrcpy-reader: using explicit BT.2020-SDR YUV matrix");
-	} else {
-		matrix_ok = video_format_get_parameters_for_format(
-			cs, range, fmt, obs_frame.color_matrix, obs_frame.color_range_min, obs_frame.color_range_max);
-	}
-
-	if (!matrix_ok) {
-		obs_log(LOG_WARNING, "scrcpy-reader: could not build color matrix for colorspace=%d format=%d range=%d",
-			out->colorspace, fmt, range);
+	if (!video_format_get_parameters_for_format(cs, range, fmt, obs_frame.color_matrix, obs_frame.color_range_min, obs_frame.color_range_max)) {
+		obs_log(LOG_WARNING, "scrcpy-reader: could not build color matrix for colorspace=%d format=%d range=%d", out->colorspace, fmt, range);
 		return;
 	}
 	obs_frame.full_range = range == VIDEO_RANGE_FULL;
-	obs_frame.trc = obs_trc_from_av(out, force_sdr_hlg);
-
+	obs_frame.trc = obs_trc_from_av(out, false);
 	obs_source_output_video(r->source, &obs_frame);
 }
 
@@ -899,7 +789,7 @@ done:
 
 scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port, bool hardware_decoding, bool flip_vertical,
 				      int video_buffer_ms, bool portrait_mode, int color_range_override,
-				      int source_color_profile, int cst_target_profile, bool force_8bit_output)
+				      bool force_8bit_output)
 {
 	struct scrcpy_reader *r = bzalloc(sizeof(*r));
 	r->source = source;
@@ -910,11 +800,7 @@ scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port, bool 
 	r->video_buffer_ms = video_buffer_ms > 0 ? video_buffer_ms : 0;
 	r->portrait_mode = portrait_mode;
 	r->color_range_override = color_range_override;
-	r->source_color_profile = source_color_profile;
-	r->cst_target_profile = cst_target_profile;
 	r->force_8bit_output = force_8bit_output;
-	r->color_transform = scrcpy_color_transform_create(source_color_profile, cst_target_profile);
-	r->cst_frame = cst_target_profile != SCRCPY_CST_OFF ? av_frame_alloc() : NULL;
 
 	r->hw_pix_fmt = AV_PIX_FMT_NONE;
 	r->stop = false;
@@ -1003,12 +889,6 @@ void scrcpy_reader_destroy(scrcpy_reader_t *r)
 		av_frame_free(&r->eight_bit_frame);
 	if (r->eight_bit_sws)
 		sws_freeContext(r->eight_bit_sws);
-	if (r->cst_frame)
-		av_frame_free(&r->cst_frame);
-	if (r->d3d11_cst)
-		scrcpy_d3d11_cst_destroy(r->d3d11_cst);
-	if (r->color_transform)
-		scrcpy_color_transform_destroy(r->color_transform);
 	if (r->hw_device_ctx)
 		av_buffer_unref(&r->hw_device_ctx);
 	if (r->codec_ctx)
