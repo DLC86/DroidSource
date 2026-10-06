@@ -486,7 +486,6 @@ static bool open_decoder(struct scrcpy_reader *r, uint32_t codec_id, uint32_t wi
 	r->packet = av_packet_alloc();
 	r->frame = av_frame_alloc();
 	r->transfer_frame = av_frame_alloc();
-	r->transform_frame = av_frame_alloc();
 	r->eight_bit_frame = av_frame_alloc();
 	if (!r->packet || !r->frame || !r->transfer_frame || !r->eight_bit_frame) {
 		obs_log(LOG_ERROR, "scrcpy-reader: av alloc failed");
@@ -890,8 +889,6 @@ void scrcpy_reader_destroy(scrcpy_reader_t *r)
 		av_frame_free(&r->frame);
 	if (r->transfer_frame)
 		av_frame_free(&r->transfer_frame);
-	if (r->transform_frame)
-		av_frame_free(&r->transform_frame);
 	if (r->eight_bit_frame)
 		av_frame_free(&r->eight_bit_frame);
 	if (r->eight_bit_sws)
