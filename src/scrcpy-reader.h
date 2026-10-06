@@ -27,8 +27,8 @@ enum scrcpy_color_range_override {
 	SCRCPY_COLOR_RANGE_LIMITED = 2,
 };
 
-scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port, bool hardware_decoding, int rotate, bool mirror,
-				      int video_buffer_ms, int color_range_override, bool force_8bit_output);
+scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port, bool hardware_decoding, int video_buffer_ms,
+				      int color_range_override, bool force_8bit_output);
 
 void scrcpy_reader_set_color_range(scrcpy_reader_t *r, int color_range_override);
 
