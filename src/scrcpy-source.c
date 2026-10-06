@@ -328,7 +328,8 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 
 	const bool camera_source = ctx->video_source && strcmp(ctx->video_source, "camera") == 0;
 	ctx->reader = scrcpy_reader_create(ctx->source, port, ctx->hardware_decoding, ctx->video_buffer_ms,
-					   ctx->camera_color_range, camera_source && ctx->camera_bit_depth == 2);
+					   ctx->camera_color_range, camera_source && ctx->camera_bit_depth != 1,
+					   camera_source && ctx->camera_bit_depth == 2);
 
 	if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0 && control_port != 0 && ctx->serial &&
 	    *ctx->serial) {
