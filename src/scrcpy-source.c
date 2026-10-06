@@ -132,7 +132,8 @@ struct scrcpy_src {
 	int camera_color_profile;
 	int camera_color_range;
 	int camera_bit_depth;
-	bool portrait_mode;
+	int rotate;
+	bool mirror;
 
 	pthread_mutex_t state_mutex;
 	pthread_t watchdog_thread;
@@ -145,7 +146,6 @@ struct scrcpy_src {
 	char *codec;
 
 	bool hardware_decoding;
-	bool flip_vertical;
 	int video_buffer_ms;
 };
 
@@ -329,8 +329,8 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 	bfree(log_path);
 
 	const bool camera_source = ctx->video_source && strcmp(ctx->video_source, "camera") == 0;
-	ctx->reader = scrcpy_reader_create(ctx->source, port, ctx->hardware_decoding, ctx->flip_vertical,
-					   ctx->video_buffer_ms, ctx->portrait_mode, ctx->camera_color_range,
+	ctx->reader = scrcpy_reader_create(ctx->source, port, ctx->hardware_decoding, ctx->rotate, ctx->mirror,
+					   ctx->video_buffer_ms, ctx->camera_color_range,
 					   camera_source && ctx->camera_bit_depth == 2);
 
 	if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0 && control_port != 0 && ctx->serial &&
@@ -415,11 +415,11 @@ static void load_settings(struct scrcpy_src *ctx, obs_data_t *settings)
 	ctx->camera_color_range = (int)obs_data_get_int(settings, "camera_color_range");
 	ctx->camera_bit_depth = (int)obs_data_get_int(settings, "camera_bit_depth");
 	
-	ctx->portrait_mode = obs_data_get_bool(settings, "portrait_mode");
+	ctx->rotate = (int)obs_data_get_int(settings, "rotate");
+	ctx->mirror = obs_data_get_bool(settings, "mirror");
 	ctx->max_size = (int)obs_data_get_int(settings, "max_size");
 	ctx->bitrate_kbps = (int)obs_data_get_int(settings, "bitrate_kbps");
 	ctx->hardware_decoding = obs_data_get_bool(settings, "hardware_decoding");
-	ctx->flip_vertical = obs_data_get_bool(settings, "flip_vertical");
 	ctx->video_buffer_ms = (int)obs_data_get_int(settings, "video_buffer_ms");
 }
 
@@ -1665,7 +1665,7 @@ static bool video_source_modified(obs_properties_t *props, obs_property_t *p, ob
 	const char *keys[] = {"camera_id",        "camera_size",    "camera_fps",           "camera_zoom",
 			      "camera_torch",     "camera_iso",     "camera_shutter_us",    "camera_focus_distance",
 			      "camera_wb_kelvin", "camera_wb_lock", "camera_color_profile", "camera_color_range",
-			      "camera_bit_depth",  "portrait_mode",  "flip_vertical",        "hardware_decoding",
+			      "camera_bit_depth",  "rotate",          "mirror",          "hardware_decoding",
 			      "refresh_cameras",  "video_buffer_ms"};
 
 	for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
@@ -1759,11 +1759,14 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_list_add_int(camera_bit_depth, "10-bit to 8-bit", 2);
 	obs_property_set_modified_callback(camera_bit_depth, camera_bit_depth_modified);
 
-	obs_property_t *portrait_mode =
-		obs_properties_add_bool(props, "portrait_mode", obs_module_text("PortraitMode"));
+	obs_property_t *rotate = obs_properties_add_list(props, "rotate", obs_module_text("Rotate"),
+					      OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(rotate, "OFF", 0);
+	obs_property_list_add_int(rotate, "90°", 90);
+	obs_property_list_add_int(rotate, "180°", 180);
+	obs_property_list_add_int(rotate, "270°", 270);
 
-	obs_property_t *flip_vertical =
-		obs_properties_add_bool(props, "flip_vertical", obs_module_text("FlipVertical"));
+	obs_property_t *mirror = obs_properties_add_bool(props, "mirror", obs_module_text("Mirror"));
 	obs_property_t *hardware_decoding =
 		obs_properties_add_bool(props, "hardware_decoding", obs_module_text("HardwareDecoding"));
 
@@ -1792,9 +1795,9 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_set_enabled(camera_wb_lock, !wb_manual);
 	obs_property_set_enabled(camera_color_profile, true);
 	obs_property_set_visible(camera_bit_depth, is_camera);
-	obs_property_set_visible(portrait_mode, is_camera);
+	obs_property_set_visible(rotate, is_camera);
 	obs_property_set_visible(refresh_cameras, is_camera);
-	obs_property_set_visible(flip_vertical, is_camera);
+	obs_property_set_visible(mirror, is_camera);
 	obs_property_set_visible(hardware_decoding, is_camera);
 
 	if (ctx->serial && *ctx->serial) {
