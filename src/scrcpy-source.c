@@ -1604,7 +1604,7 @@ static bool refresh_cameras_clicked(obs_properties_t *props, obs_property_t *p, 
 	bool ok = refresh_camera_capabilities(props, settings, true);
 	obs_data_release(settings);
 	obs_property_t *camera_bit_depth = obs_properties_get(props, "camera_bit_depth");
-	if (camera_10bit)
+	if (camera_bit_depth)
 		obs_property_set_enabled(camera_bit_depth, camera_10bit_supported(ctx));
 	return ok;
 }
@@ -1784,8 +1784,7 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_set_visible(camera_color_profile, is_camera);
 	obs_property_set_visible(camera_color_range, is_camera);
 	obs_data_t *ui_settings = obs_source_get_settings(ctx->source);
-	bool ten_bit_enabled = obs_data_get_bool(ui_settings, "camera_10bit");
-	bool wb_manual = obs_data_get_int(ui_settings, "camera_wb_kelvin") > 0;
+		bool wb_manual = obs_data_get_int(ui_settings, "camera_wb_kelvin") > 0;
 	obs_data_release(ui_settings);
 	obs_property_set_enabled(camera_wb, true);
 	obs_property_set_enabled(camera_wb_lock, !wb_manual);
@@ -1813,7 +1812,7 @@ static obs_properties_t *src_get_properties(void *data)
 		populate_camera_fallbacks(camera_id, camera_size, camera_fps, camera_color_profile);
 	}
 
-	obs_property_set_enabled(camera_10bit, camera_10bit_supported(ctx));
+	obs_property_set_enabled(camera_bit_depth, camera_10bit_supported(ctx));
 
 	obs_property_t *focus_prop = obs_properties_get(props, "camera_focus_distance");
 	if (focus_prop) {
@@ -1832,7 +1831,7 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_list_add_string(codec_list, "AV1", "av1");
 
 	obs_data_t *codec_settings = obs_source_get_settings(ctx->source);
-	bool codec_locked = obs_data_get_bool(codec_settings, "camera_10bit");
+	bool codec_locked = obs_data_get_int(codec_settings, "camera_bit_depth") != 0;
 	obs_data_release(codec_settings);
 	obs_property_set_enabled(codec_list, !codec_locked);
 
