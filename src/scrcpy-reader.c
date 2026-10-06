@@ -586,10 +586,9 @@ static bool init_gpu_8bit_filter(struct scrcpy_reader *r, const AVFrame *input)
 	if (!r->gpu_8bit_graph)
 		return false;
 
-	snprintf(args, sizeof(args), "video_size=%dx%d:pix_fmt=d3d11:time_base=1/1000000", input->width,
-		 input->height);
-	ret = avfilter_graph_create_filter(&r->gpu_8bit_src, avfilter_get_by_name("buffer"), "droidsource_gpu_in",
-					   args, NULL, r->gpu_8bit_graph);
+	snprintf(args, sizeof(args), "video_size=%dx%d:pix_fmt=d3d11:time_base=1/1000000", input->width, input->height);
+	ret = avfilter_graph_create_filter(&r->gpu_8bit_src, avfilter_get_by_name("buffer"), "droidsource_gpu_in", args,
+					   NULL, r->gpu_8bit_graph);
 	if (ret < 0)
 		goto fail;
 
@@ -623,15 +622,13 @@ static bool init_gpu_8bit_filter(struct scrcpy_reader *r, const AVFrame *input)
 	if (ret < 0)
 		goto fail;
 
-	ret = avfilter_graph_create_filter(&r->gpu_8bit_sink, avfilter_get_by_name("buffersink"),
-					   "droidsource_gpu_out", NULL, NULL, r->gpu_8bit_graph);
+	ret = avfilter_graph_create_filter(&r->gpu_8bit_sink, avfilter_get_by_name("buffersink"), "droidsource_gpu_out",
+					   NULL, NULL, r->gpu_8bit_graph);
 	if (ret < 0)
 		goto fail;
 
-	if (avfilter_link(r->gpu_8bit_src, 0, scale, 0) < 0 ||
-	    avfilter_link(scale, 0, download, 0) < 0 ||
-	    avfilter_link(download, 0, format, 0) < 0 ||
-	    avfilter_link(format, 0, r->gpu_8bit_sink, 0) < 0)
+	if (avfilter_link(r->gpu_8bit_src, 0, scale, 0) < 0 || avfilter_link(scale, 0, download, 0) < 0 ||
+	    avfilter_link(download, 0, format, 0) < 0 || avfilter_link(format, 0, r->gpu_8bit_sink, 0) < 0)
 		goto fail;
 
 	if (avfilter_graph_config(r->gpu_8bit_graph, NULL) < 0)
@@ -759,7 +756,8 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 		if (r->force_8bit_output) {
 			AVFrame *converted = NULL;
 			if (!convert_frame_to_8bit(r, out, &converted)) {
-				obs_log(LOG_WARNING, "scrcpy-reader: 8-bit output conversion failed for pixel format %d", out->format);
+				obs_log(LOG_WARNING, "scrcpy-reader: 8-bit output conversion failed for pixel format %d",
+				out->format);
 				return;
 			}
 			out = converted;
@@ -768,7 +766,8 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	log_frame_color_info(r, out, hardware_path);
 	if (r->portrait_mode) {
 		if (!rotate_frame_90_ccw(r, out)) {
-			obs_log(LOG_WARNING, "scrcpy-reader: portrait mode unsupported for pixel format %d", out->format);
+			obs_log(LOG_WARNING, "scrcpy-reader: portrait mode unsupported for pixel format %d",
+				out->format);
 			return;
 		}
 		out = r->portrait_frame;
@@ -791,8 +790,10 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	obs_frame.flip = r->flip_vertical;
 	enum video_colorspace cs = obs_colorspace_from_av(out, false);
 	enum video_range_type range = out->color_range == AVCOL_RANGE_JPEG ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
-	if (!video_format_get_parameters_for_format(cs, range, fmt, obs_frame.color_matrix, obs_frame.color_range_min, obs_frame.color_range_max)) {
-		obs_log(LOG_WARNING, "scrcpy-reader: could not build color matrix for colorspace=%d format=%d range=%d", out->colorspace, fmt, range);
+	if (!video_format_get_parameters_for_format(cs, range, fmt, obs_frame.color_matrix, obs_frame.color_range_min,
+										    obs_frame.color_range_max)) {
+		obs_log(LOG_WARNING, "scrcpy-reader: could not build color matrix for colorspace=%d format=%d range=%d",
+			out->colorspace, fmt, range);
 		return;
 	}
 	obs_frame.full_range = range == VIDEO_RANGE_FULL;
