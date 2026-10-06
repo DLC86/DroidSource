@@ -979,9 +979,11 @@ methods = r'''    public void setCameraSettings(float zoomValue, boolean torch, 
             requestBuilder.set(CaptureRequest.COLOR_CORRECTION_MODE,
                     CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX);
             requestBuilder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM,
-                    lastAutoColorCorrectionTransform);
+                    getTargetColorTransform());
 
-            RggbChannelVector gains = makeManualGainsFromAuto(whiteBalanceKelvin);
+            RggbChannelVector gains = whiteBalanceKelvin > 0
+                    ? makeManualGainsFromAuto(whiteBalanceKelvin)
+                    : lastAutoColorCorrectionGains;
             requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS, gains);
             if (android.os.Build.VERSION.SDK_INT >= 36) {
                 requestBuilder.set(CaptureRequest.COLOR_CORRECTION_COLOR_TEMPERATURE, null);
@@ -1715,7 +1717,7 @@ import android.hardware.camera2.params.TonemapCurve;
         """        if (manualPostProcessing && awbOff && transformMatrix) {
 """,
         """        if (manualPostProcessing && awbOff && transformMatrix
-                && whiteBalanceKelvin > 0) {
+                && (whiteBalanceKelvin > 0 || cameraColorSpace == 3)) {
 """,
     ),
     (
@@ -1737,7 +1739,7 @@ import android.hardware.camera2.params.TonemapCurve;
                                 && cameraCharacteristics != null
                                 && requestBuilder != null) {
 """,
-        """            if (whiteBalanceKelvin > 0
+        """            if ((whiteBalanceKelvin > 0 || cameraColorSpace == 3)
                                 && canApplyManualColorCorrection()
                                 && isAutoColorResultReady(result)
                                 && cameraCharacteristics != null
@@ -1870,7 +1872,48 @@ p = ROOT / "server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java"
 s = p.read_text(encoding="utf-8")
 marker = """    private void clearManualExposureKeys() {
 """
-helpers = r'''    private static String getActivePhysicalCameraId(TotalCaptureResult result) {
+helpers = r'''    private static final float[] SRGB_TO_REC2020 = {
+            0.627404f, 0.329283f, 0.043313f,
+            0.069098f, 0.919555f, 0.011348f,
+            0.016391f, 0.088029f, 0.895580f
+    };
+
+    private ColorSpaceTransform getTargetColorTransform() {
+        assertCameraThread();
+        if (lastAutoColorCorrectionTransform == null || cameraColorSpace != 3) {
+            return lastAutoColorCorrectionTransform;
+        }
+
+        float[] source = new float[9];
+        for (int row = 0; row < 3; ++row) {
+            for (int column = 0; column < 3; ++column) {
+                android.util.Rational value = lastAutoColorCorrectionTransform.getElement(column, row);
+                source[row * 3 + column] =
+                        (float) value.getNumerator() / Math.max(1, value.getDenominator());
+            }
+        }
+
+        float[] target = new float[9];
+        for (int row = 0; row < 3; ++row) {
+            for (int column = 0; column < 3; ++column) {
+                float value = 0;
+                for (int k = 0; k < 3; ++k) {
+                    value += SRGB_TO_REC2020[row * 3 + k] * source[k * 3 + column];
+                }
+                target[row * 3 + column] = value;
+            }
+        }
+
+        int[] elements = new int[18];
+        final int denominator = 1000000;
+        for (int i = 0; i < 9; ++i) {
+            elements[i * 2] = Math.round(target[i] * denominator);
+            elements[i * 2 + 1] = denominator;
+        }
+        return new ColorSpaceTransform(elements);
+    }
+
+    private static String getActivePhysicalCameraId(TotalCaptureResult result) {
         if (Build.VERSION.SDK_INT < 29) {
             return null;
         }
@@ -1919,38 +1962,11 @@ helpers = r'''    private static String getActivePhysicalCameraId(TotalCaptureRe
             return;
         }
 
-        /*
-         * Rec.709 (Scene) is the standard camera OETF. Prefer Android's
-         * platform preset over a hand-built curve; the previous custom curve
-         * produced a visibly darker image on this camera pipeline.
-         */
-        if (cameraGamma == 3) {
-            /*
-             * Rec.709 Scene is represented by the BT.709 Camera2 session
-             * ColorSpace. Avoid applying the preset a second time.
-             */
-            requestBuilder.set(CaptureRequest.TONEMAP_MODE,
-                    CaptureRequest.TONEMAP_MODE_FAST);
+        if (cameraTenBit && (cameraGamma == 5 || cameraGamma == 6 || cameraGamma == 7)) {
+            requestBuilder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_FAST);
             requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, null);
             requestBuilder.set(CaptureRequest.TONEMAP_CURVE, null);
             requestBuilder.set(CaptureRequest.TONEMAP_PRESET_CURVE, null);
-            return;
-        }
-
-        /*
-         * Rec.709-A is a display-management variant commonly approximated by
-         * gamma 1.961. Using GAMMA_VALUE avoids the unreliable custom-curve
-         * path while keeping the requested transfer characteristic.
-         */
-        if (cameraGamma == 4) {
-            if (!hasToneMapMode(CaptureRequest.TONEMAP_MODE_GAMMA_VALUE)) {
-                throw new IllegalArgumentException("Camera does not support gamma-value tone mapping");
-            }
-            requestBuilder.set(CaptureRequest.TONEMAP_MODE,
-                    CaptureRequest.TONEMAP_MODE_GAMMA_VALUE);
-            requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, 1.961f);
-            requestBuilder.set(CaptureRequest.TONEMAP_PRESET_CURVE, null);
-            requestBuilder.set(CaptureRequest.TONEMAP_CURVE, null);
             return;
         }
 
@@ -1958,48 +1974,20 @@ helpers = r'''    private static String getActivePhysicalCameraId(TotalCaptureRe
             if (!hasToneMapMode(CaptureRequest.TONEMAP_MODE_GAMMA_VALUE)) {
                 throw new IllegalArgumentException("Camera does not support gamma-value tone mapping");
             }
-            requestBuilder.set(CaptureRequest.TONEMAP_MODE,
-                    CaptureRequest.TONEMAP_MODE_GAMMA_VALUE);
-            requestBuilder.set(CaptureRequest.TONEMAP_GAMMA,
-                    cameraGamma == 1 ? 2.2f : 2.4f);
+            requestBuilder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_GAMMA_VALUE);
+            requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, cameraGamma == 1 ? 2.2f : 2.4f);
+            requestBuilder.set(CaptureRequest.TONEMAP_CURVE, null);
             requestBuilder.set(CaptureRequest.TONEMAP_PRESET_CURVE, null);
-            requestBuilder.set(CaptureRequest.TONEMAP_CURVE, null);
             return;
         }
 
-        if (cameraGamma == 8) {
-            /*
-             * The sRGB transfer is selected explicitly with PRESET_CURVE.
-             * Session ColorSpace selects the output color space/profile;
-             * the preset supplies the actual sRGB transfer curve.
-             */
-            if (!hasToneMapMode(CaptureRequest.TONEMAP_MODE_PRESET_CURVE)) {
-                throw new IllegalArgumentException("Camera does not support preset sRGB tone mapping");
-            }
-            requestBuilder.set(CaptureRequest.TONEMAP_MODE,
-                    CaptureRequest.TONEMAP_MODE_PRESET_CURVE);
-            requestBuilder.set(CaptureRequest.TONEMAP_PRESET_CURVE,
-                    CaptureRequest.TONEMAP_PRESET_CURVE_SRGB);
-            requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, null);
-            requestBuilder.set(CaptureRequest.TONEMAP_CURVE, null);
-            return;
-        }
-
-        if (cameraGamma == 5 || cameraGamma == 6 || cameraGamma == 7) {
-            /*
-             * For 10-bit HDR profiles the dynamic-range profile already carries
-             * the transfer function, so do not stack a second tone curve.
-             */
-            if (cameraTenBit) {
-                requestBuilder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_FAST);
-                requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, null);
-                requestBuilder.set(CaptureRequest.TONEMAP_CURVE, null);
-                requestBuilder.set(CaptureRequest.TONEMAP_PRESET_CURVE, null);
-                return;
-            }
-
-            if (!hasToneMapMode(CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)) {
-                throw new IllegalArgumentException("Camera does not support custom HLG tone mapping");
+        if (cameraGamma == 3 || cameraGamma == 4 || cameraGamma == 5) {
+            int[] capabilities = cameraCharacteristics.get(
+                    CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
+            boolean manualPostProcessing = contains(capabilities,
+                    CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING);
+            if (!manualPostProcessing || !hasToneMapMode(CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)) {
+                throw new IllegalArgumentException("Camera does not support custom tone mapping");
             }
 
             int maxPoints = 16;
@@ -2014,24 +2002,46 @@ helpers = r'''    private static String getActivePhysicalCameraId(TotalCaptureRe
             for (int i = 0; i < points; ++i) {
                 float x = (float) i / (points - 1);
                 float y;
-                if (x <= 1.0f / 12.0f) {
-                    y = (float) Math.sqrt(3.0 * x);
+                if (cameraGamma == 4) {
+                    y = (float) Math.pow(x, 1.0 / 1.961);
+                } else if (cameraGamma == 5) {
+                    if (x <= 1.0f / 12.0f) {
+                        y = (float) Math.sqrt(3.0 * x);
+                    } else {
+                        final double a = 0.17883277;
+                        final double b = 0.28466892;
+                        final double c = 0.55991073;
+                        y = (float) (a * Math.log(12.0 * x - b) + c);
+                    }
                 } else {
-                    final double a = 0.17883277;
-                    final double b = 0.28466892;
-                    final double c = 0.55991073;
-                    y = (float) (a * Math.log(12.0 * x - b) + c);
+                    if (x < 0.018f) {
+                        y = 4.5f * x;
+                    } else {
+                        y = 1.099f * (float) Math.pow(x, 0.45) - 0.099f;
+                    }
                 }
                 curve[i * 2] = x;
                 curve[i * 2 + 1] = Math.max(0.0f, Math.min(1.0f, y));
             }
 
             TonemapCurve tonemap = new TonemapCurve(curve, curve, curve);
-            requestBuilder.set(CaptureRequest.TONEMAP_MODE,
-                    CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE);
+            requestBuilder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE);
             requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, null);
             requestBuilder.set(CaptureRequest.TONEMAP_PRESET_CURVE, null);
             requestBuilder.set(CaptureRequest.TONEMAP_CURVE, tonemap);
+            return;
+        }
+
+        if (cameraGamma == 8) {
+            if (!hasToneMapMode(CaptureRequest.TONEMAP_MODE_PRESET_CURVE)) {
+                throw new IllegalArgumentException("Camera does not support preset sRGB tone mapping");
+            }
+            requestBuilder.set(CaptureRequest.TONEMAP_MODE,
+                    CaptureRequest.TONEMAP_MODE_PRESET_CURVE);
+            requestBuilder.set(CaptureRequest.TONEMAP_PRESET_CURVE,
+                    CaptureRequest.TONEMAP_PRESET_CURVE_SRGB);
+            requestBuilder.set(CaptureRequest.TONEMAP_GAMMA, null);
+            requestBuilder.set(CaptureRequest.TONEMAP_CURVE, null);
             return;
         }
 
