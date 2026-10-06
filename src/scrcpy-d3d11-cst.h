@@ -18,8 +18,8 @@ typedef enum scrcpy_d3d11_cst_result {
 typedef struct scrcpy_d3d11_cst scrcpy_d3d11_cst_t;
 
 scrcpy_d3d11_cst_t *scrcpy_d3d11_cst_create(AVBufferRef *hw_device_ctx, int source_profile, int target_profile);
-bool scrcpy_d3d11_cst_apply(scrcpy_d3d11_cst_t *cst, const AVFrame *input, AVFrame *output,
-			    enum AVColorRange input_range);
+scrcpy_d3d11_cst_result scrcpy_d3d11_cst_apply(scrcpy_d3d11_cst_t *cst, const AVFrame *input, AVFrame *output,
+					       enum AVColorRange input_range);
 void scrcpy_d3d11_cst_destroy(scrcpy_d3d11_cst_t *cst);
 #else
 typedef void scrcpy_d3d11_cst_t;
