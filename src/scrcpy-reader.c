@@ -88,7 +88,7 @@ struct scrcpy_reader {
 	enum AVPixelFormat hw_pix_fmt;
 	AVFrame *transfer_frame;
 	AVFrame *eight_bit_frame;
-	SwsContext *eight_bit_sws;
+	struct SwsContext *eight_bit_sws;
 
 	AVCodecContext *codec_ctx;
 	AVPacket *packet;
