@@ -446,8 +446,7 @@ static void rotate_plane_180(uint8_t *dst, int dst_linesize, const uint8_t *src,
 			int dx = width - 1 - x;
 			int dy = height - 1 - y;
 			memcpy(dst + (size_t)dy * dst_linesize + (size_t)dx * bytes_per_pixel,
-			       src + (size_t)y * src_linesize + (size_t)x * bytes_per_pixel,
-			       (size_t)bytes_per_pixel);
+			       src + (size_t)y * src_linesize + (size_t)x * bytes_per_pixel, (size_t)bytes_per_pixel);
 		}
 	}
 }
@@ -520,8 +519,7 @@ static void transform_plane(uint8_t *dst, int dst_linesize, const uint8_t *src, 
 			if (mirror)
 				dx = dst_width - 1 - dx;
 			memcpy(dst + (size_t)dy * dst_linesize + (size_t)dx * bytes_per_pixel,
-			       src + (size_t)sy * src_linesize + (size_t)sx * bytes_per_pixel,
-			       (size_t)bytes_per_pixel);
+			       src + (size_t)sy * src_linesize + (size_t)sx * bytes_per_pixel, (size_t)bytes_per_pixel);
 		}
 	}
 }
@@ -563,13 +561,13 @@ static bool transform_frame(struct scrcpy_reader *r, const AVFrame *src)
 	const int src_height = src->height / 2;
 	if (format == AV_PIX_FMT_NV12 || format == AV_PIX_FMT_P010LE) {
 		transform_plane(r->transform_frame->data[1], r->transform_frame->linesize[1], src->data[1],
-			       src->linesize[1], src_width, src_height, format == AV_PIX_FMT_P010LE ? 4 : 2, rotate,
-			       mirror);
+				src->linesize[1], src_width, src_height, format == AV_PIX_FMT_P010LE ? 4 : 2, rotate,
+				mirror);
 	} else {
 		transform_plane(r->transform_frame->data[1], r->transform_frame->linesize[1], src->data[1],
-			       src->linesize[1], src_width, src_height, bytes_per_luma, rotate, mirror);
+				src->linesize[1], src_width, src_height, bytes_per_luma, rotate, mirror);
 		transform_plane(r->transform_frame->data[2], r->transform_frame->linesize[2], src->data[2],
-			       src->linesize[2], src_width, src_height, bytes_per_luma, rotate, mirror);
+				src->linesize[2], src_width, src_height, bytes_per_luma, rotate, mirror);
 	}
 	return true;
 }
@@ -726,7 +724,8 @@ static bool convert_frame_to_8bit_cpu(struct scrcpy_reader *r, AVFrame *input, A
 			for (int plane = 0; plane < 2; ++plane) {
 				for (int y = 0; y < chroma_height; ++y) {
 					const uint16_t *src =
-						(const uint16_t *)(input->data[1 + plane] + (size_t)y * input->linesize[1 + plane]);
+						(const uint16_t *)(input->data[1 + plane] +
+								   (size_t)y * input->linesize[1 + plane]);
 					uint8_t *dst = r->eight_bit_frame->data[1 + plane] +
 						       (size_t)y * r->eight_bit_frame->linesize[1 + plane];
 					for (int x = 0; x < chroma_width; ++x)
