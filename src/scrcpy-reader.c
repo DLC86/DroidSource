@@ -601,9 +601,6 @@ static bool convert_frame_to_8bit_cpu(struct scrcpy_reader *r, AVFrame *input, A
 
 static bool convert_frame_to_8bit(struct scrcpy_reader *r, AVFrame *input, AVFrame **output)
 {
-	if (input->format == AV_PIX_FMT_D3D11)
-		return convert_frame_to_8bit_gpu(r, input, output);
-
 	return convert_frame_to_8bit_cpu(r, input, output);
 }
 
