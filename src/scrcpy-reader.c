@@ -400,6 +400,32 @@ static void log_frame_color_info(struct scrcpy_reader *r, const AVFrame *frame, 
 	r->logged_color_info = true;
 }
 
+static void copy_frame_props_reusable(AVFrame *dst, const AVFrame *src)
+{
+\tdst->pts = src->pts;
+\tdst->pkt_dts = src->pkt_dts;
+\tdst->duration = src->duration;
+\tdst->time_base = src->time_base;
+\tdst->color_range = src->color_range;
+\tdst->color_primaries = src->color_primaries;
+\tdst->color_trc = src->color_trc;
+\tdst->colorspace = src->colorspace;
+\tdst->chroma_location = src->chroma_location;
+}
+
+static bool prepare_reusable_frame(AVFrame *frame, enum AVPixelFormat format, int width, int height)
+{
+\tif (frame->format != format || frame->width != width || frame->height != height || !frame->buf[0]) {
+\t\tav_frame_unref(frame);
+\t\tframe->format = format;
+\t\tframe->width = width;
+\t\tframe->height = height;
+\t\treturn av_frame_get_buffer(frame, 32) >= 0;
+\t}
+
+\treturn av_frame_make_writable(frame) >= 0;
+}
+
 static void transform_plane(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize,
 			    int src_width, int src_height, int bytes_per_pixel, int rotate, bool mirror)
 {
