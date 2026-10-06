@@ -4,7 +4,7 @@ on:
     outputs:
       pluginName:
         description: Project name detected by parsing build spec file
-        value: \${{ jobs.check-event.outputs.pluginName }}
+        value: ${{ jobs.check-event.outputs.pluginName }}
 
 jobs:
   check-event:
@@ -14,10 +14,10 @@ jobs:
       run:
         shell: bash
     outputs:
-      package: \${{ steps.setup.outputs.package }}
-      config: \${{ steps.setup.outputs.config }}
-      commitHash: \${{ steps.setup.outputs.commitHash }}
-      pluginName: \${{ steps.setup.outputs.pluginName }}
+      package: ${{ steps.setup.outputs.package }}
+      config: ${{ steps.setup.outputs.config }}
+      commitHash: ${{ steps.setup.outputs.commitHash }}
+      pluginName: ${{ steps.setup.outputs.pluginName }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -44,11 +44,11 @@ jobs:
             *) ;;
           esac
 
-          for config in "\${config_data[@]}"; do
+          for config in "${config_data[@]}"; do
             IFS=':' read -r key value <<< "$config"
             echo "$key=$value" >> "$GITHUB_OUTPUT"
           done
-          echo "commitHash=\${GITHUB_SHA:0:9}" >> "$GITHUB_OUTPUT"
+          echo "commitHash=${GITHUB_SHA:0:9}" >> "$GITHUB_OUTPUT"
 
           plugin_name="$(jq -r '.name' buildspec.json)"
           plugin_display_name="$(jq -r '.displayName // empty' buildspec.json)"
@@ -110,7 +110,7 @@ jobs:
       - name: Fetch scrcpy Binary 📦
         shell: bash
         env:
-          GH_TOKEN: \${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           scrcpy_version="$(git -C scrcpy describe --tags --exact-match)"
@@ -152,8 +152,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -z "\${ANDROID_SDK_ROOT:-}" ]]; then
-            if [[ -n "\${ANDROID_HOME:-}" ]]; then
+          if [[ -z "${ANDROID_SDK_ROOT:-}" ]]; then
+            if [[ -n "${ANDROID_HOME:-}" ]]; then
               export ANDROID_SDK_ROOT="$ANDROID_HOME"
             elif [[ -d "$HOME/Library/Android/sdk" ]]; then
               export ANDROID_SDK_ROOT="$HOME/Library/Android/sdk"
@@ -190,6 +190,7 @@ jobs:
           test -x "$JAVAC"
           test -f "$JAVA8_RT_JAR"
           rm -rf "$RUNNER_TEMP/scrcpy-server-build"
+          mkdir -p "$RUNNER_TEMP/scrcpy-server-build"
           BUILD_DIR="$RUNNER_TEMP/scrcpy-server-build" bash scrcpy/server/build_without_gradle.sh
           cp "$RUNNER_TEMP/scrcpy-server-build/scrcpy-server" data/bin/scrcpy-server
 
@@ -197,20 +198,20 @@ jobs:
         uses: ./.github/actions/build-plugin
         with:
           target: macos-universal
-          config: \${{ needs.check-event.outputs.config }}
+          config: ${{ needs.check-event.outputs.config }}
           codesign: false
 
       - name: Package Plugin 📀
         uses: ./.github/actions/package-plugin
         with:
           target: macos-universal
-          config: \${{ needs.check-event.outputs.config }}
-          package: \${{ fromJSON(needs.check-event.outputs.package) }}
+          config: ${{ needs.check-event.outputs.config }}
+          package: ${{ fromJSON(needs.check-event.outputs.package) }}
           codesign: false
           notarize: false
 
       - name: Upload Artifacts 📡
         uses: actions/upload-artifact@v7
         with:
-          name: \${{ steps.setup.outputs.pluginName }}-\${{ steps.setup.outputs.pluginVersion }}-macos-universal-\${{ needs.check-event.outputs.commitHash }}
-          path: \${{ github.workspace }}/release/\${{ steps.setup.outputs.pluginName }}-\${{ steps.setup.outputs.pluginVersion }}-macos-universal*.*
+          name: ${{ steps.setup.outputs.pluginName }}-${{ steps.setup.outputs.pluginVersion }}-macos-universal-${{ needs.check-event.outputs.commitHash }}
+          path: ${{ github.workspace }}/release/${{ steps.setup.outputs.pluginName }}-${{ steps.setup.outputs.pluginVersion }}-macos-universal*.*
