@@ -711,9 +711,9 @@ static bool convert_frame_to_8bit_cpu(struct scrcpy_reader *r, AVFrame *input, A
 				for (int x = 0; x < chroma_width; ++x) {
 					dst_u[x] = (uint8_t)((src[2 * x] + 128U) >> 8);
 					dst_v[x] = (uint8_t)((src[2 * x + 1] + 128U) >> 8);
+				}
 			}
-		}
-	} else {
+		} else {
 		for (int y = 0; y < input->height; ++y) {
 			const uint16_t *src =
 				(const uint16_t *)(input->data[0] + (size_t)y * input->linesize[0]);
