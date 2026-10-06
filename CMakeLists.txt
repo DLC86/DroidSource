@@ -50,8 +50,6 @@ target_sources(
     src/scrcpy-source.c
     src/scrcpy-process.c
     src/scrcpy-reader.c
-    src/scrcpy-color-transform.c
-    src/scrcpy-d3d11-cst.c
     src/scrcpy-camera-control.c
 )
 
