@@ -12,6 +12,7 @@
 #include "scrcpy-d3d11-cst.h"
 
 #include <obs-module.h>
+#include <plugin-support.h>
 #include <util/bmem.h>
 
 #include <libavutil/hwcontext_d3d11va.h>
@@ -87,7 +88,6 @@ struct scrcpy_d3d11_cst {
 static const char d3d11_cst_shader[] =
 #include "scrcpy-d3d11-cst-shader.inc"
 	;
-
 
 static void log_hresult(const char *op, HRESULT hr)
 {
