@@ -797,7 +797,6 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	if (!color_params_ok) {
 		obs_log(LOG_WARNING, "scrcpy-reader: could not build color matrix for colorspace=%d format=%d range=%d",
 			out->colorspace, fmt, range);
-			out->colorspace, fmt, range);
 		return;
 	}
 	obs_frame.full_range = range == VIDEO_RANGE_FULL;
