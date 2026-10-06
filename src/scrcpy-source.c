@@ -1653,22 +1653,10 @@ static bool video_source_modified(obs_properties_t *props, obs_property_t *p, ob
 	UNUSED_PARAMETER(p);
 	const char *source = obs_data_get_string(settings, "video_source");
 	bool is_camera = source && strcmp(source, "camera") == 0;
-	const char *keys[] = {"camera_id",
-				      "camera_size",
-				      "camera_fps",
-				      "camera_zoom",
-				      "camera_torch",
-				      "camera_iso",
-				      "camera_shutter_us",
-				      "camera_focus_distance",
-				      "camera_wb_kelvin",
-				      "camera_wb_lock",
-				      "camera_color_profile",
-				      "camera_color_range",
-				      "camera_bit_depth",
-				      "hardware_decoding",
-				      "refresh_cameras",
-				      "video_buffer_ms"};
+	const char *keys[] = {"camera_id",        "camera_size",       "camera_fps",           "camera_zoom",
+				      "camera_torch",     "camera_iso",        "camera_shutter_us",    "camera_focus_distance",
+				      "camera_wb_kelvin", "camera_wb_lock",    "camera_color_profile", "camera_color_range",
+				      "camera_bit_depth", "hardware_decoding", "refresh_cameras",      "video_buffer_ms"};
 
 	for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
 		obs_property_t *property = obs_properties_get(props, keys[i]);
