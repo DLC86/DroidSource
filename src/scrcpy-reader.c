@@ -252,7 +252,6 @@ static enum video_colorspace obs_colorspace_from_av(const AVFrame *frame)
 	}
 }
 
-
 static enum video_range_type obs_range_from_av(const AVFrame *frame)
 {
 	return frame->color_range == AVCOL_RANGE_JPEG ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
@@ -371,7 +370,6 @@ static uint8_t obs_trc_from_av(const AVFrame *frame)
 		return VIDEO_TRC_PQ;
 	return VIDEO_TRC_SRGB;
 }
-
 
 static void log_frame_color_info(struct scrcpy_reader *r, const AVFrame *frame, bool hardware_path)
 {
@@ -591,8 +589,7 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	pthread_mutex_unlock(&r->state_mutex);
 
 	enum video_range_type source_range = resolve_color_range(f, color_range_override);
-	enum AVColorRange source_av_range =
-		source_range == VIDEO_RANGE_FULL ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
+	enum AVColorRange source_av_range = source_range == VIDEO_RANGE_FULL ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
 
 	if (hardware_path) {
 		av_frame_unref(r->transfer_frame);
@@ -659,14 +656,12 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 		obs_frame.linesize[i] = (uint32_t)out->linesize[i];
 	}
 
-	obs_frame.timestamp =
-		out->pts == AV_NOPTS_VALUE ? (uint64_t)os_gettime_ns() : (uint64_t)out->pts * 1000ULL;
+	obs_frame.timestamp = out->pts == AV_NOPTS_VALUE ? (uint64_t)os_gettime_ns() : (uint64_t)out->pts * 1000ULL;
 	obs_frame.timestamp += (uint64_t)r->video_buffer_ms * UINT64_C(1000000);
 	obs_frame.flip = false;
 
 	enum video_colorspace cs = obs_colorspace_from_av(out);
-	enum video_range_type range =
-		out->color_range == AVCOL_RANGE_JPEG ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
+	enum video_range_type range = out->color_range == AVCOL_RANGE_JPEG ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
 	const bool color_params_ok = video_format_get_parameters_for_format(
 		cs, range, fmt, obs_frame.color_matrix, obs_frame.color_range_min, obs_frame.color_range_max);
 	if (!color_params_ok) {
@@ -678,9 +673,8 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 		obs_log(LOG_WARNING,
 			"scrcpy-reader: no direct OBS matrix for colorspace=%d format=%d range=%d; using Rec.709 matrix",
 			out->colorspace, fmt, range);
-		if (!video_format_get_parameters_for_format(VIDEO_CS_709, range, fmt,
-								 obs_frame.color_matrix, obs_frame.color_range_min,
-								 obs_frame.color_range_max))
+		if (!video_format_get_parameters_for_format(VIDEO_CS_709, range, fmt, obs_frame.color_matrix,
+							    obs_frame.color_range_min, obs_frame.color_range_max))
 			return;
 	}
 
