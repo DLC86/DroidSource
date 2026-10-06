@@ -401,11 +401,102 @@ static void log_frame_color_info(struct scrcpy_reader *r, const AVFrame *frame, 
 }
 
 
+static void copy_frame_props_reusable(AVFrame *dst, const AVFrame *src)
+{
+	dst->pts = src->pts;
+	dst->pkt_dts = src->pkt_dts;
+	dst->duration = src->duration;
+	dst->time_base = src->time_base;
+	dst->color_range = src->color_range;
+	dst->color_primaries = src->color_primaries;
+	dst->color_trc = src->color_trc;
+	dst->colorspace = src->colorspace;
+	dst->chroma_location = src->chroma_location;
+}
+
+static bool prepare_reusable_frame(AVFrame *frame, enum AVPixelFormat format, int width, int height)
+{
+	if (frame->format != format || frame->width != width || frame->height != height || !frame->buf[0]) {
+		av_frame_unref(frame);
+		frame->format = format;
+		frame->width = width;
+		frame->height = height;
+		return av_frame_get_buffer(frame, 32) >= 0;
+	}
+	return av_frame_make_writable(frame) >= 0;
+}
+
+static void rotate_plane_90_ccw(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize,
+				int src_width, int src_height, int bytes_per_pixel)
+{
+	for (int sy = 0; sy < src_height; ++sy) {
+		for (int sx = 0; sx < src_width; ++sx) {
+			int dx = sy;
+			int dy = src_width - 1 - sx;
+			memcpy(dst + (size_t)dy * dst_linesize + (size_t)dx * bytes_per_pixel,
+			       src + (size_t)sy * src_linesize + (size_t)sx * bytes_per_pixel,
+			       (size_t)bytes_per_pixel);
+		}
+	}
+}
+
+static void rotate_plane_180(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize,
+			     int width, int height, int bytes_per_pixel)
+{
+	for (int y = 0; y < height; ++y) {
+		for (int x = 0; x < width; ++x) {
+			int dx = width - 1 - x;
+			int dy = height - 1 - y;
+			memcpy(dst + (size_t)dy * dst_linesize + (size_t)dx * bytes_per_pixel,
+			       src + (size_t)y * src_linesize + (size_t)x * bytes_per_pixel,
+			       (size_t)bytes_per_pixel);
+		}
+	}
+}
+
+static void mirror_plane_horizontal(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize,
+				    int width, int height, int bytes_per_pixel)
+{
+	for (int y = 0; y < height; ++y) {
+		const uint8_t *src_row = src + (size_t)y * src_linesize;
+		uint8_t *dst_row = dst + (size_t)y * dst_linesize;
+		for (int x = 0; x < width; ++x) {
+			memcpy(dst_row + (size_t)(width - 1 - x) * bytes_per_pixel,
+			       src_row + (size_t)x * bytes_per_pixel, (size_t)bytes_per_pixel);
+		}
+	}
+}
+
+static void flip_plane_vertical(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize,
+				int width, int height, int bytes_per_pixel)
+{
+	for (int y = 0; y < height; ++y) {
+		memcpy(dst + (size_t)(height - 1 - y) * dst_linesize,
+		       src + (size_t)y * src_linesize, (size_t)width * bytes_per_pixel);
+	}
+}
+
 static void transform_plane(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize,
 			    int src_width, int src_height, int bytes_per_pixel, int rotate, bool mirror)
 {
-	const int dst_width = (rotate == 90 || rotate == 270) ? src_height : src_width;
+	if (rotate == 90 && !mirror) {
+		rotate_plane_90_ccw(dst, dst_linesize, src, src_linesize, src_width, src_height, bytes_per_pixel);
+		return;
+	}
 
+	if (rotate == 0 && mirror) {
+		mirror_plane_horizontal(dst, dst_linesize, src, src_linesize, src_width, src_height, bytes_per_pixel);
+		return;
+	}
+
+	if (rotate == 180 && !mirror) {
+		rotate_plane_180(dst, dst_linesize, src, src_linesize, src_width, src_height, bytes_per_pixel);
+		return;
+	}
+
+	/* 270 and combinations are uncommon, but keep the same exact pixel
+	 * semantics as the original Portrait path. */
+	const int dst_width = (rotate == 90 || rotate == 270) ? src_height : src_width;
 	for (int sy = 0; sy < src_height; ++sy) {
 		for (int sx = 0; sx < src_width; ++sx) {
 			int dx;
@@ -431,7 +522,8 @@ static void transform_plane(uint8_t *dst, int dst_linesize, const uint8_t *src, 
 			if (mirror)
 				dx = dst_width - 1 - dx;
 			memcpy(dst + (size_t)dy * dst_linesize + (size_t)dx * bytes_per_pixel,
-			       src + (size_t)sy * src_linesize + (size_t)sx * bytes_per_pixel, (size_t)bytes_per_pixel);
+			       src + (size_t)sy * src_linesize + (size_t)sx * bytes_per_pixel,
+			       (size_t)bytes_per_pixel);
 		}
 	}
 }
@@ -454,36 +546,32 @@ static bool transform_frame(struct scrcpy_reader *r, const AVFrame *src)
 		return false;
 
 	enum AVPixelFormat format = (enum AVPixelFormat)src->format;
-	if (format != AV_PIX_FMT_YUV420P && format != AV_PIX_FMT_YUVJ420P && format != AV_PIX_FMT_NV12)
+	if (format != AV_PIX_FMT_YUV420P && format != AV_PIX_FMT_YUVJ420P && format != AV_PIX_FMT_NV12 &&
+	    format != AV_PIX_FMT_YUV420P10LE && format != AV_PIX_FMT_P010LE)
 		return false;
 
-	/* Use the same frame construction used by the original Portrait mode.
-	 * In particular, do not call av_frame_make_writable() on a frame which
-	 * OBS may still be consuming; that can trigger a full-frame copy and is
-	 * the main source of the accumulating latency seen with the reusable
-	 * transform buffer. */
-	av_frame_unref(r->transform_frame);
-	r->transform_frame->format = src->format;
-	r->transform_frame->width = (rotate == 90 || rotate == 270) ? src->height : src->width;
-	r->transform_frame->height = (rotate == 90 || rotate == 270) ? src->width : src->height;
-	if (av_frame_copy_props(r->transform_frame, src) < 0)
+	const int dst_width = (rotate == 90 || rotate == 270) ? src->height : src->width;
+	const int dst_height = (rotate == 90 || rotate == 270) ? src->width : src->height;
+	if (!prepare_reusable_frame(r->transform_frame, format, dst_width, dst_height))
 		return false;
-	if (av_frame_get_buffer(r->transform_frame, 32) < 0)
-		return false;
+	copy_frame_props_reusable(r->transform_frame, src);
 
+	const bool high_bit_depth = format == AV_PIX_FMT_YUV420P10LE || format == AV_PIX_FMT_P010LE;
+	const int bytes_per_luma = high_bit_depth ? 2 : 1;
 	transform_plane(r->transform_frame->data[0], r->transform_frame->linesize[0], src->data[0], src->linesize[0],
-		       src->width, src->height, 1, rotate, mirror);
+		       src->width, src->height, bytes_per_luma, rotate, mirror);
 
 	const int src_width = src->width / 2;
 	const int src_height = src->height / 2;
-	if (format == AV_PIX_FMT_NV12) {
+	if (format == AV_PIX_FMT_NV12 || format == AV_PIX_FMT_P010LE) {
 		transform_plane(r->transform_frame->data[1], r->transform_frame->linesize[1], src->data[1],
-			       src->linesize[1], src_width, src_height, 2, rotate, mirror);
+			       src->linesize[1], src_width, src_height, format == AV_PIX_FMT_P010LE ? 4 : 2, rotate,
+			       mirror);
 	} else {
 		transform_plane(r->transform_frame->data[1], r->transform_frame->linesize[1], src->data[1],
-			       src->linesize[1], src_width, src_height, 1, rotate, mirror);
+			       src->linesize[1], src_width, src_height, bytes_per_luma, rotate, mirror);
 		transform_plane(r->transform_frame->data[2], r->transform_frame->linesize[2], src->data[2],
-			       src->linesize[2], src_width, src_height, 1, rotate, mirror);
+			       src->linesize[2], src_width, src_height, bytes_per_luma, rotate, mirror);
 	}
 	return true;
 }
@@ -588,37 +676,67 @@ static bool convert_frame_to_8bit_cpu(struct scrcpy_reader *r, AVFrame *input, A
 		return true;
 	}
 
-	if (!sws_isSupportedInput(input_format) || !sws_isSupportedOutput(AV_PIX_FMT_YUV420P)) {
-		obs_log(LOG_WARNING, "scrcpy-reader: cannot convert pixel format %s to 8-bit YUV420P",
-			av_get_pix_fmt_name(input_format));
-		return false;
+	if (input_format == AV_PIX_FMT_P010LE || input_format == AV_PIX_FMT_YUV420P10LE) {
+		if (!prepare_reusable_frame(r->eight_bit_frame, AV_PIX_FMT_YUV420P, input->width, input->height))
+			return false;
+		copy_frame_props_reusable(r->eight_bit_frame, input);
+
+		/*
+		 * P010 stores the 10 significant bits in bits 15..6 of each
+		 * 16-bit word. YUV420P10LE stores them in bits 9..0.
+		 * A direct shift therefore has to differ between the two layouts.
+		 * This is intentionally a code-depth reduction only: no range
+		 * expansion/compression is performed, and the selected range
+		 * metadata is preserved for OBS.
+		 */
+		if (input_format == AV_PIX_FMT_P010LE) {
+			for (int y = 0; y < input->height; ++y) {
+				const uint16_t *src =
+					(const uint16_t *)(input->data[0] + (size_t)y * input->linesize[0]);
+				uint8_t *dst =
+					r->eight_bit_frame->data[0] + (size_t)y * r->eight_bit_frame->linesize[0];
+				for (int x = 0; x < input->width; ++x)
+					dst[x] = (uint8_t)((src[x] + 128U) >> 8);
+			}
+
+			const int chroma_height = input->height / 2;
+			const int chroma_width = input->width / 2;
+			for (int y = 0; y < chroma_height; ++y) {
+				const uint16_t *src =
+					(const uint16_t *)(input->data[1] + (size_t)y * input->linesize[1]);
+				uint8_t *dst_u =
+					r->eight_bit_frame->data[1] + (size_t)y * r->eight_bit_frame->linesize[1];
+				uint8_t *dst_v =
+					r->eight_bit_frame->data[2] + (size_t)y * r->eight_bit_frame->linesize[2];
+				for (int x = 0; x < chroma_width; ++x) {
+					dst_u[x] = (uint8_t)((src[2 * x] + 128U) >> 8);
+					dst_v[x] = (uint8_t)((src[2 * x + 1] + 128U) >> 8);
+			}
+		}
+	} else {
+		for (int y = 0; y < input->height; ++y) {
+			const uint16_t *src =
+				(const uint16_t *)(input->data[0] + (size_t)y * input->linesize[0]);
+			uint8_t *dst =
+				r->eight_bit_frame->data[0] + (size_t)y * r->eight_bit_frame->linesize[0];
+			for (int x = 0; x < input->width; ++x)
+				dst[x] = (uint8_t)((src[x] + 2U) >> 2);
+		}
+
+		const int chroma_height = input->height / 2;
+		const int chroma_width = input->width / 2;
+		for (int plane = 0; plane < 2; ++plane) {
+			for (int y = 0; y < chroma_height; ++y) {
+				const uint16_t *src =
+					(const uint16_t *)(input->data[1 + plane] + (size_t)y * input->linesize[1 + plane]);
+				uint8_t *dst =
+					r->eight_bit_frame->data[1 + plane] +
+					(size_t)y * r->eight_bit_frame->linesize[1 + plane];
+				for (int x = 0; x < chroma_width; ++x)
+					dst[x] = (uint8_t)((src[x] + 2U) >> 2);
+			}
+		}
 	}
-
-	r->eight_bit_sws = sws_getCachedContext(r->eight_bit_sws, input->width, input->height, input_format,
-						input->width, input->height, AV_PIX_FMT_YUV420P,
-						SWS_BILINEAR | SWS_ACCURATE_RND, NULL, NULL, NULL);
-	if (!r->eight_bit_sws)
-		return false;
-
-	const int src_range = input->color_range == AVCOL_RANGE_JPEG ? 1 : 0;
-	const int colorspace = sws_colorspace_for_frame(input);
-	const int *coefficients = sws_getCoefficients(colorspace);
-	if (sws_setColorspaceDetails(r->eight_bit_sws, coefficients, src_range, coefficients, src_range, 0, 1 << 16,
-				     1 << 16) < 0)
-		return false;
-
-	av_frame_unref(r->eight_bit_frame);
-	r->eight_bit_frame->format = AV_PIX_FMT_YUV420P;
-	r->eight_bit_frame->width = input->width;
-	r->eight_bit_frame->height = input->height;
-	if (av_frame_copy_props(r->eight_bit_frame, input) < 0)
-		return false;
-	if (av_frame_get_buffer(r->eight_bit_frame, 32) < 0)
-		return false;
-
-	if (sws_scale(r->eight_bit_sws, (const uint8_t *const *)input->data, input->linesize, 0, input->height,
-		      r->eight_bit_frame->data, r->eight_bit_frame->linesize) <= 0)
-		return false;
 
 	*output = r->eight_bit_frame;
 	return true;
