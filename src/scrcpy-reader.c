@@ -232,16 +232,8 @@ static enum AVPixelFormat get_hw_format(AVCodecContext *codec_ctx, const enum AV
 }
 #endif
 
-static enum video_colorspace obs_colorspace_from_av(const AVFrame *frame, bool native_10bit_hdr)
+static enum video_colorspace obs_colorspace_from_av(const AVFrame *frame)
 {
-	/*
-	 * 8-bit camera output is intentionally presented to OBS as SDR, even when
-	 * the Camera2 capture path used an HLG transfer internally. Only native
-	 * 10-bit output is allowed to advertise Rec.2100 HLG/PQ.
-	 */
-	if (!native_10bit_hdr)
-		return VIDEO_CS_709;
-
 	switch ((enum AVColorSpace)frame->colorspace) {
 	case AVCOL_SPC_SMPTE170M:
 	case AVCOL_SPC_BT470BG:
@@ -254,15 +246,12 @@ static enum video_colorspace obs_colorspace_from_av(const AVFrame *frame, bool n
 			return VIDEO_CS_2100_HLG;
 		if (frame->color_trc == AVCOL_TRC_SMPTE2084)
 			return VIDEO_CS_2100_PQ;
-		/*
-		 * OBS 32.2.x has no standalone BT.2020-SDR enum. The caller
-		 * therefore applies the BT.2020 matrix explicitly below.
-		 */
 		return VIDEO_CS_709;
 	default:
 		return VIDEO_CS_709;
 	}
 }
+
 
 static enum video_range_type obs_range_from_av(const AVFrame *frame)
 {
@@ -374,17 +363,15 @@ static bool obs_bt2020_sdr_matrix(enum video_format format, enum video_range_typ
 	return true;
 }
 
-static uint8_t obs_trc_from_av(const AVFrame *frame, bool force_sdr_hlg)
+static uint8_t obs_trc_from_av(const AVFrame *frame)
 {
-	if (force_sdr_hlg)
-		return VIDEO_TRC_SRGB;
-
 	if (frame->color_trc == AVCOL_TRC_ARIB_STD_B67)
 		return VIDEO_TRC_HLG;
 	if (frame->color_trc == AVCOL_TRC_SMPTE2084)
 		return VIDEO_TRC_PQ;
 	return VIDEO_TRC_SRGB;
 }
+
 
 static void log_frame_color_info(struct scrcpy_reader *r, const AVFrame *frame, bool hardware_path)
 {
@@ -604,7 +591,8 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	pthread_mutex_unlock(&r->state_mutex);
 
 	enum video_range_type source_range = resolve_color_range(f, color_range_override);
-	enum AVColorRange source_av_range = source_range == VIDEO_RANGE_FULL ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
+	enum AVColorRange source_av_range =
+		source_range == VIDEO_RANGE_FULL ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
 
 	if (hardware_path) {
 		av_frame_unref(r->transfer_frame);
@@ -639,14 +627,14 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	}
 
 	/*
-	 * Native 10-bit is the only path that may advertise HDR to OBS.
-	 * Every 8-bit frame is explicitly SDR metadata, including an 8-bit HLG
-	 * camera profile and the 10-bit-to-8-bit reduction path.
+	 * OBS must only receive HDR transfer metadata together with the native
+	 * 10-bit pixel formats. This deliberately does not touch the native 10-bit
+	 * path: P010/I010 and the Camera2 HLG/PQ metadata are passed through exactly
+	 * as decoded. Every 8-bit output path, including an 8-bit HLG camera profile
+	 * and 10-bit-to-8-bit, is explicitly advertised as SDR.
 	 */
-	const bool native_10bit_output = !r->force_8bit_output &&
-					 (fmt == VIDEO_FORMAT_I010 || fmt == VIDEO_FORMAT_P010);
-
-	if (r->force_8bit_output || !native_10bit_output) {
+	const bool native_10bit_output = fmt == VIDEO_FORMAT_I010 || fmt == VIDEO_FORMAT_P010;
+	if (!native_10bit_output) {
 		out->colorspace = AVCOL_SPC_BT709;
 		out->color_primaries = AVCOL_PRI_BT709;
 		out->color_trc = AVCOL_TRC_BT709;
@@ -671,22 +659,33 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 		obs_frame.linesize[i] = (uint32_t)out->linesize[i];
 	}
 
-	obs_frame.timestamp = out->pts == AV_NOPTS_VALUE ? (uint64_t)os_gettime_ns() : (uint64_t)out->pts * 1000ULL;
+	obs_frame.timestamp =
+		out->pts == AV_NOPTS_VALUE ? (uint64_t)os_gettime_ns() : (uint64_t)out->pts * 1000ULL;
 	obs_frame.timestamp += (uint64_t)r->video_buffer_ms * UINT64_C(1000000);
 	obs_frame.flip = false;
 
-	enum video_colorspace cs = obs_colorspace_from_av(out, native_10bit_output);
-	enum video_range_type range = out->color_range == AVCOL_RANGE_JPEG ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
+	enum video_colorspace cs = obs_colorspace_from_av(out);
+	enum video_range_type range =
+		out->color_range == AVCOL_RANGE_JPEG ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
 	const bool color_params_ok = video_format_get_parameters_for_format(
 		cs, range, fmt, obs_frame.color_matrix, obs_frame.color_range_min, obs_frame.color_range_max);
 	if (!color_params_ok) {
-		obs_log(LOG_WARNING, "scrcpy-reader: could not build color matrix for colorspace=%d format=%d range=%d",
+		/*
+		 * Keep the frame flowing even if an unusual format/metadata combination
+		 * has no direct OBS matrix. The native pixel format is more important
+		 * than dropping the frame; OBS can still consume the supplied planes.
+		 */
+		obs_log(LOG_WARNING,
+			"scrcpy-reader: no direct OBS matrix for colorspace=%d format=%d range=%d; using Rec.709 matrix",
 			out->colorspace, fmt, range);
-		return;
+		if (!video_format_get_parameters_for_format(VIDEO_CS_709, range, fmt,
+								 obs_frame.color_matrix, obs_frame.color_range_min,
+								 obs_frame.color_range_max))
+			return;
 	}
 
 	obs_frame.full_range = range == VIDEO_RANGE_FULL;
-	obs_frame.trc = obs_trc_from_av(out, native_10bit_output);
+	obs_frame.trc = native_10bit_output ? obs_trc_from_av(out) : VIDEO_TRC_SRGB;
 	obs_source_output_video(r->source, &obs_frame);
 }
 
