@@ -400,7 +400,6 @@ static void log_frame_color_info(struct scrcpy_reader *r, const AVFrame *frame, 
 	r->logged_color_info = true;
 }
 
-
 static void copy_frame_props_reusable(AVFrame *dst, const AVFrame *src)
 {
 	dst->pts = src->pts;
@@ -426,22 +425,21 @@ static bool prepare_reusable_frame(AVFrame *frame, enum AVPixelFormat format, in
 	return av_frame_make_writable(frame) >= 0;
 }
 
-static void rotate_plane_90_ccw(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize,
-				int src_width, int src_height, int bytes_per_pixel)
+static void rotate_plane_90_ccw(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize, int src_width,
+				int src_height, int bytes_per_pixel)
 {
 	for (int sy = 0; sy < src_height; ++sy) {
 		for (int sx = 0; sx < src_width; ++sx) {
 			int dx = sy;
 			int dy = src_width - 1 - sx;
 			memcpy(dst + (size_t)dy * dst_linesize + (size_t)dx * bytes_per_pixel,
-			       src + (size_t)sy * src_linesize + (size_t)sx * bytes_per_pixel,
-			       (size_t)bytes_per_pixel);
+			       src + (size_t)sy * src_linesize + (size_t)sx * bytes_per_pixel, (size_t)bytes_per_pixel);
 		}
 	}
 }
 
-static void rotate_plane_180(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize,
-			     int width, int height, int bytes_per_pixel)
+static void rotate_plane_180(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize, int width,
+			     int height, int bytes_per_pixel)
 {
 	for (int y = 0; y < height; ++y) {
 		for (int x = 0; x < width; ++x) {
@@ -454,8 +452,8 @@ static void rotate_plane_180(uint8_t *dst, int dst_linesize, const uint8_t *src,
 	}
 }
 
-static void mirror_plane_horizontal(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize,
-				    int width, int height, int bytes_per_pixel)
+static void mirror_plane_horizontal(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize, int width,
+				    int height, int bytes_per_pixel)
 {
 	for (int y = 0; y < height; ++y) {
 		const uint8_t *src_row = src + (size_t)y * src_linesize;
@@ -467,12 +465,12 @@ static void mirror_plane_horizontal(uint8_t *dst, int dst_linesize, const uint8_
 	}
 }
 
-static void flip_plane_vertical(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize,
-				int width, int height, int bytes_per_pixel)
+static void flip_plane_vertical(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize, int width,
+				int height, int bytes_per_pixel)
 {
 	for (int y = 0; y < height; ++y) {
-		memcpy(dst + (size_t)(height - 1 - y) * dst_linesize,
-		       src + (size_t)y * src_linesize, (size_t)width * bytes_per_pixel);
+		memcpy(dst + (size_t)(height - 1 - y) * dst_linesize, src + (size_t)y * src_linesize,
+		       (size_t)width * bytes_per_pixel);
 	}
 }
 
@@ -559,7 +557,7 @@ static bool transform_frame(struct scrcpy_reader *r, const AVFrame *src)
 	const bool high_bit_depth = format == AV_PIX_FMT_YUV420P10LE || format == AV_PIX_FMT_P010LE;
 	const int bytes_per_luma = high_bit_depth ? 2 : 1;
 	transform_plane(r->transform_frame->data[0], r->transform_frame->linesize[0], src->data[0], src->linesize[0],
-		       src->width, src->height, bytes_per_luma, rotate, mirror);
+			src->width, src->height, bytes_per_luma, rotate, mirror);
 
 	const int src_width = src->width / 2;
 	const int src_height = src->height / 2;
@@ -714,29 +712,28 @@ static bool convert_frame_to_8bit_cpu(struct scrcpy_reader *r, AVFrame *input, A
 				}
 			}
 		} else {
-		for (int y = 0; y < input->height; ++y) {
-			const uint16_t *src =
-				(const uint16_t *)(input->data[0] + (size_t)y * input->linesize[0]);
-			uint8_t *dst =
-				r->eight_bit_frame->data[0] + (size_t)y * r->eight_bit_frame->linesize[0];
-			for (int x = 0; x < input->width; ++x)
-				dst[x] = (uint8_t)((src[x] + 2U) >> 2);
-		}
-
-		const int chroma_height = input->height / 2;
-		const int chroma_width = input->width / 2;
-		for (int plane = 0; plane < 2; ++plane) {
-			for (int y = 0; y < chroma_height; ++y) {
+			for (int y = 0; y < input->height; ++y) {
 				const uint16_t *src =
-					(const uint16_t *)(input->data[1 + plane] + (size_t)y * input->linesize[1 + plane]);
+					(const uint16_t *)(input->data[0] + (size_t)y * input->linesize[0]);
 				uint8_t *dst =
-					r->eight_bit_frame->data[1 + plane] +
-					(size_t)y * r->eight_bit_frame->linesize[1 + plane];
-				for (int x = 0; x < chroma_width; ++x)
+					r->eight_bit_frame->data[0] + (size_t)y * r->eight_bit_frame->linesize[0];
+				for (int x = 0; x < input->width; ++x)
 					dst[x] = (uint8_t)((src[x] + 2U) >> 2);
 			}
+
+			const int chroma_height = input->height / 2;
+			const int chroma_width = input->width / 2;
+			for (int plane = 0; plane < 2; ++plane) {
+				for (int y = 0; y < chroma_height; ++y) {
+					const uint16_t *src =
+						(const uint16_t *)(input->data[1 + plane] + (size_t)y * input->linesize[1 + plane]);
+					uint8_t *dst = r->eight_bit_frame->data[1 + plane] +
+						       (size_t)y * r->eight_bit_frame->linesize[1 + plane];
+					for (int x = 0; x < chroma_width; ++x)
+						dst[x] = (uint8_t)((src[x] + 2U) >> 2);
+				}
+			}
 		}
-	}
 	}
 
 	*output = r->eight_bit_frame;
