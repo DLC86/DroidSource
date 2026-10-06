@@ -1747,7 +1747,9 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_t *camera_color_range = obs_properties_add_list(props, "camera_color_range",
 								     obs_module_text("CameraColorRange"),
 								     OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
-	obs_property_list_add_int(camera_color_range, "Auto (from stream)", SCRCPY_COLOR_RANGE_AUTO);
+	obs_property_list_add_int(camera_color_range, "Auto", SCRCPY_COLOR_RANGE_AUTO);
+	obs_property_list_add_int(camera_color_range, "Limited", SCRCPY_COLOR_RANGE_LIMITED);
+	obs_property_list_add_int(camera_color_range, "Full", SCRCPY_COLOR_RANGE_FULL);
 
 	obs_property_t *camera_bit_depth = obs_properties_add_list(props, "camera_bit_depth",
 								      obs_module_text("CameraBitDepth"), OBS_COMBO_TYPE_LIST,
