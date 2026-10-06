@@ -440,13 +440,11 @@ static float decode_transfer_cpu(float x, uint32_t id)
 	case 4:
 		return x <= 0.04045f ? x / 12.92f : powf((x + 0.055f) / 1.055f, 2.4f);
 	case 5:
-		return x <= 0.5f ? (x * x) / 3.0f
-				  : (expf((x - 0.55991073f) / 0.17883277f) + 0.28466892f) / 12.0f;
+		return x <= 0.5f ? (x * x) / 3.0f : (expf((x - 0.55991073f) / 0.17883277f) + 0.28466892f) / 12.0f;
 	case 6: {
 		const float p = powf(x, 1.0f / 78.84375f);
-		return powf(fmaxf(p - 0.8359375f, 0.0f) /
-				    fmaxf(18.8515625f - 18.6875f * p, 1e-6f),
-				1.0f / 0.1593017578f);
+		return powf(fmaxf(p - 0.8359375f, 0.0f) / fmaxf(18.8515625f - 18.6875f * p, 1e-6f),
+			    1.0f / 0.1593017578f);
 	}
 	default:
 		return x;
@@ -467,7 +465,7 @@ static float encode_transfer_cpu(float x, uint32_t id)
 		return x <= 0.0031308f ? 12.92f * x : 1.055f * powf(x, 1.0f / 2.4f) - 0.055f;
 	case 5:
 		return x <= (1.0f / 12.0f) ? sqrtf(3.0f * x)
-					  : 0.17883277f * logf(fmaxf(12.0f * x - 0.28466892f, 1e-6f)) + 0.55991073f;
+					 : 0.17883277f * logf(fmaxf(12.0f * x - 0.28466892f, 1e-6f)) + 0.55991073f;
 	case 6: {
 		const float p = powf(x, 0.1593017578f);
 		return powf((0.8359375f + 18.8515625f * p) /
