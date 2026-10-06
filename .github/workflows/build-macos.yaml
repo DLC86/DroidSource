@@ -78,11 +78,11 @@ jobs:
 
           obs_version="32.2.2"
           deps_version="2026-08-26"
-          obs_zip="$RUNNER_TEMP/obs-studio-$obs_version.zip"
-          obs_url="https://github.com/obsproject/obs-studio/archive/refs/tags/$obs_version.zip"
+          obs_archive="$RUNNER_TEMP/obs-studio-$obs_version.tar.gz"
+          obs_url="https://github.com/obsproject/obs-studio/archive/refs/tags/$obs_version.tar.gz"
 
-          curl -L --fail --retry 3 "$obs_url" -o "$obs_zip"
-          obs_hash="$(shasum -a 256 "$obs_zip" | awk '{print $1}')"
+          curl -L --fail --retry 3 "$obs_url" -o "$obs_archive"
+          obs_hash="$(shasum -a 256 "$obs_archive" | awk '{print $1}')"
           echo "OBS 32.2.2 source ZIP SHA-256: $obs_hash"
 
           jq \
