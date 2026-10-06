@@ -1752,8 +1752,6 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_list_add_int(camera_color_range, "Limited", SCRCPY_COLOR_RANGE_LIMITED);
 	obs_property_list_add_int(camera_color_range, "Full", SCRCPY_COLOR_RANGE_FULL);
 
-
-
 	const char *camera_visible = ctx->video_source && strcmp(ctx->video_source, "camera") == 0 ? "camera"
 												   : "display";
 	bool is_camera = strcmp(camera_visible, "camera") == 0;
