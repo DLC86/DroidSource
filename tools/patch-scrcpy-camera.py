@@ -1721,32 +1721,6 @@ import android.hardware.camera2.params.TonemapCurve;
 """,
     ),
     (
-        """            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM,
-                    lastAutoColorCorrectionTransform);
-
-            RggbChannelVector gains = makeManualGainsFromAuto(whiteBalanceKelvin);
-            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS, gains);
-""",
-        """            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM,
-                    lastAutoColorCorrectionTransform);
-
-            RggbChannelVector gains = makeManualGainsFromAuto(whiteBalanceKelvin);
-            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS, gains);
-""",
-    ),
-    (
-        """            if (whiteBalanceKelvin > 0
-                                && cameraCharacteristics != null
-                                && requestBuilder != null) {
-""",
-        """            if ((whiteBalanceKelvin > 0 || cameraColorSpace == 3)
-                                && canApplyManualColorCorrection()
-                                && isAutoColorResultReady(result)
-                                && cameraCharacteristics != null
-                                && requestBuilder != null) {
-""",
-    ),
-    (
         """        });
 
         try {
@@ -2113,6 +2087,37 @@ patch_generated("server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.
             requestBuilder.set(CaptureRequest.COLOR_CORRECTION_MODE,
                     CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX);
             requestBuilder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM,
+""",
+    ),
+])
+
+patch_generated("server/src/main/java/com/genymobile/scrcpy/video/CameraCapture.java", [
+    (
+        """            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM,
+                    lastAutoColorCorrectionTransform);
+
+            RggbChannelVector gains = makeManualGainsFromAuto(whiteBalanceKelvin);
+            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS, gains);
+""",
+        """            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM,
+                    getTargetColorTransform());
+
+            RggbChannelVector gains = whiteBalanceKelvin > 0
+                    ? makeManualGainsFromAuto(whiteBalanceKelvin)
+                    : lastAutoColorCorrectionGains;
+            requestBuilder.set(CaptureRequest.COLOR_CORRECTION_GAINS, gains);
+""",
+    ),
+    (
+        """            if (whiteBalanceKelvin > 0
+                                && cameraCharacteristics != null
+                                && requestBuilder != null) {
+""",
+        """            if ((whiteBalanceKelvin > 0 || cameraColorSpace == 3)
+                                && canApplyManualColorCorrection()
+                                && isAutoColorResultReady(result)
+                                && cameraCharacteristics != null
+                                && requestBuilder != null) {
 """,
     ),
 ])
