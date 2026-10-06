@@ -25,25 +25,25 @@ jobs:
     permissions:
       contents: read
 
-  # build-macos:
-  #   name: Build macOS 🍏
-  #   uses: ./.github/workflows/build-macos.yaml
-  #   secrets: inherit
-  #   permissions:
-  #     contents: read
+  build-macos:
+    name: Build macOS 🍏
+    uses: ./.github/workflows/build-macos.yaml
+    secrets: inherit
+    permissions:
+      contents: read
 
-  # build-ubuntu:
-  #   name: Build Ubuntu 🐧
-  #   uses: ./.github/workflows/build-ubuntu.yaml
-  #   secrets: inherit
-  #   permissions:
-  #     contents: read
+  build-ubuntu:
+    name: Build Ubuntu 🐧
+    uses: ./.github/workflows/build-ubuntu.yaml
+    secrets: inherit
+    permissions:
+      contents: read
 
   create-release:
     name: Create Release 🛫
     if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
-    needs: build-windows
+    needs: [build-windows, build-macos, build-ubuntu]
     defaults:
       run:
         shell: bash
