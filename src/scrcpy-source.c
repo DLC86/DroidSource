@@ -326,7 +326,8 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 		log_path = lp.array;
 	}
 
-	obs_log(LOG_INFO, "scrcpy-source: camera pipeline: bit-depth=%d, 10-bit-camera=%s, 10-bit-to-8-bit=%s, color-profile=%d",
+	obs_log(LOG_INFO,
+		"scrcpy-source: camera pipeline: bit-depth=%d, 10-bit-camera=%s, 10-bit-to-8-bit=%s, color-profile=%d",
 		ctx->camera_bit_depth, camera_bit_depth_is_10bit(ctx->camera_bit_depth) ? "yes" : "no",
 		camera_bit_depth_needs_8bit_output(ctx->camera_bit_depth) ? "yes" : "no", ctx->camera_color_profile);
 	obs_log(LOG_INFO, "scrcpy-source: spawning %s (video-port=%u, control-port=%u, log=%s)", exe_path,
@@ -341,7 +342,8 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 
 	const bool camera_source = ctx->video_source && strcmp(ctx->video_source, "camera") == 0;
 	ctx->reader = scrcpy_reader_create(ctx->source, port, ctx->hardware_decoding, ctx->video_buffer_ms,
-					   ctx->camera_color_range, camera_source && camera_bit_depth_is_10bit(ctx->camera_bit_depth),
+					   ctx->camera_color_range,
+					   camera_source && camera_bit_depth_is_10bit(ctx->camera_bit_depth),
 					   camera_source && camera_bit_depth_needs_8bit_output(ctx->camera_bit_depth));
 
 	if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0 && control_port != 0 && ctx->serial &&
@@ -363,8 +365,10 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 			if (!scrcpy_camera_control_apply(
 				    ctx->camera_control, ctx->camera_zoom, ctx->camera_torch, ctx->camera_iso,
 				    ctx->camera_shutter_us, ctx->camera_focus_distance, ctx->camera_wb_kelvin,
-				    ctx->camera_wb_lock, startup_color_space, startup_gamma, camera_bit_depth_is_10bit(ctx->camera_bit_depth),
-				    camera_gamma_to_dynamic_range(startup_gamma, camera_bit_depth_is_10bit(ctx->camera_bit_depth)))) {
+				    ctx->camera_wb_lock, startup_color_space, startup_gamma,
+				    camera_bit_depth_is_10bit(ctx->camera_bit_depth),
+				    camera_gamma_to_dynamic_range(startup_gamma,
+								  camera_bit_depth_is_10bit(ctx->camera_bit_depth)))) {
 				obs_log(LOG_WARNING, "scrcpy-source: camera control connection not ready");
 			}
 		}
