@@ -542,8 +542,8 @@ static bool camera_restart_required(const struct scrcpy_src *ctx, obs_data_t *se
 	       ctx->bitrate_kbps != (int)obs_data_get_int(settings, "bitrate_kbps") ||
 	       setting_string_changed(ctx->codec, obs_data_get_string(settings, "codec")) ||
 	       ctx->hardware_decoding != obs_data_get_bool(settings, "hardware_decoding") ||
-	       ctx->flip_vertical != obs_data_get_bool(settings, "flip_vertical") ||
-	       ctx->portrait_mode != obs_data_get_bool(settings, "portrait_mode") ||
+	       ctx->rotate != (int)obs_data_get_int(settings, "rotate") ||
+	       ctx->mirror != obs_data_get_bool(settings, "mirror") ||
 	       ctx->video_buffer_ms != (int)obs_data_get_int(settings, "video_buffer_ms") ||
 	       ctx->camera_color_profile != (int)obs_data_get_int(settings, "camera_color_profile") ||
 	       ctx->camera_bit_depth != (int)obs_data_get_int(settings, "camera_bit_depth");
