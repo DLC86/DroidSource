@@ -66,16 +66,12 @@
 #define CAMERA_COLOR_PROFILE_SRGB_SRGB 18
 #define CAMERA_COLOR_PROFILE_REC709_SRGB 28
 #define CAMERA_COLOR_PROFILE_REC2020_SRGB 38
-#define CAMERA_CST_PROFILE_SRGB_HLG_8BIT 1015
-#define CAMERA_CST_PROFILE_REC709_HLG_8BIT 1025
-#define CAMERA_CST_PROFILE_REC2020_HLG_8BIT 1035
 
 #define CAMERA_DYNAMIC_RANGE_STANDARD 0
 #define CAMERA_DYNAMIC_RANGE_HLG10 1
 #define CAMERA_DYNAMIC_RANGE_HDR10 2
 #define CAMERA_DYNAMIC_RANGE_HDR10_PLUS 3
 
-#define CAMERA_CST_OFF 0
 
 static int camera_gamma_to_dynamic_range(int gamma, bool ten_bit)
 {
@@ -135,7 +131,7 @@ struct scrcpy_src {
 	bool camera_wb_lock;
 	int camera_color_profile;
 	int camera_color_range;
-	int camera_cst;
+	bool camera_10bit_to_8bit;
 	bool camera_10bit;
 	bool portrait_mode;
 
@@ -334,25 +330,9 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 	bfree(log_path);
 
 	const bool camera_source = ctx->video_source && strcmp(ctx->video_source, "camera") == 0;
-	int effective_source_profile = camera_source ? ctx->camera_color_profile : 0;
-	if (camera_source && ctx->camera_10bit) {
-		/*
-		 * 10-bit mode forces BT.2020 and the selected HDR transfer in the
-		 * patched scrcpy server. The reader must use that actual stream
-		 * profile, not a stale disabled 8-bit UI selection.
-		 */
-		int hdr_gamma = CAMERA_GAMMA_HLG;
-		const int selected_gamma = ctx->camera_color_profile % 10;
-		if (selected_gamma == CAMERA_GAMMA_HDR10)
-			hdr_gamma = CAMERA_GAMMA_HDR10;
-		else if (selected_gamma == CAMERA_GAMMA_HDR10_PLUS)
-			hdr_gamma = CAMERA_GAMMA_HDR10_PLUS;
-		effective_source_profile = CAMERA_COLOR_SPACE_REC2020 * 10 + hdr_gamma;
-	}
 	ctx->reader = scrcpy_reader_create(ctx->source, port, ctx->hardware_decoding, ctx->flip_vertical,
 					   ctx->video_buffer_ms, ctx->portrait_mode, ctx->camera_color_range,
-					   effective_source_profile, camera_source ? ctx->camera_cst : CAMERA_CST_OFF,
-					   camera_source && !ctx->camera_10bit && ctx->camera_cst == CAMERA_CST_OFF);
+					   camera_source && ctx->camera_10bit_to_8bit);
 
 	if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0 && control_port != 0 && ctx->serial &&
 	    *ctx->serial) {
@@ -434,8 +414,8 @@ static void load_settings(struct scrcpy_src *ctx, obs_data_t *settings)
 	ctx->camera_wb_lock = obs_data_get_bool(settings, "camera_wb_lock");
 	ctx->camera_color_profile = (int)obs_data_get_int(settings, "camera_color_profile");
 	ctx->camera_color_range = (int)obs_data_get_int(settings, "camera_color_range");
-	ctx->camera_cst = (int)obs_data_get_int(settings, "camera_cst");
 	ctx->camera_10bit = obs_data_get_bool(settings, "camera_10bit");
+	ctx->camera_10bit_to_8bit = obs_data_get_bool(settings, "camera_10bit_to_8bit");
 	ctx->portrait_mode = obs_data_get_bool(settings, "portrait_mode");
 	ctx->max_size = (int)obs_data_get_int(settings, "max_size");
 	ctx->bitrate_kbps = (int)obs_data_get_int(settings, "bitrate_kbps");
@@ -567,8 +547,8 @@ static bool camera_restart_required(const struct scrcpy_src *ctx, obs_data_t *se
 	       ctx->portrait_mode != obs_data_get_bool(settings, "portrait_mode") ||
 	       ctx->video_buffer_ms != (int)obs_data_get_int(settings, "video_buffer_ms") ||
 	       ctx->camera_color_profile != (int)obs_data_get_int(settings, "camera_color_profile") ||
-	       ctx->camera_cst != (int)obs_data_get_int(settings, "camera_cst") ||
-	       ctx->camera_10bit != obs_data_get_bool(settings, "camera_10bit");
+	       ctx->camera_10bit != obs_data_get_bool(settings, "camera_10bit") ||
+	       ctx->camera_10bit_to_8bit != obs_data_get_bool(settings, "camera_10bit_to_8bit");
 }
 
 static void src_update(void *data, obs_data_t *settings)
@@ -635,8 +615,8 @@ static void src_get_defaults(obs_data_t *settings)
 	obs_data_set_default_bool(settings, "camera_wb_lock", false);
 	obs_data_set_default_int(settings, "camera_color_profile", CAMERA_COLOR_PROFILE_AUTO);
 	obs_data_set_default_int(settings, "camera_color_range", SCRCPY_COLOR_RANGE_AUTO);
-	obs_data_set_default_int(settings, "camera_cst", CAMERA_CST_OFF);
 	obs_data_set_default_bool(settings, "camera_10bit", false);
+	obs_data_set_default_bool(settings, "camera_10bit_to_8bit", false);
 	obs_data_set_default_bool(settings, "portrait_mode", false);
 	obs_data_set_default_int(settings, "max_size", 0);
 	obs_data_set_default_int(settings, "bitrate_kbps", 8000);
@@ -1771,28 +1751,8 @@ static obs_properties_t *src_get_properties(void *data)
 								     OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(camera_color_range, "Auto (from stream)", SCRCPY_COLOR_RANGE_AUTO);
 
-	obs_property_t *camera_cst = obs_properties_add_list(props, "camera_cst", obs_module_text("CameraCST"),
-							     OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
-	obs_property_list_add_int(camera_cst, "Off / Bypass", CAMERA_CST_OFF);
-	obs_property_list_add_int(camera_cst, "Rec.709 / sRGB (8-bit)", CAMERA_COLOR_PROFILE_REC709_SRGB);
-	obs_property_list_add_int(camera_cst, "Rec.709 / Rec.709 (Scene) (8-bit)",
-				  CAMERA_COLOR_PROFILE_REC709_REC709_SCENE);
-	obs_property_list_add_int(camera_cst, "Rec.709 / Gamma 2.2 (8-bit)", CAMERA_COLOR_PROFILE_REC709_22);
-	obs_property_list_add_int(camera_cst, "Rec.709 / Gamma 2.4 (8-bit)", CAMERA_COLOR_PROFILE_REC709_24);
-	obs_property_list_add_int(camera_cst, "sRGB / sRGB (8-bit)", CAMERA_COLOR_PROFILE_SRGB_SRGB);
-	obs_property_list_add_int(camera_cst, "sRGB / Rec.709 (Scene) (8-bit)", CAMERA_COLOR_PROFILE_SRGB_REC709_SCENE);
-	obs_property_list_add_int(camera_cst, "sRGB / Gamma 2.2 (8-bit)", CAMERA_COLOR_PROFILE_SRGB_22);
-	obs_property_list_add_int(camera_cst, "Rec.2020 / sRGB (8-bit)", CAMERA_COLOR_PROFILE_REC2020_SRGB);
-	obs_property_list_add_int(camera_cst, "Rec.2020 / Rec.709 (Scene) (8-bit)",
-				  CAMERA_COLOR_PROFILE_REC2020_REC709_SCENE);
-	obs_property_list_add_int(camera_cst, "Rec.2020 / Gamma 2.2 (8-bit)", CAMERA_COLOR_PROFILE_REC2020_22);
-	obs_property_list_add_int(camera_cst, "sRGB / HLG (8-bit)", CAMERA_CST_PROFILE_SRGB_HLG_8BIT);
-	obs_property_list_add_int(camera_cst, "Rec.709 / HLG (8-bit)", CAMERA_CST_PROFILE_REC709_HLG_8BIT);
-	obs_property_list_add_int(camera_cst, "Rec.2020 / HLG (8-bit)", CAMERA_CST_PROFILE_REC2020_HLG_8BIT);
-	obs_property_list_add_int(camera_cst, "Rec.2020 / HLG (10-bit)", CAMERA_COLOR_PROFILE_REC2020_HLG);
-	obs_property_list_add_int(camera_cst, "Rec.2020 / PQ (10-bit)", CAMERA_COLOR_PROFILE_REC2020_HDR10);
-	obs_property_list_add_int(camera_color_range, "Full range", SCRCPY_COLOR_RANGE_FULL);
-	obs_property_list_add_int(camera_color_range, "Limited range", SCRCPY_COLOR_RANGE_LIMITED);
+	obs_property_t *camera_10bit_to_8bit =
+		obs_properties_add_bool(props, "camera_10bit_to_8bit", obs_module_text("Camera10BitTo8Bit"));
 
 	obs_property_t *camera_10bit = obs_properties_add_bool(props, "camera_10bit", obs_module_text("Camera10Bit"));
 	obs_property_set_modified_callback(camera_10bit, camera_10bit_modified);
@@ -1823,7 +1783,6 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_set_visible(camera_wb_lock, is_camera);
 	obs_property_set_visible(camera_color_profile, is_camera);
 	obs_property_set_visible(camera_color_range, is_camera);
-	obs_property_set_visible(camera_cst, is_camera);
 	obs_data_t *ui_settings = obs_source_get_settings(ctx->source);
 	bool ten_bit_enabled = obs_data_get_bool(ui_settings, "camera_10bit");
 	bool wb_manual = obs_data_get_int(ui_settings, "camera_wb_kelvin") > 0;
@@ -1832,6 +1791,8 @@ static obs_properties_t *src_get_properties(void *data)
 	obs_property_set_enabled(camera_wb_lock, !wb_manual);
 	obs_property_set_enabled(camera_color_profile, true);
 	obs_property_set_visible(camera_10bit, is_camera);
+	obs_property_set_visible(camera_10bit_to_8bit, is_camera);
+	obs_property_set_enabled(camera_10bit_to_8bit, is_camera && ten_bit_enabled);
 	obs_property_set_visible(portrait_mode, is_camera);
 	obs_property_set_visible(refresh_cameras, is_camera);
 	obs_property_set_visible(flip_vertical, is_camera);
