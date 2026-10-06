@@ -733,28 +733,39 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	pthread_mutex_unlock(&r->state_mutex);
 	enum video_range_type source_range = resolve_color_range(f, color_range_override);
 	enum AVColorRange source_av_range = source_range == VIDEO_RANGE_FULL ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
-	if (hardware_path) {
-		av_frame_unref(r->transfer_frame);
-		if (av_hwframe_transfer_data(r->transfer_frame, f, 0) < 0) {
-			obs_log(LOG_WARNING, "scrcpy-reader: hardware frame transfer failed");
-			return;
-		}
-		if (av_frame_copy_props(r->transfer_frame, f) < 0) {
-			obs_log(LOG_WARNING, "scrcpy-reader: could not preserve hardware frame color metadata");
-			return;
-		}
-		out = r->transfer_frame;
-	}
-	log_frame_color_info(r, out, hardware_path);
-	out->color_range = source_av_range;
-	if (r->force_8bit_output) {
+	if (hardware_path && r->force_8bit_output) {
+		/* Keep the D3D11 frame on the GPU while converting P010 -> NV12. */
 		AVFrame *converted = NULL;
-		if (!convert_frame_to_8bit(r, out, &converted)) {
-			obs_log(LOG_WARNING, "scrcpy-reader: 8-bit output conversion failed for pixel format %d", out->format);
+		if (!convert_frame_to_8bit(r, f, &converted)) {
+			obs_log(LOG_WARNING, "scrcpy-reader: GPU 8-bit output conversion failed for pixel format %d", f->format);
 			return;
 		}
 		out = converted;
+		out->color_range = source_av_range;
+	} else {
+		if (hardware_path) {
+			av_frame_unref(r->transfer_frame);
+			if (av_hwframe_transfer_data(r->transfer_frame, f, 0) < 0) {
+				obs_log(LOG_WARNING, "scrcpy-reader: hardware frame transfer failed");
+				return;
+			}
+			if (av_frame_copy_props(r->transfer_frame, f) < 0) {
+				obs_log(LOG_WARNING, "scrcpy-reader: could not preserve hardware frame color metadata");
+				return;
+			}
+			out = r->transfer_frame;
+		}
+		out->color_range = source_av_range;
+		if (r->force_8bit_output) {
+			AVFrame *converted = NULL;
+			if (!convert_frame_to_8bit(r, out, &converted)) {
+				obs_log(LOG_WARNING, "scrcpy-reader: 8-bit output conversion failed for pixel format %d", out->format);
+				return;
+			}
+			out = converted;
+		}
 	}
+	log_frame_color_info(r, out, hardware_path);
 	if (r->portrait_mode) {
 		if (!rotate_frame_90_ccw(r, out)) {
 			obs_log(LOG_WARNING, "scrcpy-reader: portrait mode unsupported for pixel format %d", out->format);
