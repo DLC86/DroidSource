@@ -79,8 +79,6 @@ struct scrcpy_reader {
 	sock_t sock;
 
 	bool hardware_decoding; /* clang-format sync */
-	int rotate;
-	bool mirror;
 	int video_buffer_ms;
 	int color_range_override;
 	bool force_8bit_output;
@@ -89,7 +87,6 @@ struct scrcpy_reader {
 	AVBufferRef *hw_device_ctx;
 	enum AVPixelFormat hw_pix_fmt;
 	AVFrame *transfer_frame;
-	AVFrame *transform_frame;
 	AVFrame *eight_bit_frame;
 	SwsContext *eight_bit_sws;
 
@@ -425,153 +422,6 @@ static bool prepare_reusable_frame(AVFrame *frame, enum AVPixelFormat format, in
 	return av_frame_make_writable(frame) >= 0;
 }
 
-static void rotate_plane_90_ccw(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize, int src_width,
-				int src_height, int bytes_per_pixel)
-{
-	for (int sy = 0; sy < src_height; ++sy) {
-		for (int sx = 0; sx < src_width; ++sx) {
-			int dx = sy;
-			int dy = src_width - 1 - sx;
-			memcpy(dst + (size_t)dy * dst_linesize + (size_t)dx * bytes_per_pixel,
-			       src + (size_t)sy * src_linesize + (size_t)sx * bytes_per_pixel, (size_t)bytes_per_pixel);
-		}
-	}
-}
-
-static void rotate_plane_180(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize, int width,
-			     int height, int bytes_per_pixel)
-{
-	for (int y = 0; y < height; ++y) {
-		for (int x = 0; x < width; ++x) {
-			int dx = width - 1 - x;
-			int dy = height - 1 - y;
-			memcpy(dst + (size_t)dy * dst_linesize + (size_t)dx * bytes_per_pixel,
-			       src + (size_t)y * src_linesize + (size_t)x * bytes_per_pixel, (size_t)bytes_per_pixel);
-		}
-	}
-}
-
-static void mirror_plane_horizontal(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize, int width,
-				    int height, int bytes_per_pixel)
-{
-	for (int y = 0; y < height; ++y) {
-		const uint8_t *src_row = src + (size_t)y * src_linesize;
-		uint8_t *dst_row = dst + (size_t)y * dst_linesize;
-		for (int x = 0; x < width; ++x) {
-			memcpy(dst_row + (size_t)(width - 1 - x) * bytes_per_pixel,
-			       src_row + (size_t)x * bytes_per_pixel, (size_t)bytes_per_pixel);
-		}
-	}
-}
-
-static void flip_plane_vertical(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize, int width,
-				int height, int bytes_per_pixel)
-{
-	for (int y = 0; y < height; ++y) {
-		memcpy(dst + (size_t)(height - 1 - y) * dst_linesize, src + (size_t)y * src_linesize,
-		       (size_t)width * bytes_per_pixel);
-	}
-}
-
-static void transform_plane(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize, int src_width,
-			    int src_height, int bytes_per_pixel, int rotate, bool mirror)
-{
-	if (rotate == 90 && !mirror) {
-		rotate_plane_90_ccw(dst, dst_linesize, src, src_linesize, src_width, src_height, bytes_per_pixel);
-		return;
-	}
-
-	if (rotate == 0 && mirror) {
-		mirror_plane_horizontal(dst, dst_linesize, src, src_linesize, src_width, src_height, bytes_per_pixel);
-		return;
-	}
-
-	if (rotate == 180 && !mirror) {
-		rotate_plane_180(dst, dst_linesize, src, src_linesize, src_width, src_height, bytes_per_pixel);
-		return;
-	}
-
-	/* 270 and combinations are uncommon, but keep the same exact pixel
-	 * semantics as the original Portrait path. */
-	const int dst_width = (rotate == 90 || rotate == 270) ? src_height : src_width;
-	for (int sy = 0; sy < src_height; ++sy) {
-		for (int sx = 0; sx < src_width; ++sx) {
-			int dx;
-			int dy;
-			switch (rotate) {
-			case 90:
-				dx = sy;
-				dy = src_width - 1 - sx;
-				break;
-			case 180:
-				dx = src_width - 1 - sx;
-				dy = src_height - 1 - sy;
-				break;
-			case 270:
-				dx = src_height - 1 - sy;
-				dy = sx;
-				break;
-			default:
-				dx = sx;
-				dy = sy;
-				break;
-			}
-			if (mirror)
-				dx = dst_width - 1 - dx;
-			memcpy(dst + (size_t)dy * dst_linesize + (size_t)dx * bytes_per_pixel,
-			       src + (size_t)sy * src_linesize + (size_t)sx * bytes_per_pixel, (size_t)bytes_per_pixel);
-		}
-	}
-}
-
-static bool transform_frame(struct scrcpy_reader *r, const AVFrame *src)
-{
-	int rotate;
-	bool mirror;
-	if (!r || !src || !r->transform_frame)
-		return false;
-
-	pthread_mutex_lock(&r->state_mutex);
-	rotate = r->rotate;
-	mirror = r->mirror;
-	pthread_mutex_unlock(&r->state_mutex);
-
-	if (rotate != 0 && rotate != 90 && rotate != 180 && rotate != 270)
-		rotate = 0;
-	if (rotate == 0 && !mirror)
-		return false;
-
-	enum AVPixelFormat format = (enum AVPixelFormat)src->format;
-	if (format != AV_PIX_FMT_YUV420P && format != AV_PIX_FMT_YUVJ420P && format != AV_PIX_FMT_NV12 &&
-	    format != AV_PIX_FMT_YUV420P10LE && format != AV_PIX_FMT_P010LE)
-		return false;
-
-	const int dst_width = (rotate == 90 || rotate == 270) ? src->height : src->width;
-	const int dst_height = (rotate == 90 || rotate == 270) ? src->width : src->height;
-	if (!prepare_reusable_frame(r->transform_frame, format, dst_width, dst_height))
-		return false;
-	copy_frame_props_reusable(r->transform_frame, src);
-
-	const bool high_bit_depth = format == AV_PIX_FMT_YUV420P10LE || format == AV_PIX_FMT_P010LE;
-	const int bytes_per_luma = high_bit_depth ? 2 : 1;
-	transform_plane(r->transform_frame->data[0], r->transform_frame->linesize[0], src->data[0], src->linesize[0],
-			src->width, src->height, bytes_per_luma, rotate, mirror);
-
-	const int src_width = src->width / 2;
-	const int src_height = src->height / 2;
-	if (format == AV_PIX_FMT_NV12 || format == AV_PIX_FMT_P010LE) {
-		transform_plane(r->transform_frame->data[1], r->transform_frame->linesize[1], src->data[1],
-				src->linesize[1], src_width, src_height, format == AV_PIX_FMT_P010LE ? 4 : 2, rotate,
-				mirror);
-	} else {
-		transform_plane(r->transform_frame->data[1], r->transform_frame->linesize[1], src->data[1],
-				src->linesize[1], src_width, src_height, bytes_per_luma, rotate, mirror);
-		transform_plane(r->transform_frame->data[2], r->transform_frame->linesize[2], src->data[2],
-				src->linesize[2], src_width, src_height, bytes_per_luma, rotate, mirror);
-	}
-	return true;
-}
-
 static bool open_decoder(struct scrcpy_reader *r, uint32_t codec_id, uint32_t width, uint32_t height)
 {
 	enum AVCodecID av_id = scrcpy_codec_to_avcodec(codec_id);
@@ -638,7 +488,7 @@ static bool open_decoder(struct scrcpy_reader *r, uint32_t codec_id, uint32_t wi
 	r->transfer_frame = av_frame_alloc();
 	r->transform_frame = av_frame_alloc();
 	r->eight_bit_frame = av_frame_alloc();
-	if (!r->packet || !r->frame || !r->transfer_frame || !r->transform_frame || !r->eight_bit_frame) {
+	if (!r->packet || !r->frame || !r->transfer_frame || !r->eight_bit_frame) {
 		obs_log(LOG_ERROR, "scrcpy-reader: av alloc failed");
 		return false;
 	}
@@ -777,21 +627,13 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 		}
 		out = converted;
 	}
-	log_frame_color_info(r, out, hardware_path);
-	int rotate;
-	bool mirror;
-	pthread_mutex_lock(&r->state_mutex);
-	rotate = r->rotate;
-	mirror = r->mirror;
-	pthread_mutex_unlock(&r->state_mutex);
-	if (rotate != 0 || mirror) {
-		if (!transform_frame(r, out)) {
-			obs_log(LOG_WARNING, "scrcpy-reader: image transform unsupported for pixel format %d",
-				out->format);
-			return;
-		}
-		out = r->transform_frame;
+	/* 8-bit output must not retain HDR transfer metadata. */
+	if (r->force_8bit_output) {
+		out->colorspace = AVCOL_SPC_BT709;
+		out->color_primaries = AVCOL_PRI_BT709;
+		out->color_trc = AVCOL_TRC_BT709;
 	}
+	log_frame_color_info(r, out, hardware_path);
 	enum video_format fmt = av_to_obs_format((enum AVPixelFormat)out->format);
 	if (fmt == VIDEO_FORMAT_NONE) {
 		obs_log(LOG_WARNING, "scrcpy-reader: unsupported pix fmt %d", out->format);
@@ -955,17 +797,14 @@ done:
 	return NULL;
 }
 
-scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port, bool hardware_decoding, int rotate,
-				      bool mirror, int video_buffer_ms, int color_range_override,
-				      bool force_8bit_output)
+scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port, bool hardware_decoding, int video_buffer_ms,
+				      int color_range_override, bool force_8bit_output)
 {
 	struct scrcpy_reader *r = bzalloc(sizeof(*r));
 	r->source = source;
 	r->port = port;
 	r->sock = INVALID_SOCK;
 	r->hardware_decoding = hardware_decoding;
-	r->rotate = rotate;
-	r->mirror = mirror;
 	r->video_buffer_ms = video_buffer_ms > 0 ? video_buffer_ms : 0;
 	r->color_range_override = color_range_override;
 	r->force_8bit_output = force_8bit_output;
