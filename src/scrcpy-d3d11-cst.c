@@ -21,6 +21,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 #ifndef SAFE_RELEASE
 #define SAFE_RELEASE(x) \
@@ -31,6 +32,8 @@
 		} \
 	} while (0)
 #endif
+
+#define D3D11_CST_LUT_SIZE 1025
 
 struct d3d11_cst_params {
 	uint32_t srcTransfer;
@@ -45,6 +48,8 @@ struct d3d11_cst_params {
 	float peak;
 	float reserved1;
 	float reserved2;
+	float srcTransferLut[D3D11_CST_LUT_SIZE];
+	float targetTransferLut[D3D11_CST_LUT_SIZE];
 };
 
 struct gpu_profile {
@@ -91,6 +96,9 @@ struct scrcpy_d3d11_cst {
 	bool logical_target_8bit;
 	bool output_10bit;
 	bool disabled;
+	uint32_t cached_src_transfer;
+	uint32_t cached_target_transfer;
+	bool transfer_lut_valid;
 };
 
 static const char d3d11_cst_shader[] =
@@ -415,6 +423,67 @@ static bool ensure_resources(struct scrcpy_d3d11_cst *cst, const AVFrame *input)
 	return true;
 }
 
+
+static float decode_transfer_cpu(float x, uint32_t id)
+{
+	x = fmaxf(x, 0.0f);
+	switch (id) {
+	case 1:
+		return powf(x, 2.2f);
+	case 2:
+		return powf(x, 2.4f);
+	case 3:
+		return x <= 0.081f ? x / 4.5f : powf((x + 0.099f) / 1.099f, 1.0f / 0.45f);
+	case 4:
+		return x <= 0.04045f ? x / 12.92f : powf((x + 0.055f) / 1.055f, 2.4f);
+	case 5:
+		return x <= 0.5f ? (x * x) / 3.0f
+				  : (expf((x - 0.55991073f) / 0.17883277f) + 0.28466892f) / 12.0f;
+	case 6: {
+		const float p = powf(x, 1.0f / 78.84375f);
+		return powf(fmaxf(p - 0.8359375f, 0.0f) /
+				    fmaxf(18.8515625f - 18.6875f * p, 1e-6f),
+				1.0f / 0.1593017578f);
+	}
+	default:
+		return x;
+	}
+}
+
+static float encode_transfer_cpu(float x, uint32_t id)
+{
+	x = fmaxf(x, 0.0f);
+	switch (id) {
+	case 1:
+		return powf(x, 1.0f / 2.2f);
+	case 2:
+		return powf(x, 1.0f / 2.4f);
+	case 3:
+		return x <= 0.018f ? 4.5f * x : 1.099f * powf(x, 0.45f) - 0.099f;
+	case 4:
+		return x <= 0.0031308f ? 12.92f * x : 1.055f * powf(x, 1.0f / 2.4f) - 0.055f;
+	case 5:
+		return x <= (1.0f / 12.0f) ? sqrtf(3.0f * x)
+					  : 0.17883277f * logf(fmaxf(12.0f * x - 0.28466892f, 1e-6f)) + 0.55991073f;
+	case 6: {
+		const float p = powf(x, 0.1593017578f);
+		return powf((0.8359375f + 18.8515625f * p) /
+				    fmaxf(1.0f + 18.6875f * p, 1e-6f),
+				78.84375f);
+	}
+	default:
+		return x;
+	}
+}
+
+static void fill_transfer_lut(float *lut, uint32_t id, bool encode)
+{
+	for (int i = 0; i < D3D11_CST_LUT_SIZE; ++i) {
+		const float x = (float)i / (float)(D3D11_CST_LUT_SIZE - 1);
+		lut[i] = encode ? encode_transfer_cpu(x, id) : decode_transfer_cpu(x, id);
+	}
+}
+
 static bool update_params(struct scrcpy_d3d11_cst *cst, const struct gpu_profile *source,
 			  const struct gpu_profile *target, const AVFrame *input, enum AVColorRange input_range)
 {
@@ -429,7 +498,6 @@ static bool update_params(struct scrcpy_d3d11_cst *cst, const struct gpu_profile
 	}
 
 	params = mapped.pData;
-	memset(params, 0, sizeof(*params));
 	params->srcTransfer = source->transfer;
 	params->targetTransfer = target->transfer;
 	params->srcPrimaries = source->primaries;
@@ -439,6 +507,16 @@ static bool update_params(struct scrcpy_d3d11_cst *cst, const struct gpu_profile
 	params->height = (UINT)input->height;
 	params->srcFullRange = input_range == AVCOL_RANGE_JPEG ? 1.0f : 0.0f;
 	params->peak = 1.0f;
+
+	if (!cst->transfer_lut_valid || cst->cached_src_transfer != source->transfer ||
+	    cst->cached_target_transfer != target->transfer) {
+		fill_transfer_lut(params->srcTransferLut, source->transfer, false);
+		fill_transfer_lut(params->targetTransferLut, target->transfer, true);
+		cst->cached_src_transfer = source->transfer;
+		cst->cached_target_transfer = target->transfer;
+		cst->transfer_lut_valid = true;
+	}
+
 	ID3D11DeviceContext_Unmap(cst->context, (ID3D11Resource *)cst->params_buffer, 0);
 	return true;
 }
