@@ -134,6 +134,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "8"
+          architecture: x64
 
       - name: Save JDK 8 path
         shell: bash
