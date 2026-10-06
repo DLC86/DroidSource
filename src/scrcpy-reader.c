@@ -476,8 +476,8 @@ static void flip_plane_vertical(uint8_t *dst, int dst_linesize, const uint8_t *s
 	}
 }
 
-static void transform_plane(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize,
-			    int src_width, int src_height, int bytes_per_pixel, int rotate, bool mirror)
+static void transform_plane(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize, int src_width,
+			    int src_height, int bytes_per_pixel, int rotate, bool mirror)
 {
 	if (rotate == 90 && !mirror) {
 		rotate_plane_90_ccw(dst, dst_linesize, src, src_linesize, src_width, src_height, bytes_per_pixel);
