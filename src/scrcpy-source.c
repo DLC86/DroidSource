@@ -709,11 +709,12 @@ static bool parse_camera_id_line(const char *line, char *id, size_t id_size, cha
 		}
 	}
 
-	if (label && label_size > 0)
+	if (label && label_size > 0) {
 		if (width > 0 && height > 0)
 			snprintf(label, label_size, "Camera %s (%s, %ux%u)", id, facing, width, height);
 		else
 			snprintf(label, label_size, "Camera %s (%s)", id, facing);
+	}
 
 	if (fps && fps_count) {
 		*fps_count = 0;
@@ -1434,7 +1435,6 @@ static bool refresh_camera_capabilities(obs_properties_t *props, obs_data_t *set
 		bool focus_supported = selected_focus_max > 0.0f;
 		obs_property_set_enabled(focus_prop, focus_supported);
 		obs_property_float_set_limits(focus_prop, 0.0, focus_supported ? selected_focus_max : 1.0, 0.1);
-		double current_focus = obs_data_get_double(settings, "camera_focus_distance");
 	}
 
 	obs_property_t *zoom_prop = obs_properties_get(props, "camera_zoom");
@@ -1558,6 +1558,7 @@ static bool serial_modified(obs_properties_t *props, obs_property_t *p, obs_data
 {
 	UNUSED_PARAMETER(p);
 	UNUSED_PARAMETER(props);
+	UNUSED_PARAMETER(settings);
 	return true;
 }
 
