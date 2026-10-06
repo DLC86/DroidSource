@@ -401,129 +401,81 @@ static void log_frame_color_info(struct scrcpy_reader *r, const AVFrame *frame, 
 }
 
 static void transform_plane(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize,
-			      int src_width, int src_height, int bytes_per_pixel, int rotate, bool mirror)
+			    int src_width, int src_height, int bytes_per_pixel, int rotate, bool mirror)
 {
-	int dst_width = (rotate == 90 || rotate == 270) ? src_height : src_width;
+	const int dst_width = (rotate == 90 || rotate == 270) ? src_height : src_width;
 
 	for (int sy = 0; sy < src_height; ++sy) {
 		for (int sx = 0; sx < src_width; ++sx) {
 			int dx;
 			int dy;
 			switch (rotate) {
-			case 90: dx = sy; dy = src_width - 1 - sx; break;
-			case 180: dx = src_width - 1 - sx; dy = src_height - 1 - sy; break;
-			case 270: dx = src_height - 1 - sy; dy = sx; break;
-			default: dx = sx; dy = sy; break;
+			case 90:
+				dx = sy;
+				dy = src_width - 1 - sx;
+				break;
+			case 180:
+				dx = src_width - 1 - sx;
+				dy = src_height - 1 - sy;
+				break;
+			case 270:
+				dx = src_height - 1 - sy;
+				dy = sx;
+				break;
+			default:
+				dx = sx;
+				dy = sy;
+				break;
 			}
-			if (mirror) dx = dst_width - 1 - dx;
+			if (mirror)
+				dx = dst_width - 1 - dx;
 			memcpy(dst + (size_t)dy * dst_linesize + (size_t)dx * bytes_per_pixel,
 			       src + (size_t)sy * src_linesize + (size_t)sx * bytes_per_pixel, (size_t)bytes_per_pixel);
 		}
 	}
 }
 
-static void copy_frame_props_reusable(AVFrame *dst, const AVFrame *src)
-{
-\tdst->pts = src->pts;
-\tdst->pkt_dts = src->pkt_dts;
-\tdst->duration = src->duration;
-\tdst->time_base = src->time_base;
-\tdst->color_range = src->color_range;
-\tdst->color_primaries = src->color_primaries;
-\tdst->color_trc = src->color_trc;
-\tdst->colorspace = src->colorspace;
-\tdst->chroma_location = src->chroma_location;
-}
-
-static bool prepare_reusable_frame(AVFrame *frame, enum AVPixelFormat format, int width, int height)
-{
-\tif (frame->format != format || frame->width != width || frame->height != height || !frame->buf[0]) {
-\t\tav_frame_unref(frame);
-\t\tframe->format = format;
-\t\tframe->width = width;
-\t\tframe->height = height;
-\t\treturn av_frame_get_buffer(frame, 32) >= 0;
-\t}
-
-\treturn av_frame_make_writable(frame) >= 0;
-}
-
-static void transform_plane(uint8_t *dst, int dst_linesize, const uint8_t *src, int src_linesize,
-\t\t\t    int src_width, int src_height, int bytes_per_pixel, int rotate, bool mirror)
-{
-\tconst int dst_width = (rotate == 90 || rotate == 270) ? src_height : src_width;
-
-\tfor (int sy = 0; sy < src_height; ++sy) {
-\t\tfor (int sx = 0; sx < src_width; ++sx) {
-\t\t\tint dx;
-\t\t\tint dy;
-\t\t\tswitch (rotate) {
-\t\t\tcase 90:
-\t\t\t\tdx = sy;
-\t\t\t\tdy = src_width - 1 - sx;
-\t\t\t\tbreak;
-\t\t\tcase 180:
-\t\t\t\tdx = src_width - 1 - sx;
-\t\t\t\tdy = src_height - 1 - sy;
-\t\t\t\tbreak;
-\t\t\tcase 270:
-\t\t\t\tdx = src_height - 1 - sy;
-\t\t\t\tdy = sx;
-\t\t\t\tbreak;
-\t\t\tdefault:
-\t\t\t\tdx = sx;
-\t\t\t\tdy = sy;
-\t\t\t\tbreak;
-\t\t\t}
-\t\t\tif (mirror)
-\t\t\t\tdx = dst_width - 1 - dx;
-\t\t\tmemcpy(dst + (size_t)dy * dst_linesize + (size_t)dx * bytes_per_pixel,
-\t\t\t       src + (size_t)sy * src_linesize + (size_t)sx * bytes_per_pixel, (size_t)bytes_per_pixel);
-\t\t}
-\t}
-}
-
 static bool transform_frame(struct scrcpy_reader *r, const AVFrame *src)
 {
-\tint rotate;
-\tbool mirror;
-\tif (!r || !src || !r->transform_frame)
-\t\treturn false;
-\tpthread_mutex_lock(&r->state_mutex);
-\trotate = r->rotate;
-\tmirror = r->mirror;
-\tpthread_mutex_unlock(&r->state_mutex);
-\tif (rotate != 0 && rotate != 90 && rotate != 180 && rotate != 270)
-\t\trotate = 0;
-\tif (rotate == 0 && !mirror)
-\t\treturn false;
+	int rotate;
+	bool mirror;
+	if (!r || !src || !r->transform_frame)
+		return false;
+	pthread_mutex_lock(&r->state_mutex);
+	rotate = r->rotate;
+	mirror = r->mirror;
+	pthread_mutex_unlock(&r->state_mutex);
+	if (rotate != 0 && rotate != 90 && rotate != 180 && rotate != 270)
+		rotate = 0;
+	if (rotate == 0 && !mirror)
+		return false;
 
-\tenum AVPixelFormat format = (enum AVPixelFormat)src->format;
-\tbool high_bit_depth = format == AV_PIX_FMT_YUV420P10LE || format == AV_PIX_FMT_P010LE;
-\tif (format != AV_PIX_FMT_YUV420P && format != AV_PIX_FMT_YUVJ420P && format != AV_PIX_FMT_NV12 && !high_bit_depth)
-\t\treturn false;
+	enum AVPixelFormat format = (enum AVPixelFormat)src->format;
+	bool high_bit_depth = format == AV_PIX_FMT_YUV420P10LE || format == AV_PIX_FMT_P010LE;
+	if (format != AV_PIX_FMT_YUV420P && format != AV_PIX_FMT_YUVJ420P && format != AV_PIX_FMT_NV12 && !high_bit_depth)
+		return false;
 
-\tint dst_width = (rotate == 90 || rotate == 270) ? src->height : src->width;
-\tint dst_height = (rotate == 90 || rotate == 270) ? src->width : src->height;
-\tif (!prepare_reusable_frame(r->transform_frame, format, dst_width, dst_height))
-\t\treturn false;
-\tcopy_frame_props_reusable(r->transform_frame, src);
+	int dst_width = (rotate == 90 || rotate == 270) ? src->height : src->width;
+	int dst_height = (rotate == 90 || rotate == 270) ? src->width : src->height;
+	if (!prepare_reusable_frame(r->transform_frame, format, dst_width, dst_height))
+		return false;
+	copy_frame_props_reusable(r->transform_frame, src);
 
-\tint bytes_per_luma = high_bit_depth ? 2 : 1;
-\ttransform_plane(r->transform_frame->data[0], r->transform_frame->linesize[0], src->data[0], src->linesize[0],
-\t\t\t       src->width, src->height, bytes_per_luma, rotate, mirror);
-\tint src_width = src->width / 2;
-\tint src_height = src->height / 2;
-\tif (format == AV_PIX_FMT_NV12 || format == AV_PIX_FMT_P010LE) {
-\t\ttransform_plane(r->transform_frame->data[1], r->transform_frame->linesize[1], src->data[1], src->linesize[1],
-\t\t\t       src_width, src_height, format == AV_PIX_FMT_P010LE ? 4 : 2, rotate, mirror);
-\t} else {
-\t\ttransform_plane(r->transform_frame->data[1], r->transform_frame->linesize[1], src->data[1], src->linesize[1],
-\t\t\t       src_width, src_height, bytes_per_luma, rotate, mirror);
-\t\ttransform_plane(r->transform_frame->data[2], r->transform_frame->linesize[2], src->data[2], src->linesize[2],
-\t\t\t       src_width, src_height, bytes_per_luma, rotate, mirror);
-\t}
-\treturn true;
+	int bytes_per_luma = high_bit_depth ? 2 : 1;
+	transform_plane(r->transform_frame->data[0], r->transform_frame->linesize[0], src->data[0], src->linesize[0],
+			       src->width, src->height, bytes_per_luma, rotate, mirror);
+	int src_width = src->width / 2;
+	int src_height = src->height / 2;
+	if (format == AV_PIX_FMT_NV12 || format == AV_PIX_FMT_P010LE) {
+		transform_plane(r->transform_frame->data[1], r->transform_frame->linesize[1], src->data[1], src->linesize[1],
+			       src_width, src_height, format == AV_PIX_FMT_P010LE ? 4 : 2, rotate, mirror);
+	} else {
+		transform_plane(r->transform_frame->data[1], r->transform_frame->linesize[1], src->data[1], src->linesize[1],
+			       src_width, src_height, bytes_per_luma, rotate, mirror);
+		transform_plane(r->transform_frame->data[2], r->transform_frame->linesize[2], src->data[2], src->linesize[2],
+			       src_width, src_height, bytes_per_luma, rotate, mirror);
+	}
+	return true;
 }
 
 static bool open_decoder(struct scrcpy_reader *r, uint32_t codec_id, uint32_t width, uint32_t height)
@@ -619,79 +571,79 @@ static int sws_colorspace_for_frame(const AVFrame *frame)
 
 static bool convert_frame_to_8bit_cpu(struct scrcpy_reader *r, AVFrame *input, AVFrame **output)
 {
-\tconst enum AVPixelFormat input_format = (enum AVPixelFormat)input->format;
+	const enum AVPixelFormat input_format = (enum AVPixelFormat)input->format;
 
-\tif (input_format == AV_PIX_FMT_YUV420P || input_format == AV_PIX_FMT_NV12) {
-\t\t*output = input;
-\t\treturn true;
-\t}
+	if (input_format == AV_PIX_FMT_YUV420P || input_format == AV_PIX_FMT_NV12) {
+		*output = input;
+		return true;
+	}
 
-\tif (input_format == AV_PIX_FMT_P010LE || input_format == AV_PIX_FMT_YUV420P10LE) {
-\t\tif (!prepare_reusable_frame(r->eight_bit_frame, AV_PIX_FMT_YUV420P, input->width, input->height))
-\t\t\treturn false;
-\t\tcopy_frame_props_reusable(r->eight_bit_frame, input);
+	if (input_format == AV_PIX_FMT_P010LE || input_format == AV_PIX_FMT_YUV420P10LE) {
+		if (!prepare_reusable_frame(r->eight_bit_frame, AV_PIX_FMT_YUV420P, input->width, input->height))
+			return false;
+		copy_frame_props_reusable(r->eight_bit_frame, input);
 
-\t\tfor (int y = 0; y < input->height; ++y) {
-\t\t\tconst uint16_t *src = (const uint16_t *)(input->data[0] + (size_t)y * input->linesize[0]);
-\t\t\tuint8_t *dst = r->eight_bit_frame->data[0] + (size_t)y * r->eight_bit_frame->linesize[0];
-\t\t\tfor (int x = 0; x < input->width; ++x)
-\t\t\t\tdst[x] = (uint8_t)(src[x] >> 8);
-\t\t}
+		for (int y = 0; y < input->height; ++y) {
+			const uint16_t *src = (const uint16_t *)(input->data[0] + (size_t)y * input->linesize[0]);
+			uint8_t *dst = r->eight_bit_frame->data[0] + (size_t)y * r->eight_bit_frame->linesize[0];
+			for (int x = 0; x < input->width; ++x)
+				dst[x] = (uint8_t)(src[x] >> 8);
+		}
 
-\t\tconst int chroma_height = input->height / 2;
-\t\tconst int chroma_width = input->width / 2;
-\t\tif (input_format == AV_PIX_FMT_P010LE) {
-\t\t\tfor (int y = 0; y < chroma_height; ++y) {
-\t\t\t\tconst uint16_t *src = (const uint16_t *)(input->data[1] + (size_t)y * input->linesize[1]);
-\t\t\t\tuint8_t *dst_u = r->eight_bit_frame->data[1] + (size_t)y * r->eight_bit_frame->linesize[1];
-\t\t\t\tuint8_t *dst_v = r->eight_bit_frame->data[2] + (size_t)y * r->eight_bit_frame->linesize[2];
-\t\t\t\tfor (int x = 0; x < chroma_width; ++x) {
-\t\t\t\t\tdst_u[x] = (uint8_t)(src[2 * x] >> 8);
-\t\t\t\t\tdst_v[x] = (uint8_t)(src[2 * x + 1] >> 8);
-\t\t\t\t}
-\t\t\t}
-\t\t} else {
-\t\t\tfor (int p = 0; p < 2; ++p) {
-\t\t\t\tfor (int y = 0; y < chroma_height; ++y) {
-\t\t\t\t\tconst uint16_t *src = (const uint16_t *)(input->data[1 + p] + (size_t)y * input->linesize[1 + p]);
-\t\t\t\t\tuint8_t *dst = r->eight_bit_frame->data[1 + p] + (size_t)y * r->eight_bit_frame->linesize[1 + p];
-\t\t\t\t\tfor (int x = 0; x < chroma_width; ++x)
-\t\t\t\t\t\tdst[x] = (uint8_t)(src[x] >> 8);
-\t\t\t\t}
-\t\t\t}
-\t\t}
-\t\t*output = r->eight_bit_frame;
-\t\treturn true;
-\t}
+		const int chroma_height = input->height / 2;
+		const int chroma_width = input->width / 2;
+		if (input_format == AV_PIX_FMT_P010LE) {
+			for (int y = 0; y < chroma_height; ++y) {
+				const uint16_t *src = (const uint16_t *)(input->data[1] + (size_t)y * input->linesize[1]);
+				uint8_t *dst_u = r->eight_bit_frame->data[1] + (size_t)y * r->eight_bit_frame->linesize[1];
+				uint8_t *dst_v = r->eight_bit_frame->data[2] + (size_t)y * r->eight_bit_frame->linesize[2];
+				for (int x = 0; x < chroma_width; ++x) {
+					dst_u[x] = (uint8_t)(src[2 * x] >> 8);
+					dst_v[x] = (uint8_t)(src[2 * x + 1] >> 8);
+				}
+			}
+		} else {
+			for (int p = 0; p < 2; ++p) {
+				for (int y = 0; y < chroma_height; ++y) {
+					const uint16_t *src = (const uint16_t *)(input->data[1 + p] + (size_t)y * input->linesize[1 + p]);
+					uint8_t *dst = r->eight_bit_frame->data[1 + p] + (size_t)y * r->eight_bit_frame->linesize[1 + p];
+					for (int x = 0; x < chroma_width; ++x)
+						dst[x] = (uint8_t)(src[x] >> 8);
+				}
+			}
+		}
+		*output = r->eight_bit_frame;
+		return true;
+	}
 
-\tif (!sws_isSupportedInput(input_format) || !sws_isSupportedOutput(AV_PIX_FMT_YUV420P)) {
-\t\tobs_log(LOG_WARNING, "scrcpy-reader: cannot convert pixel format %s to 8-bit YUV420P",
-\t\t\tav_get_pix_fmt_name(input_format));
-\t\treturn false;
-\t}
+	if (!sws_isSupportedInput(input_format) || !sws_isSupportedOutput(AV_PIX_FMT_YUV420P)) {
+		obs_log(LOG_WARNING, "scrcpy-reader: cannot convert pixel format %s to 8-bit YUV420P",
+			av_get_pix_fmt_name(input_format));
+		return false;
+	}
 
-\tr->eight_bit_sws = sws_getCachedContext(r->eight_bit_sws, input->width, input->height, input_format,
-\t\t\t\t\tinput->width, input->height, AV_PIX_FMT_YUV420P,
-\t\t\t\t\tSWS_FAST_BILINEAR, NULL, NULL, NULL);
-\tif (!r->eight_bit_sws)
-\t\treturn false;
+	r->eight_bit_sws = sws_getCachedContext(r->eight_bit_sws, input->width, input->height, input_format,
+					input->width, input->height, AV_PIX_FMT_YUV420P,
+					SWS_FAST_BILINEAR, NULL, NULL, NULL);
+	if (!r->eight_bit_sws)
+		return false;
 
-\tconst int src_range = input->color_range == AVCOL_RANGE_JPEG ? 1 : 0;
-\tconst int colorspace = sws_colorspace_for_frame(input);
-\tconst int *coefficients = sws_getCoefficients(colorspace);
-\tif (sws_setColorspaceDetails(r->eight_bit_sws, coefficients, src_range, coefficients, src_range, 0, 1 << 16,
-\t\t\t\t     1 << 16) < 0)
-\t\treturn false;
+	const int src_range = input->color_range == AVCOL_RANGE_JPEG ? 1 : 0;
+	const int colorspace = sws_colorspace_for_frame(input);
+	const int *coefficients = sws_getCoefficients(colorspace);
+	if (sws_setColorspaceDetails(r->eight_bit_sws, coefficients, src_range, coefficients, src_range, 0, 1 << 16,
+				     1 << 16) < 0)
+		return false;
 
-\tif (!prepare_reusable_frame(r->eight_bit_frame, AV_PIX_FMT_YUV420P, input->width, input->height))
-\t\treturn false;
-\tcopy_frame_props_reusable(r->eight_bit_frame, input);
-\tif (sws_scale(r->eight_bit_sws, (const uint8_t *const *)input->data, input->linesize, 0, input->height,
-\t\t\t      r->eight_bit_frame->data, r->eight_bit_frame->linesize) <= 0)
-\t\treturn false;
+	if (!prepare_reusable_frame(r->eight_bit_frame, AV_PIX_FMT_YUV420P, input->width, input->height))
+		return false;
+	copy_frame_props_reusable(r->eight_bit_frame, input);
+	if (sws_scale(r->eight_bit_sws, (const uint8_t *const *)input->data, input->linesize, 0, input->height,
+			      r->eight_bit_frame->data, r->eight_bit_frame->linesize) <= 0)
+		return false;
 
-\t*output = r->eight_bit_frame;
-\treturn true;
+	*output = r->eight_bit_frame;
+	return true;
 }
 
 static bool convert_frame_to_8bit(struct scrcpy_reader *r, AVFrame *input, AVFrame **output)
