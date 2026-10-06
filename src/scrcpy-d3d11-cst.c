@@ -42,7 +42,6 @@ struct d3d11_cst_params {
 	uint32_t srcPrimaries;
 	uint32_t targetPrimaries;
 	uint32_t srcSlice;
-	uint32_t src10bit;
 	uint32_t width;
 	uint32_t height;
 	uint32_t reserved0;
@@ -508,7 +507,7 @@ static bool update_params(struct scrcpy_d3d11_cst *cst, const struct gpu_profile
 	params->srcPrimaries = source->primaries;
 	params->targetPrimaries = target->primaries;
 	params->srcSlice = (UINT)(uintptr_t)input->data[1];
-	params->src10bit = cst->input_10bit ? 1U : 0U;
+	params->reserved0 = cst->input_10bit ? 1U : 0U;
 	params->width = (UINT)input->width;
 	params->height = (UINT)input->height;
 	params->srcFullRange = input_range == AVCOL_RANGE_JPEG ? 1.0f : 0.0f;
