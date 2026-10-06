@@ -734,7 +734,8 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 		/* Keep the D3D11 frame on the GPU while converting P010 -> NV12. */
 		AVFrame *converted = NULL;
 		if (!convert_frame_to_8bit(r, f, &converted)) {
-			obs_log(LOG_WARNING, "scrcpy-reader: GPU 8-bit output conversion failed for pixel format %d", f->format);
+			obs_log(LOG_WARNING, "scrcpy-reader: GPU 8-bit output conversion failed for pixel format %d",
+				f->format);
 			return;
 		}
 		out = converted;
@@ -756,8 +757,9 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 		if (r->force_8bit_output) {
 			AVFrame *converted = NULL;
 			if (!convert_frame_to_8bit(r, out, &converted)) {
-				obs_log(LOG_WARNING, "scrcpy-reader: 8-bit output conversion failed for pixel format %d",
-				out->format);
+				obs_log(LOG_WARNING,
+					"scrcpy-reader: 8-bit output conversion failed for pixel format %d",
+					out->format);
 				return;
 			}
 			out = converted;
@@ -791,7 +793,7 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	enum video_colorspace cs = obs_colorspace_from_av(out, false);
 	enum video_range_type range = out->color_range == AVCOL_RANGE_JPEG ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
 	if (!video_format_get_parameters_for_format(cs, range, fmt, obs_frame.color_matrix, obs_frame.color_range_min,
-										    obs_frame.color_range_max)) {
+									    obs_frame.color_range_max)) {
 		obs_log(LOG_WARNING, "scrcpy-reader: could not build color matrix for colorspace=%d format=%d range=%d",
 			out->colorspace, fmt, range);
 		return;
