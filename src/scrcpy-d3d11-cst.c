@@ -304,8 +304,8 @@ static bool create_output_resources(struct scrcpy_d3d11_cst *cst, bool output_10
 		}
 
 		uav.Format = uv_format;
-		if (FAILED(ID3D11Device_CreateUnorderedAccessView(cst->device, (ID3D11Resource *)slot->output_uv_texture,
-								  &uav, &slot->output_uv_uav))) {
+		if (FAILED(ID3D11Device_CreateUnorderedAccessView(
+			    cst->device, (ID3D11Resource *)slot->output_uv_texture, &uav, &slot->output_uv_uav))) {
 			log_hresult("CreateUnorderedAccessView(UV)", E_FAIL);
 			goto fail;
 		}
@@ -518,8 +518,8 @@ static enum staging_copy_result copy_plane_to_frame_try(struct scrcpy_d3d11_cst 
 	}
 
 	for (int y = 0; y < height; ++y)
-		memcpy(dst + (size_t)y * (size_t)dst_linesize, (const uint8_t *)mapped.pData + (size_t)y * mapped.RowPitch,
-		       row_bytes);
+		memcpy(dst + (size_t)y * (size_t)dst_linesize,
+		       (const uint8_t *)mapped.pData + (size_t)y * mapped.RowPitch, row_bytes);
 
 	ID3D11DeviceContext_Unmap(cst->context, (ID3D11Resource *)staging, 0);
 	return STAGING_COPY_DONE;
