@@ -34,6 +34,7 @@
 #endif
 
 #define D3D11_CST_LUT_SIZE 1025
+#define D3D11_CST_LUT_VECTORS 257
 
 struct d3d11_cst_params {
 	uint32_t srcTransfer;
@@ -48,8 +49,8 @@ struct d3d11_cst_params {
 	float peak;
 	float reserved1;
 	float reserved2;
-	float srcTransferLut[D3D11_CST_LUT_SIZE];
-	float targetTransferLut[D3D11_CST_LUT_SIZE];
+	float srcTransferLut[D3D11_CST_LUT_VECTORS][4];
+	float targetTransferLut[D3D11_CST_LUT_VECTORS][4];
 };
 
 struct gpu_profile {
@@ -96,6 +97,8 @@ struct scrcpy_d3d11_cst {
 	bool logical_target_8bit;
 	bool output_10bit;
 	bool disabled;
+	float src_transfer_lut[D3D11_CST_LUT_SIZE];
+	float target_transfer_lut[D3D11_CST_LUT_SIZE];
 	uint32_t cached_src_transfer;
 	uint32_t cached_target_transfer;
 	bool transfer_lut_valid;
@@ -510,12 +513,15 @@ static bool update_params(struct scrcpy_d3d11_cst *cst, const struct gpu_profile
 
 	if (!cst->transfer_lut_valid || cst->cached_src_transfer != source->transfer ||
 	    cst->cached_target_transfer != target->transfer) {
-		fill_transfer_lut(params->srcTransferLut, source->transfer, false);
-		fill_transfer_lut(params->targetTransferLut, target->transfer, true);
+		fill_transfer_lut(cst->src_transfer_lut, source->transfer, false);
+		fill_transfer_lut(cst->target_transfer_lut, target->transfer, true);
 		cst->cached_src_transfer = source->transfer;
 		cst->cached_target_transfer = target->transfer;
 		cst->transfer_lut_valid = true;
 	}
+
+	memcpy(params->srcTransferLut, cst->src_transfer_lut, sizeof(params->srcTransferLut));
+	memcpy(params->targetTransferLut, cst->target_transfer_lut, sizeof(params->targetTransferLut));
 
 	ID3D11DeviceContext_Unmap(cst->context, (ID3D11Resource *)cst->params_buffer, 0);
 	return true;
