@@ -112,6 +112,8 @@ Native 10-bit output is kept separate from the 10-bit-to-8-bit path so HDR metad
 
 The project uses CMake and the same general OBS plugin build infrastructure as the original fork.
 
+Every push to master runs the Windows, macOS and Ubuntu build workflows.
+
 GitHub Actions currently build:
 
 - **Windows x64**
