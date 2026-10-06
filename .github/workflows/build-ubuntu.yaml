@@ -87,10 +87,9 @@ jobs:
           scrcpy_version="$(git -C scrcpy describe --tags --exact-match)"
           asset_name="scrcpy-linux-x86_64-$scrcpy_version.tar.gz"
 
-          gh release download "$scrcpy_version" \
-            --repo wtarit/scrcpy \
-            --pattern "$asset_name" \
-            --dir "$RUNNER_TEMP"
+          curl -L --fail --retry 3 \
+            "https://github.com/wtarit/scrcpy/releases/download/$scrcpy_version/$asset_name" \
+            -o "$RUNNER_TEMP/$asset_name"
 
           mkdir -p data/bin
           rm -rf "$RUNNER_TEMP/scrcpy-extracted"
