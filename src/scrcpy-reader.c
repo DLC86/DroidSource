@@ -634,10 +634,14 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	enum video_range_type source_range = resolve_color_range(f, color_range_override);
 	enum AVColorRange source_av_range = source_range == VIDEO_RANGE_FULL ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
 
-	if (hardware_path && cst_enabled && r->d3d11_cst) {
-		if (scrcpy_d3d11_cst_apply(r->d3d11_cst, f, r->cst_frame, source_av_range)) {
+\tif (hardware_path && cst_enabled && r->d3d11_cst) {
+		scrcpy_d3d11_cst_result cst_result =
+			scrcpy_d3d11_cst_apply(r->d3d11_cst, f, r->cst_frame, source_av_range);
+		if (cst_result == SCRCPY_D3D11_CST_FRAME) {
 			out = r->cst_frame;
 			gpu_cst = true;
+		} else if (cst_result == SCRCPY_D3D11_CST_NO_FRAME) {
+			return;
 		}
 	}
 

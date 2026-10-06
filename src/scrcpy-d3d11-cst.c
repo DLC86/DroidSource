@@ -57,6 +57,19 @@ struct gpu_profile {
 	enum AVColorTransferCharacteristic av_trc;
 };
 
+#define D3D11_CST_READBACK_SLOTS 3
+
+struct d3d11_cst_readback_slot {
+	ID3D11Texture2D *output_y_texture;
+	ID3D11Texture2D *output_uv_texture;
+	ID3D11UnorderedAccessView *output_y_uav;
+	ID3D11UnorderedAccessView *output_uv_uav;
+	ID3D11Texture2D *staging_y_texture;
+	ID3D11Texture2D *staging_uv_texture;
+	int64_t pts;
+	bool pending;
+};
+
 struct scrcpy_d3d11_cst {
 	AVBufferRef *hw_device_ref;
 	ID3D11Device *device;
@@ -69,12 +82,7 @@ struct scrcpy_d3d11_cst {
 	ID3D11ShaderResourceView *input_y_srv;
 	ID3D11ShaderResourceView *input_uv_srv;
 
-	ID3D11Texture2D *output_y_texture;
-	ID3D11Texture2D *output_uv_texture;
-	ID3D11UnorderedAccessView *output_y_uav;
-	ID3D11UnorderedAccessView *output_uv_uav;
-	ID3D11Texture2D *staging_y_texture;
-	ID3D11Texture2D *staging_uv_texture;
+	struct d3d11_cst_readback_slot slots[D3D11_CST_READBACK_SLOTS];
 
 	int source_profile;
 	int target_profile;
@@ -226,12 +234,17 @@ static void release_input_views(struct scrcpy_d3d11_cst *cst)
 
 static void release_output_resources(struct scrcpy_d3d11_cst *cst)
 {
-	SAFE_RELEASE(cst->output_y_uav);
-	SAFE_RELEASE(cst->output_uv_uav);
-	SAFE_RELEASE(cst->output_y_texture);
-	SAFE_RELEASE(cst->output_uv_texture);
-	SAFE_RELEASE(cst->staging_y_texture);
-	SAFE_RELEASE(cst->staging_uv_texture);
+	for (int i = 0; i < D3D11_CST_READBACK_SLOTS; ++i) {
+		struct d3d11_cst_readback_slot *slot = &cst->slots[i];
+		SAFE_RELEASE(slot->output_y_uav);
+		SAFE_RELEASE(slot->output_uv_uav);
+		SAFE_RELEASE(slot->output_y_texture);
+		SAFE_RELEASE(slot->output_uv_texture);
+		SAFE_RELEASE(slot->staging_y_texture);
+		SAFE_RELEASE(slot->staging_uv_texture);
+		slot->pts = AV_NOPTS_VALUE;
+		slot->pending = false;
+	}
 	cst->width = 0;
 	cst->height = 0;
 }
@@ -264,45 +277,49 @@ static bool create_output_resources(struct scrcpy_d3d11_cst *cst, bool output_10
 {
 	const DXGI_FORMAT y_format = output_10bit ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R8_UINT;
 	const DXGI_FORMAT uv_format = output_10bit ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R8G8_UINT;
-	HRESULT hr;
-	D3D11_UNORDERED_ACCESS_VIEW_DESC uav = {0};
 
 	release_output_resources(cst);
 
 	if (cst->width <= 0 || cst->height <= 0 || (cst->width & 1) || (cst->height & 1))
 		return false;
 
-	if (!create_2d_texture(cst, (UINT)cst->width, (UINT)cst->height, y_format, D3D11_BIND_UNORDERED_ACCESS,
-			       D3D11_USAGE_DEFAULT, 0, &cst->output_y_texture))
-		goto fail;
-	if (!create_2d_texture(cst, (UINT)(cst->width / 2), (UINT)(cst->height / 2), uv_format,
-			       D3D11_BIND_UNORDERED_ACCESS, D3D11_USAGE_DEFAULT, 0, &cst->output_uv_texture))
-		goto fail;
+	for (int i = 0; i < D3D11_CST_READBACK_SLOTS; ++i) {
+		struct d3d11_cst_readback_slot *slot = &cst->slots[i];
+		D3D11_UNORDERED_ACCESS_VIEW_DESC uav = {0};
 
-	uav.Format = y_format;
-	uav.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
-	uav.Texture2D.MipSlice = 0;
-	ID3D11Resource *output_y_resource = (ID3D11Resource *)cst->output_y_texture;
-	hr = ID3D11Device_CreateUnorderedAccessView(cst->device, output_y_resource, &uav, &cst->output_y_uav);
-	if (FAILED(hr)) {
-		log_hresult("CreateUnorderedAccessView(Y)", hr);
-		goto fail;
+		if (!create_2d_texture(cst, (UINT)cst->width, (UINT)cst->height, y_format, D3D11_BIND_UNORDERED_ACCESS,
+				       D3D11_USAGE_DEFAULT, 0, &slot->output_y_texture))
+			goto fail;
+		if (!create_2d_texture(cst, (UINT)(cst->width / 2), (UINT)(cst->height / 2), uv_format,
+				       D3D11_BIND_UNORDERED_ACCESS, D3D11_USAGE_DEFAULT, 0, &slot->output_uv_texture))
+			goto fail;
+
+		uav.Format = y_format;
+		uav.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+		uav.Texture2D.MipSlice = 0;
+		if (FAILED(ID3D11Device_CreateUnorderedAccessView(
+			    cst->device, (ID3D11Resource *)slot->output_y_texture, &uav, &slot->output_y_uav))) {
+			log_hresult("CreateUnorderedAccessView(Y)", E_FAIL);
+			goto fail;
+		}
+
+		uav.Format = uv_format;
+		if (FAILED(ID3D11Device_CreateUnorderedAccessView(
+			    cst->device, (ID3D11Resource *)slot->output_uv_texture, &uav, &slot->output_uv_uav))) {
+			log_hresult("CreateUnorderedAccessView(UV)", E_FAIL);
+			goto fail;
+		}
+
+		if (!create_2d_texture(cst, (UINT)cst->width, (UINT)cst->height, y_format, 0, D3D11_USAGE_STAGING,
+				       D3D11_CPU_ACCESS_READ, &slot->staging_y_texture))
+			goto fail;
+		if (!create_2d_texture(cst, (UINT)(cst->width / 2), (UINT)(cst->height / 2), uv_format, 0,
+				       D3D11_USAGE_STAGING, D3D11_CPU_ACCESS_READ, &slot->staging_uv_texture))
+			goto fail;
+
+		slot->pts = AV_NOPTS_VALUE;
+		slot->pending = false;
 	}
-
-	uav.Format = uv_format;
-	ID3D11Resource *output_uv_resource = (ID3D11Resource *)cst->output_uv_texture;
-	hr = ID3D11Device_CreateUnorderedAccessView(cst->device, output_uv_resource, &uav, &cst->output_uv_uav);
-	if (FAILED(hr)) {
-		log_hresult("CreateUnorderedAccessView(UV)", hr);
-		goto fail;
-	}
-
-	if (!create_2d_texture(cst, (UINT)cst->width, (UINT)cst->height, y_format, 0, D3D11_USAGE_STAGING,
-			       D3D11_CPU_ACCESS_READ, &cst->staging_y_texture))
-		goto fail;
-	if (!create_2d_texture(cst, (UINT)(cst->width / 2), (UINT)(cst->height / 2), uv_format, 0, D3D11_USAGE_STAGING,
-			       D3D11_CPU_ACCESS_READ, &cst->staging_uv_texture))
-		goto fail;
 
 	cst->output_10bit = output_10bit;
 	return true;
@@ -373,14 +390,14 @@ static bool ensure_resources(struct scrcpy_d3d11_cst *cst, const AVFrame *input)
 	}
 
 	output_10bit = !cst->logical_target_8bit;
-	if (cst->output_y_texture &&
+	if (cst->slots[0].output_y_texture &&
 	    (cst->width != input->width || cst->height != input->height || cst->output_10bit != output_10bit))
 		release_output_resources(cst);
 
 	cst->width = input->width;
 	cst->height = input->height;
 
-	if (!cst->output_y_texture && !create_output_resources(cst, output_10bit))
+	if (!cst->slots[0].output_y_texture && !create_output_resources(cst, output_10bit))
 		return false;
 
 	if (cst->input_texture != texture || !cst->input_y_srv || !cst->input_uv_srv) {
@@ -481,43 +498,60 @@ static bool compile_shader(ID3D11Device *device, const char *source_code, bool o
 	return true;
 }
 
-static bool copy_plane_to_frame(struct scrcpy_d3d11_cst *cst, ID3D11Texture2D *staging, uint8_t *dst, int dst_linesize,
-				int height, size_t row_bytes)
+enum staging_copy_result {
+	STAGING_COPY_ERROR = -1,
+	STAGING_COPY_NOT_READY = 0,
+	STAGING_COPY_DONE = 1,
+};
+
+static enum staging_copy_result copy_plane_to_frame_try(struct scrcpy_d3d11_cst *cst,
+							 ID3D11Texture2D *staging, uint8_t *dst, int dst_linesize,
+							 int height, size_t row_bytes)
 {
 	D3D11_MAPPED_SUBRESOURCE mapped = {0};
-	HRESULT hr = ID3D11DeviceContext_Map(cst->context, (ID3D11Resource *)staging, 0, D3D11_MAP_READ, 0, &mapped);
+	HRESULT hr = ID3D11DeviceContext_Map(cst->context, (ID3D11Resource *)staging, 0, D3D11_MAP_READ,
+					     D3D11_MAP_FLAG_DO_NOT_WAIT, &mapped);
+	if (hr == DXGI_ERROR_WAS_STILL_DRAWING)
+		return STAGING_COPY_NOT_READY;
 	if (FAILED(hr)) {
 		log_hresult("Map(staging)", hr);
-		return false;
+		return STAGING_COPY_ERROR;
 	}
 
 	for (int y = 0; y < height; ++y)
-		memcpy(dst + (size_t)y * (size_t)dst_linesize,
-		       (const uint8_t *)mapped.pData + (size_t)y * mapped.RowPitch, row_bytes);
+		memcpy(dst + (size_t)y * (size_t)dst_linesize, (const uint8_t *)mapped.pData + (size_t)y * mapped.RowPitch,
+		       row_bytes);
 
 	ID3D11DeviceContext_Unmap(cst->context, (ID3D11Resource *)staging, 0);
-	return true;
+	return STAGING_COPY_DONE;
 }
 
-static bool copy_staging_to_frame(struct scrcpy_d3d11_cst *cst, const AVFrame *input, AVFrame *output)
+static enum staging_copy_result copy_staging_to_frame(struct scrcpy_d3d11_cst *cst,
+							 struct d3d11_cst_readback_slot *slot, AVFrame *output)
 {
 	const enum AVPixelFormat output_format = cst->output_10bit ? AV_PIX_FMT_P010 : AV_PIX_FMT_NV12;
-	const size_t row_bytes = (size_t)input->width * (cst->output_10bit ? 2U : 1U);
+	const size_t row_bytes = (size_t)cst->width * (cst->output_10bit ? 2U : 1U);
+	enum staging_copy_result result;
 
 	av_frame_unref(output);
 	output->format = output_format;
-	output->width = input->width;
-	output->height = input->height;
-	if (av_frame_copy_props(output, input) < 0)
-		return false;
+	output->width = cst->width;
+	output->height = cst->height;
+	output->pts = slot->pts;
 	if (av_frame_get_buffer(output, 32) < 0)
-		return false;
+		return STAGING_COPY_ERROR;
 
-	if (!copy_plane_to_frame(cst, cst->staging_y_texture, output->data[0], output->linesize[0], input->height,
-				 row_bytes))
-		return false;
-	return copy_plane_to_frame(cst, cst->staging_uv_texture, output->data[1], output->linesize[1],
-				   input->height / 2, row_bytes);
+	result = copy_plane_to_frame_try(cst, slot->staging_y_texture, output->data[0], output->linesize[0], cst->height,
+					 row_bytes);
+	if (result != STAGING_COPY_DONE)
+		return result;
+
+	result = copy_plane_to_frame_try(cst, slot->staging_uv_texture, output->data[1], output->linesize[1],
+					 cst->height / 2, row_bytes);
+	if (result != STAGING_COPY_DONE)
+		return result;
+
+	return STAGING_COPY_DONE;
 }
 
 scrcpy_d3d11_cst_t *scrcpy_d3d11_cst_create(AVBufferRef *hw_device_ctx, int source_profile, int target_profile)
@@ -563,11 +597,12 @@ scrcpy_d3d11_cst_t *scrcpy_d3d11_cst_create(AVBufferRef *hw_device_ctx, int sour
 	return cst;
 }
 
-bool scrcpy_d3d11_cst_apply(scrcpy_d3d11_cst_t *cst, const AVFrame *input, AVFrame *output,
-			    enum AVColorRange input_range)
+enum scrcpy_d3d11_cst_result scrcpy_d3d11_cst_apply(scrcpy_d3d11_cst_t *cst, const AVFrame *input, AVFrame *output,
+						      enum AVColorRange input_range)
 {
 	struct gpu_profile source;
 	struct gpu_profile target;
+	struct d3d11_cst_readback_slot *submit_slot = NULL;
 	ID3D11UnorderedAccessView *uavs[2];
 	ID3D11ShaderResourceView *srvs[2];
 	ID3D11UnorderedAccessView *null_uavs[2] = {NULL, NULL};
@@ -575,9 +610,10 @@ bool scrcpy_d3d11_cst_apply(scrcpy_d3d11_cst_t *cst, const AVFrame *input, AVFra
 	ID3D11Buffer *null_buffer = NULL;
 	ID3D11Buffer *cbuffers[1];
 	ID3D11ComputeShader *shader;
+	int completed = 0;
 
 	if (!cst || cst->disabled || !input || !output)
-		return false;
+		return SCRCPY_D3D11_CST_ERROR;
 
 	if (!profile_from_frame(cst->source_profile, input, &source) ||
 	    !profile_from_frame(cst->target_profile, NULL, &target))
@@ -586,13 +622,50 @@ bool scrcpy_d3d11_cst_apply(scrcpy_d3d11_cst_t *cst, const AVFrame *input, AVFra
 	if (!ensure_resources(cst, input))
 		goto fail;
 
+	/*
+	 * A blocking Map immediately after CopyResource serialized the entire
+	 * GPU pipeline with the decoder thread. Keep multiple readback slots in
+	 * flight and poll staging resources without waiting.
+	 */
+	for (int i = 0; i < D3D11_CST_READBACK_SLOTS; ++i) {
+		struct d3d11_cst_readback_slot *slot = &cst->slots[i];
+		if (!slot->pending)
+			continue;
+
+		enum staging_copy_result result = copy_staging_to_frame(cst, slot, output);
+		if (result == STAGING_COPY_DONE) {
+			slot->pending = false;
+			completed = 1;
+			break;
+		}
+		if (result == STAGING_COPY_ERROR)
+			goto fail;
+	}
+
+	if (completed) {
+		output->color_primaries = target.av_primaries;
+		output->colorspace = target.av_space;
+		output->color_trc = target.av_trc;
+		output->color_range = AVCOL_RANGE_JPEG;
+	}
+
+	for (int i = 0; i < D3D11_CST_READBACK_SLOTS; ++i) {
+		if (!cst->slots[i].pending) {
+			submit_slot = &cst->slots[i];
+			break;
+		}
+	}
+
+	if (!submit_slot)
+		return completed ? SCRCPY_D3D11_CST_FRAME : SCRCPY_D3D11_CST_NO_FRAME;
+
 	if (!update_params(cst, &source, &target, input, input_range))
 		goto fail;
 
 	srvs[0] = cst->input_y_srv;
 	srvs[1] = cst->input_uv_srv;
-	uavs[0] = cst->output_y_uav;
-	uavs[1] = cst->output_uv_uav;
+	uavs[0] = submit_slot->output_y_uav;
+	uavs[1] = submit_slot->output_uv_uav;
 	cbuffers[0] = cst->params_buffer;
 	shader = cst->output_10bit ? cst->shader_10bit : cst->shader_8bit;
 
@@ -608,26 +681,22 @@ bool scrcpy_d3d11_cst_apply(scrcpy_d3d11_cst_t *cst, const AVFrame *input, AVFra
 	ID3D11DeviceContext_CSSetConstantBuffers(cst->context, 0, 1, &null_buffer);
 	ID3D11DeviceContext_CSSetShader(cst->context, NULL, NULL, 0);
 
-	ID3D11DeviceContext_CopyResource(cst->context, (ID3D11Resource *)cst->staging_y_texture,
-					 (ID3D11Resource *)cst->output_y_texture);
-	ID3D11DeviceContext_CopyResource(cst->context, (ID3D11Resource *)cst->staging_uv_texture,
-					 (ID3D11Resource *)cst->output_uv_texture);
+	ID3D11DeviceContext_CopyResource(cst->context, (ID3D11Resource *)submit_slot->staging_y_texture,
+					 (ID3D11Resource *)submit_slot->output_y_texture);
+	ID3D11DeviceContext_CopyResource(cst->context, (ID3D11Resource *)submit_slot->staging_uv_texture,
+					 (ID3D11Resource *)submit_slot->output_uv_texture);
 
-	if (!copy_staging_to_frame(cst, input, output))
-		goto fail;
+	submit_slot->pts = input->pts;
+	submit_slot->pending = true;
 
-	output->color_primaries = target.av_primaries;
-	output->colorspace = target.av_space;
-	output->color_trc = target.av_trc;
-	output->color_range = AVCOL_RANGE_JPEG;
-	return true;
+	return completed ? SCRCPY_D3D11_CST_FRAME : SCRCPY_D3D11_CST_NO_FRAME;
 
 fail:
 	if (cst) {
 		cst->disabled = true;
 		obs_log(LOG_WARNING, "scrcpy-d3d11-cst: GPU path disabled; reverting to CPU CST");
 	}
-	return false;
+	return SCRCPY_D3D11_CST_ERROR;
 }
 
 void scrcpy_d3d11_cst_destroy(scrcpy_d3d11_cst_t *cst)
