@@ -72,6 +72,16 @@
 #define CAMERA_DYNAMIC_RANGE_HDR10 2
 #define CAMERA_DYNAMIC_RANGE_HDR10_PLUS 3
 
+static bool camera_bit_depth_is_10bit(int bit_depth)
+{
+	return bit_depth == 1 || bit_depth == 2;
+}
+
+static bool camera_bit_depth_needs_8bit_output(int bit_depth)
+{
+	return bit_depth == 2;
+}
+
 static int camera_gamma_to_dynamic_range(int gamma, bool ten_bit)
 {
 	if (!ten_bit)
@@ -232,7 +242,7 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 	if (ctx->max_size > 0)
 		snprintf(max_size_arg, sizeof(max_size_arg), "--max-size=%d", ctx->max_size);
 	char codec_arg[64] = {0};
-	const char *effective_codec = ctx->camera_bit_depth != 0 ? "h265" : ctx->codec;
+	const char *effective_codec = camera_bit_depth_is_10bit(ctx->camera_bit_depth) ? "h265" : ctx->codec;
 	if (effective_codec && *effective_codec)
 		snprintf(codec_arg, sizeof(codec_arg), "--video-codec=%s", effective_codec);
 	char source_arg[64] = {0};
@@ -258,7 +268,7 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 			startup_color_space = 0;
 			startup_gamma = 0;
 		}
-		if (ctx->camera_bit_depth != 0 &&
+		if (camera_bit_depth_is_10bit(ctx->camera_bit_depth) &&
 		    (startup_gamma < CAMERA_GAMMA_HLG || startup_gamma > CAMERA_GAMMA_HDR10_PLUS)) {
 			startup_color_space = CAMERA_COLOR_SPACE_REC2020;
 			startup_gamma = CAMERA_GAMMA_HLG;
@@ -268,8 +278,8 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 			"--video-codec-options=__scrcpy_obs_camera_control_port:int=%u,__scrcpy_obs_camera_iso:int=%d,__scrcpy_obs_camera_shutter_us:int=%d,__scrcpy_obs_camera_focus_distance:float=%.6f,__scrcpy_obs_camera_wb_kelvin:int=%d,__scrcpy_obs_camera_wb_lock:int=%d,__scrcpy_obs_camera_color_space:int=%d,__scrcpy_obs_camera_gamma:int=%d,color-range:int=%d%s",
 			(unsigned)control_port, ctx->camera_iso, ctx->camera_shutter_us, ctx->camera_focus_distance,
 			ctx->camera_wb_kelvin, ctx->camera_wb_lock ? 1 : 0, startup_color_space, startup_gamma,
-			ctx->camera_bit_depth != 0 ? 2 : 1,
-			ctx->camera_bit_depth != 0 ? ",__scrcpy_obs_camera_10bit:int=1" : "");
+			camera_bit_depth_is_10bit(ctx->camera_bit_depth) ? 2 : 1,
+			camera_bit_depth_is_10bit(ctx->camera_bit_depth) ? ",__scrcpy_obs_camera_10bit:int=1" : "");
 	}
 
 	char serial_arg[128] = {0};
@@ -316,6 +326,9 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 		log_path = lp.array;
 	}
 
+	obs_log(LOG_INFO, "scrcpy-source: camera pipeline: bit-depth=%d, 10-bit-camera=%s, 10-bit-to-8-bit=%s, color-profile=%d",
+		ctx->camera_bit_depth, camera_bit_depth_is_10bit(ctx->camera_bit_depth) ? "yes" : "no",
+		camera_bit_depth_needs_8bit_output(ctx->camera_bit_depth) ? "yes" : "no", ctx->camera_color_profile);
 	obs_log(LOG_INFO, "scrcpy-source: spawning %s (video-port=%u, control-port=%u, log=%s)", exe_path,
 		(unsigned)port, (unsigned)control_port, log_path ? log_path : "(none)");
 
@@ -328,8 +341,8 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 
 	const bool camera_source = ctx->video_source && strcmp(ctx->video_source, "camera") == 0;
 	ctx->reader = scrcpy_reader_create(ctx->source, port, ctx->hardware_decoding, ctx->video_buffer_ms,
-					   ctx->camera_color_range, camera_source && ctx->camera_bit_depth != 1,
-					   camera_source && ctx->camera_bit_depth == 2);
+					   ctx->camera_color_range, camera_source && camera_bit_depth_is_10bit(ctx->camera_bit_depth),
+					   camera_source && camera_bit_depth_needs_8bit_output(ctx->camera_bit_depth));
 
 	if (ctx->video_source && strcmp(ctx->video_source, "camera") == 0 && control_port != 0 && ctx->serial &&
 	    *ctx->serial) {
@@ -350,8 +363,8 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 			if (!scrcpy_camera_control_apply(
 				    ctx->camera_control, ctx->camera_zoom, ctx->camera_torch, ctx->camera_iso,
 				    ctx->camera_shutter_us, ctx->camera_focus_distance, ctx->camera_wb_kelvin,
-				    ctx->camera_wb_lock, startup_color_space, startup_gamma, ctx->camera_bit_depth != 0,
-				    camera_gamma_to_dynamic_range(startup_gamma, ctx->camera_bit_depth != 0))) {
+				    ctx->camera_wb_lock, startup_color_space, startup_gamma, camera_bit_depth_is_10bit(ctx->camera_bit_depth),
+				    camera_gamma_to_dynamic_range(startup_gamma, camera_bit_depth_is_10bit(ctx->camera_bit_depth)))) {
 				obs_log(LOG_WARNING, "scrcpy-source: camera control connection not ready");
 			}
 		}
@@ -584,7 +597,7 @@ static void src_update(void *data, obs_data_t *settings)
 		(void)scrcpy_camera_control_apply(
 			ctx->camera_control, ctx->camera_zoom, ctx->camera_torch, ctx->camera_iso,
 			ctx->camera_shutter_us, ctx->camera_focus_distance, ctx->camera_wb_kelvin, ctx->camera_wb_lock,
-			runtime_color_space, runtime_gamma, ctx->camera_bit_depth != 0,
+			runtime_color_space, runtime_gamma, camera_bit_depth_is_10bit(ctx->camera_bit_depth),
 			camera_gamma_to_dynamic_range(runtime_gamma, ctx->camera_bit_depth != 0));
 	}
 
