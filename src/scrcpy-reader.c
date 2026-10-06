@@ -232,13 +232,15 @@ static enum AVPixelFormat get_hw_format(AVCodecContext *codec_ctx, const enum AV
 }
 #endif
 
-static enum video_colorspace obs_colorspace_from_av(const AVFrame *frame, bool force_sdr_hlg)
+static enum video_colorspace obs_colorspace_from_av(const AVFrame *frame, bool native_10bit_hdr)
 {
-	if (force_sdr_hlg) {
-		if (frame->colorspace == AVCOL_SPC_BT2020_NCL || frame->colorspace == AVCOL_SPC_BT2020_CL)
-			return VIDEO_CS_709;
-		return VIDEO_CS_SRGB;
-	}
+	/*
+	 * 8-bit camera output is intentionally presented to OBS as SDR, even when
+	 * the Camera2 capture path used an HLG transfer internally. Only native
+	 * 10-bit output is allowed to advertise Rec.2100 HLG/PQ.
+	 */
+	if (!native_10bit_hdr)
+		return VIDEO_CS_709;
 
 	switch ((enum AVColorSpace)frame->colorspace) {
 	case AVCOL_SPC_SMPTE170M:
@@ -516,71 +518,72 @@ static bool convert_frame_to_8bit_cpu(struct scrcpy_reader *r, AVFrame *input, A
 {
 	const enum AVPixelFormat input_format = (enum AVPixelFormat)input->format;
 
-	if (input_format == AV_PIX_FMT_YUV420P || input_format == AV_PIX_FMT_NV12) {
+	if (input_format == AV_PIX_FMT_YUV420P || input_format == AV_PIX_FMT_NV12 ||
+	    input_format == AV_PIX_FMT_YUVJ420P) {
 		*output = input;
 		return true;
 	}
 
-	if (input_format == AV_PIX_FMT_P010LE || input_format == AV_PIX_FMT_YUV420P10LE) {
-		if (!prepare_reusable_frame(r->eight_bit_frame, AV_PIX_FMT_YUV420P, input->width, input->height))
-			return false;
-		copy_frame_props_reusable(r->eight_bit_frame, input);
+	if (input_format != AV_PIX_FMT_P010LE && input_format != AV_PIX_FMT_YUV420P10LE &&
+	    input_format != AV_PIX_FMT_P010BE && input_format != AV_PIX_FMT_YUV420P10BE) {
+		obs_log(LOG_WARNING, "scrcpy-reader: cannot reduce pixel format %s to 8-bit YUV420P",
+			av_get_pix_fmt_name(input_format));
+		return false;
+	}
 
-		/*
-		 * P010 stores the 10 significant bits in bits 15..6 of each
-		 * 16-bit word. YUV420P10LE stores them in bits 9..0.
-		 * A direct shift therefore has to differ between the two layouts.
-		 * This is intentionally a code-depth reduction only: no range
-		 * expansion/compression is performed, and the selected range
-		 * metadata is preserved for OBS.
-		 */
-		if (input_format == AV_PIX_FMT_P010LE) {
-			for (int y = 0; y < input->height; ++y) {
-				const uint16_t *src =
-					(const uint16_t *)(input->data[0] + (size_t)y * input->linesize[0]);
-				uint8_t *dst =
-					r->eight_bit_frame->data[0] + (size_t)y * r->eight_bit_frame->linesize[0];
-				for (int x = 0; x < input->width; ++x)
-					dst[x] = (uint8_t)((src[x] + 128U) >> 8);
-			}
+	if (!prepare_reusable_frame(r->eight_bit_frame, AV_PIX_FMT_YUV420P, input->width, input->height))
+		return false;
+	copy_frame_props_reusable(r->eight_bit_frame, input);
 
-			const int chroma_height = input->height / 2;
-			const int chroma_width = input->width / 2;
-			for (int y = 0; y < chroma_height; ++y) {
-				const uint16_t *src =
-					(const uint16_t *)(input->data[1] + (size_t)y * input->linesize[1]);
-				uint8_t *dst_u =
-					r->eight_bit_frame->data[1] + (size_t)y * r->eight_bit_frame->linesize[1];
-				uint8_t *dst_v =
-					r->eight_bit_frame->data[2] + (size_t)y * r->eight_bit_frame->linesize[2];
-				for (int x = 0; x < chroma_width; ++x) {
-					dst_u[x] = (uint8_t)((src[2 * x] + 128U) >> 8);
-					dst_v[x] = (uint8_t)((src[2 * x + 1] + 128U) >> 8);
-				}
-			}
-		} else {
-			for (int y = 0; y < input->height; ++y) {
-				const uint16_t *src =
-					(const uint16_t *)(input->data[0] + (size_t)y * input->linesize[0]);
-				uint8_t *dst =
-					r->eight_bit_frame->data[0] + (size_t)y * r->eight_bit_frame->linesize[0];
-				for (int x = 0; x < input->width; ++x)
-					dst[x] = (uint8_t)((src[x] + 2U) >> 2);
-			}
+	/*
+	 * P010 stores the 10 significant bits in bits 15..6. YUV420P10 stores
+	 * them in bits 9..0. We only discard the two least-significant bits;
+	 * there is deliberately no range conversion, matrix conversion,
+	 * transfer-function conversion, or tone mapping here.
+	 */
+	const bool p010 = input_format == AV_PIX_FMT_P010LE || input_format == AV_PIX_FMT_P010BE;
+	const bool big_endian = input_format == AV_PIX_FMT_P010BE || input_format == AV_PIX_FMT_YUV420P10BE;
 
-			const int chroma_height = input->height / 2;
-			const int chroma_width = input->width / 2;
-			for (int plane = 0; plane < 2; ++plane) {
-				for (int y = 0; y < chroma_height; ++y) {
-					const uint16_t *src =
-						(const uint16_t *)(input->data[1 + plane] +
-								   (size_t)y * input->linesize[1 + plane]);
-					uint8_t *dst = r->eight_bit_frame->data[1 + plane] +
-						       (size_t)y * r->eight_bit_frame->linesize[1 + plane];
-					for (int x = 0; x < chroma_width; ++x)
-						dst[x] = (uint8_t)((src[x] + 2U) >> 2);
-				}
+	for (int y = 0; y < input->height; ++y) {
+		const uint8_t *src_row = input->data[0] + (size_t)y * input->linesize[0];
+		uint8_t *dst =
+			r->eight_bit_frame->data[0] + (size_t)y * r->eight_bit_frame->linesize[0];
+		for (int x = 0; x < input->width; ++x) {
+			uint16_t sample;
+			memcpy(&sample, src_row + (size_t)x * 2, sizeof(sample));
+			if (big_endian)
+				sample = (uint16_t)((sample >> 8) | (sample << 8));
+			dst[x] = p010 ? (uint8_t)((sample + 128U) >> 8) : (uint8_t)((sample + 2U) >> 2);
+		}
+	}
+
+	const int chroma_height = input->height / 2;
+	const int chroma_width = input->width / 2;
+	for (int y = 0; y < chroma_height; ++y) {
+		const uint8_t *src_row = input->data[1] + (size_t)y * input->linesize[1];
+		uint8_t *dst_u =
+			r->eight_bit_frame->data[1] + (size_t)y * r->eight_bit_frame->linesize[1];
+		uint8_t *dst_v =
+			r->eight_bit_frame->data[2] + (size_t)y * r->eight_bit_frame->linesize[2];
+
+		for (int x = 0; x < chroma_width; ++x) {
+			uint16_t u;
+			uint16_t v;
+			if (p010) {
+				memcpy(&u, src_row + (size_t)(2 * x) * 2, sizeof(u));
+				memcpy(&v, src_row + (size_t)(2 * x + 1) * 2, sizeof(v));
+			} else {
+				const uint8_t *u_src = input->data[1] + (size_t)y * input->linesize[1];
+				const uint8_t *v_src = input->data[2] + (size_t)y * input->linesize[2];
+				memcpy(&u, u_src + (size_t)x * 2, sizeof(u));
+				memcpy(&v, v_src + (size_t)x * 2, sizeof(v));
 			}
+			if (big_endian) {
+				u = (uint16_t)((u >> 8) | (u << 8));
+				v = (uint16_t)((v >> 8) | (v << 8));
+			}
+			dst_u[x] = p010 ? (uint8_t)((u + 128U) >> 8) : (uint8_t)((u + 2U) >> 2);
+			dst_v[x] = p010 ? (uint8_t)((v + 128U) >> 8) : (uint8_t)((v + 2U) >> 2);
 		}
 	}
 
@@ -602,8 +605,11 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 	r->last_frame_ns = os_gettime_ns();
 	color_range_override = r->color_range_override;
 	pthread_mutex_unlock(&r->state_mutex);
+
 	enum video_range_type source_range = resolve_color_range(f, color_range_override);
-	enum AVColorRange source_av_range = source_range == VIDEO_RANGE_FULL ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
+	enum AVColorRange source_av_range =
+		source_range == VIDEO_RANGE_FULL ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
+
 	if (hardware_path) {
 		av_frame_unref(r->transfer_frame);
 		if (av_hwframe_transfer_data(r->transfer_frame, f, 0) < 0) {
@@ -616,29 +622,52 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 		}
 		out = r->transfer_frame;
 	}
+
 	out->color_range = source_av_range;
+
 	if (r->force_8bit_output) {
 		AVFrame *converted = NULL;
 		if (!convert_frame_to_8bit_cpu(r, out, &converted)) {
-			obs_log(LOG_WARNING, "scrcpy-reader: 8-bit output conversion failed for pixel format %d",
-				out->format);
+			obs_log(LOG_WARNING, "scrcpy-reader: 10-bit-to-8-bit conversion failed for pixel format %s",
+			av_get_pix_fmt_name((enum AVPixelFormat)out->format));
 			return;
 		}
 		out = converted;
 	}
-	/* 8-bit output must not retain HDR transfer metadata. Native 10-bit output
-	 * keeps the decoder's original color metadata unchanged. */
-	if (r->force_8bit_output) {
+
+	enum video_format fmt = av_to_obs_format((enum AVPixelFormat)out->format);
+	if (fmt == VIDEO_FORMAT_NONE) {
+		obs_log(LOG_WARNING, "scrcpy-reader: unsupported pix fmt %s",
+			av_get_pix_fmt_name((enum AVPixelFormat)out->format));
+		return;
+	}
+
+	/*
+	 * Native 10-bit is the only path that may advertise HDR to OBS.
+	 * Every 8-bit frame is explicitly SDR metadata, including an 8-bit HLG
+	 * camera profile and the 10-bit-to-8-bit reduction path.
+	 */
+	const bool native_10bit_output =
+		!r->force_8bit_output &&
+		(fmt == VIDEO_FORMAT_I010 || fmt == VIDEO_FORMAT_P010);
+
+	if (r->force_8bit_output || !native_10bit_output) {
 		out->colorspace = AVCOL_SPC_BT709;
 		out->color_primaries = AVCOL_PRI_BT709;
 		out->color_trc = AVCOL_TRC_BT709;
 	}
-	log_frame_color_info(r, out, hardware_path);
-	enum video_format fmt = av_to_obs_format((enum AVPixelFormat)out->format);
-	if (fmt == VIDEO_FORMAT_NONE) {
-		obs_log(LOG_WARNING, "scrcpy-reader: unsupported pix fmt %d", out->format);
-		return;
+
+	if (!r->logged_color_info) {
+		obs_log(LOG_INFO,
+			"scrcpy-reader: frame format decode=%s output=%s OBS=%d native-10bit=%s "
+			"colorspace=%d primaries=%d transfer=%d range=%d",
+			av_get_pix_fmt_name((enum AVPixelFormat)f->format),
+			av_get_pix_fmt_name((enum AVPixelFormat)out->format),
+			fmt, native_10bit_output ? "yes" : "no", out->colorspace,
+			out->color_primaries, out->color_trc, out->color_range);
+		r->logged_color_info = true;
 	}
+
 	struct obs_source_frame obs_frame = {0};
 	obs_frame.format = fmt;
 	obs_frame.width = (uint32_t)out->width;
@@ -647,20 +676,26 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 		obs_frame.data[i] = out->data[i];
 		obs_frame.linesize[i] = (uint32_t)out->linesize[i];
 	}
-	obs_frame.timestamp = out->pts == AV_NOPTS_VALUE ? (uint64_t)os_gettime_ns() : (uint64_t)out->pts * 1000ULL;
+
+	obs_frame.timestamp =
+		out->pts == AV_NOPTS_VALUE ? (uint64_t)os_gettime_ns() : (uint64_t)out->pts * 1000ULL;
 	obs_frame.timestamp += (uint64_t)r->video_buffer_ms * UINT64_C(1000000);
 	obs_frame.flip = false;
-	enum video_colorspace cs = obs_colorspace_from_av(out, false);
-	enum video_range_type range = out->color_range == AVCOL_RANGE_JPEG ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
+
+	enum video_colorspace cs = obs_colorspace_from_av(out, native_10bit_output);
+	enum video_range_type range =
+		out->color_range == AVCOL_RANGE_JPEG ? VIDEO_RANGE_FULL : VIDEO_RANGE_PARTIAL;
 	const bool color_params_ok = video_format_get_parameters_for_format(
 		cs, range, fmt, obs_frame.color_matrix, obs_frame.color_range_min, obs_frame.color_range_max);
 	if (!color_params_ok) {
-		obs_log(LOG_WARNING, "scrcpy-reader: could not build color matrix for colorspace=%d format=%d range=%d",
+		obs_log(LOG_WARNING,
+			"scrcpy-reader: could not build color matrix for colorspace=%d format=%d range=%d",
 			out->colorspace, fmt, range);
 		return;
 	}
+
 	obs_frame.full_range = range == VIDEO_RANGE_FULL;
-	obs_frame.trc = obs_trc_from_av(out, false);
+	obs_frame.trc = obs_trc_from_av(out, native_10bit_output);
 	obs_source_output_video(r->source, &obs_frame);
 }
 
