@@ -81,6 +81,7 @@ struct scrcpy_reader {
 	bool hardware_decoding; /* clang-format sync */
 	int video_buffer_ms;
 	int color_range_override;
+	bool force_sdr_output;
 	bool force_8bit_output;
 	bool logged_color_info;
 
@@ -626,8 +627,12 @@ static void emit_frame(struct scrcpy_reader *r, AVFrame *f)
 		}
 		out = converted;
 	}
-	/* 8-bit output must not retain HDR transfer metadata. */
-	if (r->force_8bit_output) {
+	/* Never advertise HDR to OBS when the selected output mode is 8-bit.
+	 * Bit depth and HDR transfer characteristics are independent in FFmpeg's
+	 * AVFrame metadata, so an 8-bit HLG-tagged frame can otherwise make OBS
+	 * treat the source as Rec.2100/HDR even though the actual OBS format is I420.
+	 * Native 10-bit output is the only mode allowed to keep HLG/PQ metadata. */
+	if (r->force_sdr_output) {
 		out->colorspace = AVCOL_SPC_BT709;
 		out->color_primaries = AVCOL_PRI_BT709;
 		out->color_trc = AVCOL_TRC_BT709;
@@ -797,7 +802,7 @@ done:
 }
 
 scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port, bool hardware_decoding, int video_buffer_ms,
-				      int color_range_override, bool force_8bit_output)
+				      int color_range_override, bool force_sdr_output, bool force_8bit_output)
 {
 	struct scrcpy_reader *r = bzalloc(sizeof(*r));
 	r->source = source;
@@ -806,6 +811,7 @@ scrcpy_reader_t *scrcpy_reader_create(obs_source_t *source, uint16_t port, bool 
 	r->hardware_decoding = hardware_decoding;
 	r->video_buffer_ms = video_buffer_ms > 0 ? video_buffer_ms : 0;
 	r->color_range_override = color_range_override;
+	r->force_sdr_output = force_sdr_output;
 	r->force_8bit_output = force_8bit_output;
 
 	r->hw_pix_fmt = AV_PIX_FMT_NONE;
