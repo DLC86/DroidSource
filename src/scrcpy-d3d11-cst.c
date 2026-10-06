@@ -297,15 +297,15 @@ static bool create_output_resources(struct scrcpy_d3d11_cst *cst, bool output_10
 		uav.Format = y_format;
 		uav.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
 		uav.Texture2D.MipSlice = 0;
-		if (FAILED(ID3D11Device_CreateUnorderedAccessView(
-			    cst->device, (ID3D11Resource *)slot->output_y_texture, &uav, &slot->output_y_uav))) {
+		if (FAILED(ID3D11Device_CreateUnorderedAccessView(cst->device, (ID3D11Resource *)slot->output_y_texture,
+								  &uav, &slot->output_y_uav))) {
 			log_hresult("CreateUnorderedAccessView(Y)", E_FAIL);
 			goto fail;
 		}
 
 		uav.Format = uv_format;
-		if (FAILED(ID3D11Device_CreateUnorderedAccessView(
-			    cst->device, (ID3D11Resource *)slot->output_uv_texture, &uav, &slot->output_uv_uav))) {
+		if (FAILED(ID3D11Device_CreateUnorderedAccessView(cst->device, (ID3D11Resource *)slot->output_uv_texture,
+								  &uav, &slot->output_uv_uav))) {
 			log_hresult("CreateUnorderedAccessView(UV)", E_FAIL);
 			goto fail;
 		}
@@ -504,9 +504,8 @@ enum staging_copy_result {
 	STAGING_COPY_DONE = 1,
 };
 
-static enum staging_copy_result copy_plane_to_frame_try(struct scrcpy_d3d11_cst *cst,
-							 ID3D11Texture2D *staging, uint8_t *dst, int dst_linesize,
-							 int height, size_t row_bytes)
+static enum staging_copy_result copy_plane_to_frame_try(struct scrcpy_d3d11_cst *cst, ID3D11Texture2D *staging,
+							uint8_t *dst, int dst_linesize, int height, size_t row_bytes)
 {
 	D3D11_MAPPED_SUBRESOURCE mapped = {0};
 	HRESULT hr = ID3D11DeviceContext_Map(cst->context, (ID3D11Resource *)staging, 0, D3D11_MAP_READ,
@@ -527,7 +526,7 @@ static enum staging_copy_result copy_plane_to_frame_try(struct scrcpy_d3d11_cst 
 }
 
 static enum staging_copy_result copy_staging_to_frame(struct scrcpy_d3d11_cst *cst,
-							 struct d3d11_cst_readback_slot *slot, AVFrame *output)
+						      struct d3d11_cst_readback_slot *slot, AVFrame *output)
 {
 	const enum AVPixelFormat output_format = cst->output_10bit ? AV_PIX_FMT_P010 : AV_PIX_FMT_NV12;
 	const size_t row_bytes = (size_t)cst->width * (cst->output_10bit ? 2U : 1U);
@@ -541,8 +540,8 @@ static enum staging_copy_result copy_staging_to_frame(struct scrcpy_d3d11_cst *c
 	if (av_frame_get_buffer(output, 32) < 0)
 		return STAGING_COPY_ERROR;
 
-	result = copy_plane_to_frame_try(cst, slot->staging_y_texture, output->data[0], output->linesize[0], cst->height,
-					 row_bytes);
+	result = copy_plane_to_frame_try(cst, slot->staging_y_texture, output->data[0], output->linesize[0],
+					 cst->height, row_bytes);
 	if (result != STAGING_COPY_DONE)
 		return result;
 
@@ -598,7 +597,7 @@ scrcpy_d3d11_cst_t *scrcpy_d3d11_cst_create(AVBufferRef *hw_device_ctx, int sour
 }
 
 enum scrcpy_d3d11_cst_result scrcpy_d3d11_cst_apply(scrcpy_d3d11_cst_t *cst, const AVFrame *input, AVFrame *output,
-						      enum AVColorRange input_range)
+						    enum AVColorRange input_range)
 {
 	struct gpu_profile source;
 	struct gpu_profile target;

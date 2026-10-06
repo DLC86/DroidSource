@@ -508,7 +508,8 @@ static bool open_decoder(struct scrcpy_reader *r, uint32_t codec_id, uint32_t wi
 				if (r->cst_target_profile != SCRCPY_CST_OFF) {
 					AVHWDeviceContext *av_device = (AVHWDeviceContext *)r->hw_device_ctx->data;
 					if (av_device && av_device->hwctx) {
-						AVD3D11VADeviceContext *d3d = (AVD3D11VADeviceContext *)av_device->hwctx;
+						AVD3D11VADeviceContext *d3d =
+							(AVD3D11VADeviceContext *)av_device->hwctx;
 						d3d->BindFlags |= D3D11_BIND_SHADER_RESOURCE;
 					}
 				}

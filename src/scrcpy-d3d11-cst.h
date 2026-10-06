@@ -34,7 +34,7 @@ static inline scrcpy_d3d11_cst_t *scrcpy_d3d11_cst_create(AVBufferRef *hw_device
 }
 
 static inline scrcpy_d3d11_cst_result scrcpy_d3d11_cst_apply(scrcpy_d3d11_cst_t *cst, const AVFrame *input,
-							    AVFrame *output, enum AVColorRange input_range)
+							     AVFrame *output, enum AVColorRange input_range)
 {
 	(void)cst;
 	(void)input;
