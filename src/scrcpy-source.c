@@ -614,12 +614,12 @@ static void src_get_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "camera_color_profile", CAMERA_COLOR_PROFILE_AUTO);
 	obs_data_set_default_int(settings, "camera_color_range", SCRCPY_COLOR_RANGE_AUTO);
 	obs_data_set_default_int(settings, "camera_bit_depth", 0);
-	obs_data_set_default_bool(settings, "portrait_mode", false);
+	obs_data_set_default_int(settings, "rotate", 0);
+	obs_data_set_default_bool(settings, "mirror", false);
 	obs_data_set_default_int(settings, "max_size", 0);
 	obs_data_set_default_int(settings, "bitrate_kbps", 8000);
 	obs_data_set_default_string(settings, "codec", "h264");
 	obs_data_set_default_bool(settings, "hardware_decoding", true);
-	obs_data_set_default_bool(settings, "flip_vertical", false);
 	obs_data_set_default_int(settings, "video_buffer_ms", 0);
 }
 
@@ -1739,25 +1739,25 @@ static obs_properties_t *src_get_properties(void *data)
 		obs_properties_add_bool(props, "camera_wb_lock", obs_module_text("CameraWhiteBalanceLock"));
 	obs_property_set_modified_callback(camera_wb_lock, camera_wb_lock_modified);
 
-	obs_property_t *camera_color_profile = obs_properties_add_list(props, "camera_color_profile",
-								       obs_module_text("CameraColorProfile"),
-								       OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
-	obs_property_list_add_int(camera_color_profile, "Camera default", CAMERA_COLOR_PROFILE_AUTO);
-
 	obs_property_t *camera_color_range = obs_properties_add_list(props, "camera_color_range",
-								     obs_module_text("CameraColorRange"),
-								     OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+									     obs_module_text("CameraColorRange"),
+									     OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(camera_color_range, "Auto", SCRCPY_COLOR_RANGE_AUTO);
 	obs_property_list_add_int(camera_color_range, "Limited", SCRCPY_COLOR_RANGE_LIMITED);
 	obs_property_list_add_int(camera_color_range, "Full", SCRCPY_COLOR_RANGE_FULL);
 
 	obs_property_t *camera_bit_depth = obs_properties_add_list(props, "camera_bit_depth",
-								      obs_module_text("CameraBitDepth"), OBS_COMBO_TYPE_LIST,
-								      OBS_COMBO_FORMAT_INT);
+									      obs_module_text("CameraBitDepth"), OBS_COMBO_TYPE_LIST,
+									      OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(camera_bit_depth, "8-bit", 0);
 	obs_property_list_add_int(camera_bit_depth, "10-bit", 1);
 	obs_property_list_add_int(camera_bit_depth, "10-bit to 8-bit", 2);
 	obs_property_set_modified_callback(camera_bit_depth, camera_bit_depth_modified);
+
+	obs_property_t *camera_color_profile = obs_properties_add_list(props, "camera_color_profile",
+									       obs_module_text("CameraColorProfile"),
+									       OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(camera_color_profile, "Camera default", CAMERA_COLOR_PROFILE_AUTO);
 
 	obs_property_t *rotate = obs_properties_add_list(props, "rotate", obs_module_text("Rotate"),
 					      OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
