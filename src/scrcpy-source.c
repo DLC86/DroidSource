@@ -268,7 +268,7 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 			startup_color_space = 0;
 			startup_gamma = 0;
 		}
-		if (camera_bit_depth_is_10bit(ctx->camera_bit_depth) &&
+		if (ctx->camera_bit_depth == 1 &&
 		    (startup_gamma < CAMERA_GAMMA_HLG || startup_gamma > CAMERA_GAMMA_HDR10_PLUS)) {
 			startup_color_space = CAMERA_COLOR_SPACE_REC2020;
 			startup_gamma = CAMERA_GAMMA_HLG;
@@ -279,7 +279,11 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 			(unsigned)control_port, ctx->camera_iso, ctx->camera_shutter_us, ctx->camera_focus_distance,
 			ctx->camera_wb_kelvin, ctx->camera_wb_lock ? 1 : 0, startup_color_space, startup_gamma,
 			camera_bit_depth_is_10bit(ctx->camera_bit_depth) ? 2 : 1,
-			camera_bit_depth_is_10bit(ctx->camera_bit_depth) ? ",__scrcpy_obs_camera_10bit:int=1" : "");
+			camera_bit_depth_is_10bit(ctx->camera_bit_depth)
+				? (camera_bit_depth_needs_8bit_output(ctx->camera_bit_depth)
+					   ? ",__scrcpy_obs_camera_10bit:int=1,__scrcpy_obs_camera_10bit_to_8bit:int=1"
+					   : ",__scrcpy_obs_camera_10bit:int=1")
+				: "");
 	}
 
 	char serial_arg[128] = {0};
@@ -356,7 +360,7 @@ static void start_scrcpy(struct scrcpy_src *ctx, obs_data_t *settings)
 				startup_color_space = 0;
 				startup_gamma = 0;
 			}
-			if (ctx->camera_bit_depth != 0 &&
+			if (ctx->camera_bit_depth == 1 &&
 			    (startup_gamma < CAMERA_GAMMA_HLG || startup_gamma > CAMERA_GAMMA_HDR10_PLUS)) {
 				startup_color_space = CAMERA_COLOR_SPACE_REC2020;
 				startup_gamma = CAMERA_GAMMA_HLG;
@@ -592,7 +596,7 @@ static void src_update(void *data, obs_data_t *settings)
 			runtime_color_space = 0;
 			runtime_gamma = 0;
 		}
-		if (ctx->camera_bit_depth != 0 &&
+		if (ctx->camera_bit_depth == 1 &&
 		    (runtime_gamma < CAMERA_GAMMA_HLG || runtime_gamma > CAMERA_GAMMA_HDR10_PLUS)) {
 			runtime_color_space = CAMERA_COLOR_SPACE_REC2020;
 			runtime_gamma = CAMERA_GAMMA_HLG;
